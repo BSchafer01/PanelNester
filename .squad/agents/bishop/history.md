@@ -7,11 +7,40 @@
 - **Stack:** C#/.NET desktop host, WPF shell, WebView2 UI, React + TypeScript web app, Three.js viewer, local JSON/SQLite persistence, CsvHelper/ClosedXML import, QuestPDF reporting
 - **Description:** Local desktop tool for importing rectangular parts, nesting them by material, visualizing sheet layouts, and exporting PDF summaries.
 
+## Phase 3 — Project Persistence & Material Snapshots (IN PROGRESS)
+
+**Ownership:** Bishop (Desktop bridge layer) 🚀
+
+**Assignment:** Bridge contracts and handlers for project operations
+
+**Deliverables:**
+1. Bridge contracts for project messages in `BridgeContracts.cs`
+2. Handler registrations for all six project messages (new-project, open-project, save-project, save-project-as, get-project-metadata, update-project-metadata)
+3. Wire handlers to `IProjectService` and native file dialogs
+4. Coordinate with existing open-file-dialog pattern for project open/save-as
+
+**Key Decisions:**
+- Six message types with corresponding response messages
+- Error codes: `project-not-found`, `project-corrupt`, `project-unsupported-version`, `project-save-failed`
+- Handlers integrate with Parker's `IProjectService` interface
+
+**Parallel Workstreams:**
+- Parker (Domain/Services): `IProjectService` and `ProjectSerializer`
+- Dallas (WebUI): Project page and metadata form
+- Hicks (Tests & review): Bridge test compliance
+
+**Execution Timeline:**
+- Day 1: Bridge contracts (from interface)
+- Day 2: Handler wiring
+- Day 3: Integration with service + native dialogs
+- Day 4: Bug fixes from integration
+
 ## Learnings
 
 - 2026-03-14: Initial team staffing. I own desktop host integration, local persistence wiring, and export plumbing.
 - 2026-03-14: Phase 0/1 host scaffolding works best when the desktop shell prefers a future `src\PanelNester.WebUI\dist` build but still ships a bundled placeholder page and a `window.hostBridge.receive(...)` receiver shim so the bridge stays stable before the real UI lands.
 - 2026-03-14: If the desktop output bundles `WebApp`, content resolution must search every ancestor for `src\PanelNester.WebUI\dist` before accepting a placeholder; otherwise running from `bin\Debug\net10.0-windows` masks a valid real UI build.
+- 2026-03-14: Phase 3 extends the bridge with project lifecycle messages. Design keeps handler seams clean by consuming stable `IProjectService` interface from Parker while Dallas consumes the same bridge contracts on the UI side.
 
 ## Recent Work (2026-03-14)
 

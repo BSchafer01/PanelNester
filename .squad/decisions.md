@@ -911,3 +911,277 @@ Phase 2 material library implementation complete. Required final verification of
 - Phase 2 material library slice is production-ready
 - Phase 3 can proceed with confidence that material CRUD and exact-match import behavior are stable
 - Early Phase 3 work: retire skipped test and add Web UI e2e coverage for material selector/delete flow
+
+---
+
+# Decision: Phase 3 Project Persistence & Material Snapshots
+
+**Author:** Ripley  
+**Date:** 2026-03-14  
+**Status:** Proposed
+
+## Context
+
+Phase 2 established a shared material library with CRUD persistence. Phase 3 introduces project management: creating, saving, reopening, and editing project metadata. This phase also defines how projects interact with the material library through **material snapshots**.
+
+## PRD Requirements Addressed
+
+- Create, save, reopen local nesting projects
+- Project metadata (name, number, customer, estimator, drafter, PM, date, revision, notes, kerf)
+- Preserve imported parts, selected materials, settings, and last known results
+- Materials are reusable across projects but **snapshots recommended at time of use**
+
+## Scope: Narrowest Practical Slice
+
+Phase 3 adds:
+
+1. **Project CRUD** — Create new, save, open existing project files
+2. **Project metadata editing** — All PRD fields editable in UI
+3. **Material snapshots** — Project stores a copy of referenced materials at save time
+4. **Import/nesting state persistence** — Imported parts and last nesting results saved with project
+5. **Bridge extension** — New message types for project operations
+
+**Explicitly deferred to Phase 4+:**
+- XLSX import (stays CSV-only until Phase 4)
+- Inline row editing in import table
+- Project export to external job data format
+- Project revision history or diffing
+- Multiple materials per project (single-material nesting per run persists)
+
+## Persistence Format Decision
+
+**Decision:** JSON file-based project storage
+
+**Location:** User-chosen via native Save/Open dialogs, `.pnest` extension
+
+**Rationale:**
+- Matches material library pattern (JSON with System.Text.Json)
+- Human-readable and debuggable
+- No SQLite overhead for v1 file-per-project approach
+- Users can copy/share project files easily
+- Avoids implicit storage location confusion
+
+**Project file schema:**
+```json
+{
+  "version": 1,
+  "projectId": "guid",
+  "metadata": {
+    "projectName": "string",
+    "projectNumber": "string",
+    "customerName": "string",
+    "estimator": "string",
+    "drafter": "string",
+    "pm": "string",
+    "date": "iso8601",
+    "revision": "string",
+    "notes": "string"
+  },
+  "settings": {
+    "kerfWidth": 0.0625
+  },
+  "materialSnapshots": [ /* Material[] at save time */ ],
+  "importState": {
+    "sourceFilePath": "string|null",
+    "parts": [ /* PartRow[] */ ]
+  },
+  "lastNestingResult": {
+    "materialId": "string",
+    "sheets": [ /* NestSheet[] */ ],
+    "placements": [ /* NestPlacement[] */ ],
+    "unplacedItems": [ /* UnplacedItem[] */ ],
+    "summary": { /* MaterialSummary */ }
+  }
+}
+```
+
+## Material Snapshot Interaction with Phase 2 Library
+
+**Decision:** Projects snapshot referenced materials at save time
+
+**Behavior:**
+1. When a project is **created**, it has no material snapshots
+2. When a user **selects a material** from the library for import/nesting, the material is read live
+3. When a project is **saved**, any materials currently referenced (selected or in imported parts) are copied into `materialSnapshots`
+4. When a project is **opened**, the UI shows the snapshotted materials for that project's context
+5. Users can **update to library version** manually if the library has changed (Phase 6 polish)
+
+**Rationale:**
+- PRD recommends "snapshot materials into the project at time of use"
+- Prevents project corruption when library materials are renamed/deleted
+- Project results remain reproducible even if library evolves
+- Import validation uses snapshotted material when available, falls back to live library for new imports
+
+**Edge cases:**
+- Opening a project with a material deleted from library → project still works (has snapshot)
+- Opening a project and adding new parts → new parts validate against live library
+- Saving a project → updates snapshots for all currently referenced materials
+
+## Architecture Seams
+
+### Domain Layer (PanelNester.Domain)
+
+New files:
+- `Models/Project.cs` — Project record with metadata, settings
+- `Models/ProjectMetadata.cs` — PRD metadata fields
+- `Models/ProjectSettings.cs` — Kerf and future per-project settings
+- `Models/ProjectState.cs` — Import state + last nesting result container
+- `Contracts/IProjectService.cs` — Service interface
+
+### Services Layer (PanelNester.Services)
+
+New files:
+- `Projects/ProjectService.cs` — Orchestrates load/save
+- `Projects/ProjectSerializer.cs` — JSON round-trip with version handling
+
+### Desktop Layer (PanelNester.Desktop)
+
+Changes:
+- `Bridge/BridgeContracts.cs` — Project message types
+- `Bridge/DesktopBridgeRegistration.cs` — Project handlers
+- Native file dialogs for save-as/open
+
+### WebUI Layer (PanelNester.WebUI)
+
+Changes:
+- `src/types/contracts.ts` — Project contracts
+- `src/pages/ProjectPage.tsx` — New: metadata editor
+- `src/bridge/hostBridge.ts` — Project request helpers
+- App shell state to track current project dirty/clean status
+
+## Bridge Contract Extension
+
+New message types:
+
+```
+new-project             → new-project-response
+open-project            → open-project-response  
+save-project            → save-project-response
+save-project-as         → save-project-as-response
+get-project-metadata    → get-project-metadata-response
+update-project-metadata → update-project-metadata-response
+```
+
+Error codes:
+- `project-not-found` — Open failed, file doesn't exist
+- `project-corrupt` — Open failed, invalid JSON or schema
+- `project-unsupported-version` — Version mismatch
+- `project-save-failed` — IO error on save
+
+## Workstream Splits
+
+### Parker (Domain/Services)
+
+Deliverables:
+1. Domain models: `Project`, `ProjectMetadata`, `ProjectSettings`, `ProjectState`
+2. `IProjectService` interface with `NewAsync`, `LoadAsync`, `SaveAsync`, `UpdateMetadataAsync`
+3. `ProjectSerializer` for JSON round-trip with schema versioning
+4. Unit tests for serialization, version handling, snapshot behavior
+
+Interfaces Owned:
+- `IProjectService { NewAsync(), LoadAsync(path), SaveAsync(project, path), UpdateMetadataAsync(project, metadata) }`
+- Serialization honors `version: 1` for forward compatibility
+
+Dependencies: None — can start immediately
+
+### Bishop (Desktop Bridge)
+
+Deliverables:
+1. Bridge contracts for project messages in `BridgeContracts.cs`
+2. Handler registrations for all six project messages
+3. Wire handlers to `IProjectService` and native file dialogs
+4. Coordinate with existing open-file-dialog pattern for project open/save-as
+
+Interfaces Consumed:
+- `IProjectService` from Parker
+
+Interfaces Owned:
+- Request/response contracts: `NewProjectRequest`, `OpenProjectRequest`, etc.
+- Error code forwarding from service layer
+
+Dependencies: Parker's `IProjectService` interface (not implementation)
+
+### Dallas (WebUI)
+
+Deliverables:
+1. Project contracts in `contracts.ts`
+2. Project page with metadata form (all PRD fields)
+3. Project dirty/clean state tracking in app shell
+4. Save prompt on navigation when dirty
+5. Update Import and Results pages to show "current project" context
+6. Material selector shows snapshotted materials for existing projects
+
+Interfaces Consumed:
+- Bridge message types from Bishop
+
+Interfaces Owned:
+- UI component props and local state
+- Client-side metadata validation
+
+Dependencies: Bishop's bridge contract types (can stub initially)
+
+### Hicks (Tests & Review)
+
+Deliverables:
+1. `ProjectSerializerTests` — Round-trip, version handling, corrupt file handling
+2. `ProjectServiceTests` — New/load/save flows, metadata updates
+3. `ProjectBridgeTests` — Request/response contract compliance
+4. Updated smoke-test guide for project workflows
+5. Final integration review gate
+
+Interfaces Consumed:
+- Parker's service and serializer
+- Bishop's bridge handlers
+
+Dependencies: All three workstreams (review gate at end)
+
+## Parallel Execution Plan
+
+**Day 1:**
+- Parker: Domain models + `IProjectService` interface + serializer stub
+- Bishop: Bridge contracts (from interface, not impl)
+- Dallas: Project page scaffold + contracts.ts types (stub bridge)
+
+**Day 2:**
+- Parker: `ProjectSerializer` implementation + unit tests
+- Bishop: Handler wiring (once interface stable)
+- Dallas: Metadata form + dirty state tracking
+
+**Day 3:**
+- Parker: `ProjectService` orchestration + snapshot logic
+- Bishop: Integration with service + native dialogs
+- Dallas: Wire real bridge, material snapshot display
+
+**Day 4:**
+- Hicks: Service tests + bridge tests + smoke guide + review gate
+- All: Bug fixes from integration
+
+## Success Criteria
+
+Phase 3 is complete when:
+
+1. User can create a new project via File menu / button
+2. User can edit all PRD metadata fields
+3. User can save project to a `.pnest` file via native dialog
+4. User can open an existing `.pnest` file
+5. Imported parts and last nesting results persist in project
+6. Materials used in project are snapshotted at save time
+7. Opening a project shows snapshotted material even if library changed
+8. All Phase 2 tests still pass
+9. New project tests pass
+10. Smoke guide updated and verified
+
+## Open Questions (Non-Blocking)
+
+1. **Should we warn on unsaved changes before quit?** — Recommended: Yes (native dialog)
+2. **Should project remember window position?** — Deferred to Phase 6 polish
+3. **Should we auto-save?** — Deferred to Phase 6 polish
+
+## Consequences
+
+- Project file format is stable for v1; version field enables future migrations
+- Material snapshots prevent silent data corruption from library edits
+- Import validation behavior slightly changes: existing projects use snapshots, new imports use live library
+- Phase 4+ can extend with XLSX, inline editing, multi-material support
+- No breaking changes to Phase 2 contracts (additive only)
+

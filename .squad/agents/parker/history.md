@@ -43,8 +43,38 @@
 - ✅ Validation logic tested for edge cases
 - ✅ All Phase 2 tests passing; ready for Phase 3 (desktop UI, project persistence)
 
+## Phase 3 — Project Persistence & Material Snapshots (IN PROGRESS)
+
+**Ownership:** Parker (Domain/Services foundation) 🚀
+
+**Assignment:** Domain models, `IProjectService` interface, `ProjectSerializer` JSON serialization with version handling
+
+**Deliverables:**
+1. Domain models: `Project`, `ProjectMetadata`, `ProjectSettings`, `ProjectState`
+2. `IProjectService` interface with `NewAsync`, `LoadAsync`, `SaveAsync`, `UpdateMetadataAsync`
+3. `ProjectSerializer` for JSON round-trip with schema versioning
+4. Unit tests for serialization, version handling, snapshot behavior
+
+**Key Decisions:**
+- JSON file format (`.pnest` extension) — matches material library pattern, human-readable, no SQLite overhead
+- Project snapshots materials at save time — prevents corruption when library materials are renamed/deleted
+- Schema version: 1 — forward compatible
+- Material snapshot interaction: existing projects use snapshots, new imports use live library
+
+**Parallel Workstreams:**
+- Bishop (Desktop bridge layer): Bridge contracts and handlers
+- Dallas (WebUI): Project page and metadata form
+- Hicks (Tests & review): Service tests, bridge tests, smoke guide update
+
+**Execution Timeline:**
+- Day 1: Domain models + `IProjectService` interface stub
+- Day 2: `ProjectSerializer` implementation + unit tests
+- Day 3: `ProjectService` orchestration + snapshot logic
+- Day 4: Bug fixes from integration
+
 ## Learnings
 
 - 2026-03-14: Initial team staffing. I own import, validation, domain services, and the nesting engine.
 - 2026-03-14: Phase 0/1 backend contracts stay cleaner if import keeps quantity on compact `PartRow` records, nesting expands instances just-in-time, and all sheet geometry stays in `decimal` with kerf treated as added spacing instead of part resizing.
 - 2026-03-14: Parallel agent execution and decision-driven architecture allow teams to de-risk at seams early and move fast once contracts stabilize.
+- 2026-03-14: Phase 3 extends Phase 2 architecture: projects persist as JSON files with metadata, settings, and material snapshots. Design keeps repo/serializer seams clean by versioning the schema early and deferring XLSX/multi-material/export to later phases.

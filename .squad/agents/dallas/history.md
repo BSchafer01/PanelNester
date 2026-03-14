@@ -69,3 +69,40 @@
   - Orchestration log and session log recorded
   - Material library is now the stable anchor for Phase 3 (projects will reference these materials)
 
+## Phase 3 — Project Persistence & Material Snapshots (IN PROGRESS)
+
+**Ownership:** Dallas (WebUI) 🚀
+
+**Assignment:** Project page and metadata form
+
+**Deliverables:**
+1. Project contracts in `contracts.ts`
+2. Project page with metadata form (all PRD fields: projectName, projectNumber, customerName, estimator, drafter, pm, date, revision, notes)
+3. Project dirty/clean state tracking in app shell
+4. Save prompt on navigation when dirty
+5. Update Import and Results pages to show "current project" context
+6. Material selector shows snapshotted materials for existing projects
+
+**Key Decisions:**
+- Metadata form captures all PRD fields
+- App-shell state tracks dirty status
+- Snapshotted materials from project snapshot at open time
+- Import/Results pages wire to project context
+
+**Parallel Workstreams:**
+- Parker (Domain/Services): `IProjectService` and `ProjectSerializer`
+- Bishop (Desktop bridge): Bridge contracts and handlers
+- Hicks (Tests & review): Tests and integration gate
+
+**Execution Timeline:**
+- Day 1: Project page scaffold + contracts.ts types (stub bridge)
+- Day 2: Metadata form + dirty state tracking
+- Day 3: Wire real bridge, material snapshot display
+- Day 4: Bug fixes from integration
+
+## Learnings
+
+- 2026-03-14: Initial team staffing. I own web UI flows, viewer behavior, and operator-facing clarity.
+- 2026-03-14: Phase 0/1 UI scaffold works best as a contract-first shell—typed bridge DTOs, a `window.hostBridge.receive(...)` seam, and read-only pages keep Bishop/Parker unblocked without fake product behavior.
+- 2026-03-14: Phase 3 introduces project-scoped UI: a metadata editor, dirty/clean state tracking, and snapshotted materials. Design keeps page components clean by consuming stable bridge contracts from Bishop while data flows through app-shell state.
+

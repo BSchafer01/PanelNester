@@ -34,6 +34,47 @@
 - 2026-03-14: **PHASE 2 ASSIGNMENT: Tests & Integration Review Gate**
 - ✓ Completed Phase 2 final integration review gate: reran full regression (63 total, 61 passed, 2 expected skips), verified Web UI production build, spot-checked material CRUD persistence, bridge wiring, import exact-match behavior, failure code surfacing, and Demo Material fallback paths. **Phase 2 APPROVED**. Recorded decision, orchestration log, and session log. Residual risks documented: missing Web UI e2e automation for selector/delete, one stale skipped test to retire early.
 
+## Phase 3 — Project Persistence & Material Snapshots (IN PROGRESS)
+
+**Ownership:** Hicks (Tests & integration review) 🚀
+
+**Assignment:** Test coverage, integration review, smoke guide update
+
+**Deliverables:**
+1. `ProjectSerializerTests` — Round-trip, version handling, corrupt file handling
+2. `ProjectServiceTests` — New/load/save flows, metadata updates
+3. `ProjectBridgeTests` — Request/response contract compliance
+4. Updated smoke-test guide for project workflows
+5. Final integration review gate
+
+**Key Decisions:**
+- Version handling tests ensure forward compatibility
+- Material snapshot behavior tested for edge cases (library changes, snapshot availability, fallback behavior)
+- Smoke guide includes project workflows (new, save, open, metadata edit)
+
+**Parallel Workstreams:**
+- Parker (Domain/Services): `IProjectService` and `ProjectSerializer`
+- Bishop (Desktop bridge): Bridge contracts and handlers
+- Dallas (WebUI): Project page and metadata form
+
+**Execution Timeline:**
+- Days 1-3: Scaffold tests with Parker/Bishop/Dallas, collaborate on contract compliance
+- Day 4: Service tests + bridge tests + smoke guide + integration review gate
+
+**Success Criteria:**
+- All project operations have test coverage
+- Bridge contract compliance verified
+- Smoke guide updated with project workflows
+- Version handling tested for edge cases
+- All tests passing (no new failures beyond Phase 2 baseline)
+- Ready-to-ship verdict for Phase 3 close
+
+## Learnings
+
+- 2026-03-14: Initial team staffing. I own acceptance criteria, regression coverage, and reviewer verdicts.
+- 2026-03-14: Phase 0/1 test startup works best as spec-first scaffolding — one runnable smoke/contract test per seam, skipped integration tests with explicit blockers, and a matrix that maps back to success criteria.
+- 2026-03-14: Phase 3 testing focuses on JSON serialization stability, version migration, and material snapshot edge cases. Design leverages Parker's service contracts early (Day 1) and integrates Bishop's bridge messages by Day 3 for final gate.
+
 ## Phase 2 Scope (Material Library Tests & Verification)
 
 **Ownership:** Hicks (Tests and integration review gate)
