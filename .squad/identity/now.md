@@ -1,9 +1,9 @@
 ---
-updated_at: 2026-03-14T14:42:13.017Z
-focus_area: PRD phase decomposition
+updated_at: 2026-03-14T14:45:11.032Z
+focus_area: Phase 0 and Phase 1 implementation
 active_issues: []
 ---
 
 # What We're Focused On
 
-Ripley has decomposed the PRD into implementation phases. Next likely work is the Phase 0/1 foundation batch: WPF shell, WebView2 bridge, UI scaffold, and CSV-to-results vertical slice.
+The team is executing the first delivery batch in parallel: Bishop on the desktop host and bridge, Dallas on the Web UI scaffold, Parker on domain/services, and Hicks on test scaffolding and edge cases.

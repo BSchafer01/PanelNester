@@ -10,3 +10,4 @@
 ## Learnings
 
 - 2026-03-14: Initial team staffing. I own web UI flows, viewer behavior, and operator-facing clarity.
+- 2026-03-14: Phase 0/1 UI scaffold works best as a contract-first shell—typed bridge DTOs, a `window.hostBridge.receive(...)` seam, and read-only pages keep Bishop/Parker unblocked without fake product behavior.
