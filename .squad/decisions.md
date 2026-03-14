@@ -1,12 +1,12 @@
-# Squad Decisions — Phase 3
+# Squad Decisions — Phase 4
 
 ## Strategic Context
 
 **Architecture:** PanelNester—local desktop tool for importing rectangular parts, nesting by material, visualizing sheet layouts, exporting PDF summaries.
 
-**Current Phase:** Phase 3 — Project Management & Persistence  
-**Status:** COMPLETED ✅ (2026-03-14T18:14:59Z)  
-**Approval Status:** All three layers integrated and tested. Phase 4 ready.
+**Current Phase:** Phase 4 — Full Import Pipeline  
+**Status:** DESIGN REVIEW COMPLETE ✅ (2026-03-14T18:34:43Z) | READY TO IMPLEMENT  
+**Approval Status:** Phase 3 cleared all reviewer gates. Phase 4 design review complete. Implementation sequence assigned and ready to begin.
 
 ---
 
@@ -16,9 +16,9 @@
 
 - **Phase 0:** WPF shell, WebView2 integration, message bridge (COMPLETED)
 - **Phase 1:** Vertical slice—CSV import, single-material nesting, basic results (COMPLETED)
-- **Phase 2:** Material library—CRUD, local persistence, material selection (IN PROGRESS)
-- **Phase 3:** Project management—Create/save/open projects, metadata editing, JSON persistence, snapshot materials (IN PROGRESS)
-- **Phase 4:** Full import pipeline—XLSX, validation, inline editing
+- **Phase 2:** Material library—CRUD, local persistence, material selection (COMPLETED)
+- **Phase 3:** Project management—Create/save/open projects, metadata editing, JSON persistence, snapshot materials (COMPLETED)
+- **Phase 4:** Full import pipeline—XLSX, validation, inline editing (READY)
 - **Phase 5:** Results viewer & PDF reporting—Three.js, QuestPDF, editable fields
 - **Phase 6:** Polish & edge cases—error handling, performance, UX refinement
 
@@ -147,8 +147,99 @@ Web UI must implement project page (create/open/save/save-as) and metadata editi
 
 ---
 
+## Phase 4 Decisions
+
+### Decision: Ripley — Phase 4 Full Import Pipeline Design Review
+
+**Author:** Ripley | **Date:** 2026-03-14 | **Status:** Approved
+
+#### Context
+
+Phase 3 (project persistence) is fully approved. Phase 4 is the next boundary: hardening the import pipeline with XLSX support, richer validation, and inline editing. This review defines the exact shippable slice, seam contracts, ownership splits, and constraints.
+
+#### Phase 4 Slice Definition (In Scope)
+
+1. **XLSX Import** — ClosedXML-based reader, same `ImportResponse` contract, first-sheet-only in v1
+2. **Unified File Import Dispatcher** — Routes `.csv` → `CsvImportService`, `.xlsx` → `XlsxImportService` by extension
+3. **Part Row Editing** — Update, delete, and add part rows after import with automatic re-validation
+4. **Re-validation Pipeline** — Runs the same validation rules on edited rows against current material library
+5. **Bridge Extensions** — New messages for unified import and row editing operations
+6. **Import Page UI Hardening** — Inline editing controls, add/delete rows, filter by material and validation status, sort columns
+
+#### Seam Ownership
+
+- **Parker:** `IPartEditorService` interface, `PartRowUpdate` DTO, `PartRowValidator` extraction, `XlsxImportService`, `FileImportDispatcher`, `PartEditorService`
+- **Bishop:** Bridge messages (`import-file`, `update-part-row`, `delete-part-row`, `add-part-row`), file dialog filter update, state management for edits
+- **Dallas:** Import page UI refactor (file button, inline editing, add/delete rows, filter/sort), TypeScript contracts
+- **Hicks:** XLSX import tests, dispatcher tests, part editor tests, bridge round-trip tests, integration gate
+
+#### Implementation Sequence
+
+**Batch 1 (Day 1): Contracts + Foundation**
+- Parker: interfaces, DTOs, validation extraction, service implementations
+- Hicks: parametrized tests against stable contracts
+
+**Batch 2 (Day 2): Bridge + UI (Parallel)**
+- Bishop: bridge handlers
+- Dallas: UI implementation
+
+**Batch 3 (Day 3): Integration Gate**
+- Hicks: end-to-end validation (import XLSX → edit rows → revalidate → run nesting)
+
+#### Constraints
+
+1. ClosedXML reads first worksheet only (no sheet selection UI in v1)
+2. `PartRowUpdate` uses string fields (service parses and validates, not UI)
+3. Each edit operation returns the full `ImportResponse` (no partial updates, no client-side validation divergence)
+4. Material name matching stays exact (case-sensitive, ordinal comparison, per PRD §5)
+5. `import-csv` bridge message not removed (backward compatible)
+6. Filter/sort is client-side only (no additional bridge messages needed)
+
+#### Consequences
+
+- Import pipeline supports both CSV and XLSX with identical validation behavior
+- Users can fix import errors in-app instead of returning to their spreadsheet
+- Validation stays in .NET domain (no client-side validation divergence)
+- Phase 5 (results viewer + PDF) can assume clean, validated part data
+- Bridge vocabulary grows additively; no breaking changes to Phase 0-3 messages
+
+---
+
+### Decision: Hicks — Phase 4 Test Gate
+
+**Author:** Hicks | **Date:** 2026-03-14 | **Status:** Approved
+
+#### Context
+
+Phase 4 is the first slice that can damage trust across three already-approved seams at once: the Phase 1 CSV import path, the Phase 3 project persistence path, and the user-visible import table in the Web UI. Current code is still CSV-only and read-only at the import-table level, so Phase 4 needs an explicit reviewer gate before implementation spreads assumptions across services, bridge contracts, and UI behavior.
+
+#### Four Non-Negotiable Review Gates
+
+1. **Regression safety:** Current CSV import, nesting, and `.pnest` persistence behavior cannot regress while XLSX/editing land
+2. **Format parity:** Equivalent CSV and XLSX data must yield the same row payload shape, validation statuses, and actionable error/warning codes
+3. **Edit persistence:** Inline import-table changes must revalidate immediately and survive save/open exactly, including deletes and validation messages
+4. **Failure clarity:** Missing materials, bad numerics, corrupt workbooks, and multi-issue rows must stay user-visible and specific; no crashes, hangs, or silent drops
+
+#### Test Coverage
+
+- **XLSX Import Tests** — Required headers, column order flexibility, empty file, multi-sheet, corrupt file, Unicode round-trip
+- **File Import Dispatcher Tests** — `.csv` and `.xlsx` routing, unknown extensions → `unsupported-file-type`
+- **Part Editor Tests** — Update valid/error rows, delete with recalculation, add with auto-rowId, non-existent rowId error, revalidate with material library changes
+- **Bridge Round-Trip Tests** — `import-file` CSV parity, `import-file` with XLSX, `update-part-row`, `delete-part-row`, `add-part-row`
+- **Integration Tests** — End-to-end: import XLSX → edit rows → revalidate → run nesting
+
+#### Consequences
+
+- Teams can implement against a stable review target instead of vague "import hardening" language
+- Any Phase 4 batch that ships XLSX support but leaves edits non-persistent should be rejected
+- Any Phase 4 batch that ships inline editing with generic failure messaging should be rejected
+- The smoke guide and Phase 4 matrix track the same reviewer gate, so manual and automated evidence converge
+
+---
+
 ## Historical Reference
 
-Earlier Phase 0/1 and Phase 2 decisions have been archived to `decisions-archive.md` for historical reference while maintaining operational focus on Phase 3. All archived decisions remain valid and in-scope for future phases.
+Earlier Phase 0, Phase 1, and Phase 2 decisions have been archived to `decisions-archive.md` for historical reference while maintaining operational focus on Phase 3 and 4. All archived decisions remain valid and in-scope for future phases.
 
 **Archive Date:** 2026-03-14T17:56:50Z
+**Phase 4 Decisions Added:** 2026-03-14T18:34:43Z

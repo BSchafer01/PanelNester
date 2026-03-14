@@ -37,7 +37,41 @@
   - **Final approval: GATE CLEARED** — All three layers (Parker domain, Bishop bridge, Dallas Web UI) integrated and tested
   - Ready to begin Phase 4 design
 
-## Phase 2 Scope (Material Library Tests & Verification)
+- ✓ **PHASE 3 FULLY COMPLETE** (2026-03-14T18:14:59Z) — Dallas Web UI implementation finished:
+   - Project page with metadata form (all PRD fields)
+   - Dirty-state tracking and navigation guards
+   - Material snapshot display with saved vs pending distinction
+   - Web UI build passing
+   - Complete end-to-end project lifecycle operational from desktop host through Web UI
+   - **Final approval: GATE CLEARED** — All three layers (Parker domain, Bishop bridge, Dallas Web UI) integrated and tested
+   - Ready to begin Phase 4 design
+
+## Phase 4 Scope (Import Pipeline Tests & Integration Gate)
+
+**Ownership:** Hicks (Tests and integration review gate)
+
+**Gate Status (2026-03-14T18:34:43Z):** DESIGN REVIEW COMPLETE — Phase 4 ready to implement
+
+**Four Non-Negotiable Review Gates:**
+1. **Regression safety** — Current CSV import, nesting, `.pnest` persistence cannot regress while XLSX/editing land
+2. **Format parity** — Equivalent CSV and XLSX data must yield same row payload shape, validation statuses, error/warning codes
+3. **Edit persistence** — Inline import-table changes must revalidate immediately and survive save/open exactly
+4. **Failure clarity** — Missing materials, bad numerics, corrupt workbooks must stay user-visible and specific
+
+**Test Coverage Plan:**
+- XLSX Import Tests: headers, column order, empty file, multi-sheet, corrupt file, Unicode round-trip
+- File Import Dispatcher Tests: `.csv` and `.xlsx` routing, unknown extensions → error
+- Part Editor Tests: update/delete/add operations, revalidation, non-existent rowId error
+- Bridge Round-Trip Tests: `import-file`, `update-part-row`, `delete-part-row`, `add-part-row`
+- Integration Tests: end-to-end import XLSX → edit → revalidate → nesting
+
+**Deliverables:**
+1. Phase 4 Test Matrix (`tests/Phase4-Import-Pipeline-Test-Matrix.md`) — ✓ COMPLETE
+2. Smoke Test Guide Phase 4 Extension — ✓ COMPLETE
+3. Service/Bridge tests (parametrized against Parker contracts) — Ready for Batch 1
+4. Integration tests — Ready for Batch 3
+
+**Phase 2 Scope (Material Library Tests & Verification)
 
 **Ownership:** Hicks (Tests and integration review gate)
 

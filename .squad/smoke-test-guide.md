@@ -11,9 +11,12 @@ Before launching the app, ensure the foundation is solid:
 dotnet restore
 dotnet build
 dotnet test
+Set-Location .\src\PanelNester.WebUI
+npm run build
+Set-Location ..\..
 ```
 
-**Expected outcome:** `Build succeeded` + `dotnet test` completes with zero failures. Skips should be limited to the documented WebView2/material-library placeholders that are still intentionally blocked.
+**Expected outcome:** `Build succeeded`, `dotnet test` completes with zero failures, and `npm run build` completes without TypeScript/Vite errors. Skips should be limited to the documented WebView2/material-library placeholders that are still intentionally blocked.
 
 ---
 
@@ -256,9 +259,53 @@ Panel-B,12,36,0,Demo Material
 
 ---
 
+## Phase 4 Import Pipeline Preview
+
+> Activate this section once Ripley locks the Phase 4 scope. Current code is still CSV-only and the import table is read-only, so these checks are scaffolding, not a release verdict.
+
+### Test Case 11: XLSX Happy Path Matches CSV Expectations
+
+1. Create an `.xlsx` workbook with the required columns `Id`, `Length`, `Width`, `Quantity`, and `Material`.
+2. Include the same rows used in `good-parts.csv`, but shuffle the column order and add one ignored extra column.
+3. Import the workbook through the desktop host.
+4. **Pass:** all rows appear in the import table with the same values/statuses the CSV path would produce; extra columns are ignored; no `unsupported-file-type` error appears.
+5. **Fail:** `.xlsx` cannot be selected, the import silently drops rows, or CSV/XLSX produce different row-level validation outcomes for the same data.
+
+### Test Case 12: Inline Fix Clears a Row Error Without Reimport
+
+1. Import a file that includes one bad row (for example `Length = abc` or `Material = Unknown Material`).
+2. Edit that row inline instead of reimporting the file.
+3. Correct the invalid field and commit the change.
+4. **Pass:** the row revalidates immediately, the validation status changes from `error` to `valid`/`warning`, and the warnings/errors summary updates without a full reimport.
+5. **Fail:** edits require a restart/reimport, validation messages do not refresh, or the row stays stale until nesting runs.
+
+### Test Case 13: Add/Delete/Edit Rows Persist Through Save/Open
+
+1. Import a mixed-validity file.
+2. Fix one row inline, delete one unwanted row, and—if Ripley confirms manual row creation is in scope—add one new valid row manually.
+3. Save the project, close it, and reopen the same `.pnest` file.
+4. **Pass:** every import-table change rehydrates exactly, including validation statuses/messages and the disabled/enabled state for nesting.
+5. **Fail:** reopened projects restore the pre-edit import state, resurrect deleted rows, drop manual rows, or clear validation messages.
+
+### Test Case 14: Multi-Issue Rows Stay Actionable
+
+1. Import a row with more than one problem (for example blank `Id`, invalid `Length`, and missing `Material`).
+2. Inspect the import table and validation summary.
+3. **Pass:** every issue remains visible with an actionable code/message, the row keeps a stable `rowId`, and the app stays responsive.
+4. **Fail:** only the first error is shown, later errors are silently discarded, or the UI becomes unstable when one row carries multiple issues.
+
+### Phase 4 Assumptions to Reconcile With Ripley
+
+- Whether Phase 4 includes full row CRUD (`add`, `edit`, `delete`) or only editing/deleting imported rows.
+- Whether the bridge keeps `import-csv` as the live message and broadens it to `.xlsx`, or introduces a new generic import contract.
+- Whether richer validation adds new warning/error rules beyond the current CSV set, especially for unusually small parts, very large imports, or field-level validation timing.
+- Whether missing/deleted library materials after project reopen stay as inline import errors or get a dedicated remap flow.
+
+---
+
 ## Acceptance Criteria
 
-- [ ] Preflight: `dotnet test` reports zero failures, with only documented placeholder skips remaining
+- [ ] Preflight: `dotnet test` reports zero failures and `npm run build` succeeds, with only documented placeholder skips remaining
 - [ ] Happy path: All 3 parts import as `valid`
 - [ ] Happy path: Nesting places all 7 instances on 1–2 sheets
 - [ ] Happy path: Results show sheet count, utilization, and zero unplaced items

@@ -1,9 +1,9 @@
 ---
-updated_at: 2026-03-14T17:37:43.797Z
-focus_area: Phase 3 project persistence kickoff
+updated_at: 2026-03-14T18:19:14.827Z
+focus_area: Phase 4 planning readiness
 active_issues: []
 ---
 
 # What We're Focused On
 
-The team is beginning Phase 3 by implementing project save/open flows, metadata editing, and material snapshots in `.pnest` files while preserving the approved Phase 2 material library and Phase 0/1 nesting round-trip.
+Phase 3 is approved and fully integrated: project save/open flows, metadata editing, dirty-state handling, and material snapshots in `.pnest` files are complete across the domain, desktop bridge, and Web UI. The next boundary is Phase 4, where the team will harden the import pipeline with richer validation and editing while preserving the approved Phase 0-3 slices.
