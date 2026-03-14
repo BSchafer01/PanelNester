@@ -16,3 +16,4 @@
 - 2026-03-14: Hicks approved VS Code dark-theme refresh. Regression gate: Web UI build ✓, solution build ✓, tests ✓ (38 passed, 1 skipped). Workflow seams preserved. Ready for Phase 2.
 - 2026-03-14: Second-pass Web UI cleanup kept the VS Code dark shell intact but neutralized the remaining blue-leaning capability chips and viewer placeholder fill. The native titlebar/footer mismatch still reads as a desktop-host follow-up rather than a web styling issue.
 - 2026-03-14: Session completed. Orchestration log recorded; session log created. Web UI build passed. Ready for Phase 2 integration.
+- 2026-03-14: Hicks review gate: second-pass chrome cleanup REJECTED. Runtime evidence showed old blue host header/footer and light titlebar (did not meet acceptance criteria). Dallas locked from next revision cycle; Ripley owns next revision.

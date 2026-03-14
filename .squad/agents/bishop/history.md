@@ -26,3 +26,4 @@
 - ✓ Applied a low-risk native dark titlebar path through DWM immersive dark mode plus caption/text/border color hints instead of rewriting window chrome
 - ✓ Re-ran `dotnet test PanelNester.slnx -nologo` after the host changes; 39 tests executed with 38 passing and 1 existing skip
 - ✓ Session completed (2026-03-14). Orchestration log recorded; solution validation green. Ready for Phase 2.
+- 2026-03-14: Hicks review gate: second-pass chrome cleanup REJECTED. Runtime evidence showed old blue host header/footer and light titlebar (did not meet acceptance criteria). Bishop locked from next revision cycle; Ripley owns next revision.
