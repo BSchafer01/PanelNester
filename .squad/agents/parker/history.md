@@ -43,34 +43,26 @@
 - ✅ Validation logic tested for edge cases
 - ✅ All Phase 2 tests passing; ready for Phase 3 (desktop UI, project persistence)
 
-## Phase 3 — Project Persistence & Material Snapshots (IN PROGRESS)
+## Phase 3 — Project Persistence & Material Snapshots (COMPLETE)
 
-**Ownership:** Parker (Domain/Services foundation) 🚀
+**Ownership:** Parker (Domain/Services foundation) ✅
 
-**Assignment:** Domain models, `IProjectService` interface, `ProjectSerializer` JSON serialization with version handling
+**Completed Deliverables:**
+1. ✅ Domain models: `Project`, `ProjectMetadata`, `ProjectSettings`, `ProjectState`, `MaterialSnapshot`  
+2. ✅ `IProjectService` interface with `NewAsync`, `LoadAsync`, `SaveAsync`, `UpdateMetadataAsync`  
+3. ✅ `ProjectSerializer` for JSON round-trip with version handling  
+4. ✅ `ProjectService` implementation with snapshot-first restore logic  
+5. ✅ Unit tests for serialization, version handling, snapshot behavior  
+6. ✅ Integration tests with full domain stack  
 
-**Deliverables:**
-1. Domain models: `Project`, `ProjectMetadata`, `ProjectSettings`, `ProjectState`
-2. `IProjectService` interface with `NewAsync`, `LoadAsync`, `SaveAsync`, `UpdateMetadataAsync`
-3. `ProjectSerializer` for JSON round-trip with schema versioning
-4. Unit tests for serialization, version handling, snapshot behavior
+**Test Results:** 79 passed, 3 skipped ✅
 
-**Key Decisions:**
-- JSON file format (`.pnest` extension) — matches material library pattern, human-readable, no SQLite overhead
-- Project snapshots materials at save time — prevents corruption when library materials are renamed/deleted
-- Schema version: 1 — forward compatible
-- Material snapshot interaction: existing projects use snapshots, new imports use live library
+**Key Achievement:** Projects now persist as deterministic snapshots, locked in at save time. Reopening a `.pnest` file restores exact materials from the snapshot, immune to later library edits—core requirement for Phase 3.
 
-**Parallel Workstreams:**
-- Bishop (Desktop bridge layer): Bridge contracts and handlers
-- Dallas (WebUI): Project page and metadata form
-- Hicks (Tests & review): Service tests, bridge tests, smoke guide update
-
-**Execution Timeline:**
-- Day 1: Domain models + `IProjectService` interface stub
-- Day 2: `ProjectSerializer` implementation + unit tests
-- Day 3: `ProjectService` orchestration + snapshot logic
-- Day 4: Bug fixes from integration
+**Next Handoffs:**
+- Hicks: QA approval gate (snapshot-first expectations)  
+- Dallas: UI integration (show saved vs. pending snapshots)  
+- Bishop: Desktop bridge implementation  
 
 ## Learnings
 

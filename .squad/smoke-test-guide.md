@@ -225,6 +225,37 @@ Panel-B,12,36,0,Demo Material
 
 ---
 
+## Phase 3 Project Persistence Preview
+
+> Hicks will not approve Phase 3 on green builds alone. Save/open, metadata, and snapshot drift each need a repeatable human check.
+
+### Test Case 8: Metadata Save/Open Round-Trip
+
+1. Create a new project.
+2. Fill every PRD field: Project Name, Project Number, Customer Name, Estimator, Drafter, PM, Date, Revision, Notes, and kerf width.
+3. Save the project as `phase3-metadata.pnest`, close it, then reopen that exact file.
+4. **Pass:** every field rehydrates exactly, including date, revision, multiline notes, and kerf.
+5. **Fail:** reopened metadata falls back to defaults, drops a field, trims unexpectedly, or silently clears notes/date.
+
+### Test Case 9: Saved Project Restores Its Own Material Snapshot
+
+1. Create or open a project that uses `Baltic Birch`.
+2. Save the project to `phase3-snapshot.pnest`.
+3. Edit the live material library entry for `Baltic Birch` (or delete it entirely).
+4. Reopen `phase3-snapshot.pnest`.
+5. **Pass:** the reopened project shows the snapshotted material values from the file and keeps its import/nesting context intact.
+6. **Fail:** the project silently adopts the new live-library values, loses the material, or substitutes a fallback without telling the user.
+
+### Test Case 10: Corrupt or Unsupported `.pnest` File
+
+1. Copy a known-good `.pnest` file.
+2. Break the copy by either corrupting the JSON or changing `version` to an unsupported number (for example `99`).
+3. Attempt to open the broken file.
+4. **Pass:** the app surfaces `project-corrupt` or `project-unsupported-version` and keeps the current session stable.
+5. **Fail:** crash, blank project state, silent reset, or a generic error with no actionable code.
+
+---
+
 ## Acceptance Criteria
 
 - [ ] Preflight: `dotnet test` reports zero failures, with only documented placeholder skips remaining
@@ -239,6 +270,9 @@ Panel-B,12,36,0,Demo Material
 - [ ] Phase 2 duplicate create/update rejects with `material-name-exists`
 - [ ] Phase 2 in-use delete rejects with `material-in-use`
 - [ ] Phase 2 selected-material import mismatch rejects with `material-not-found`
+- [ ] Phase 3 save/open preserves all PRD metadata fields and kerf
+- [ ] Phase 3 reopened projects show snapshotted material values instead of silently rereading the live library
+- [ ] Phase 3 corrupt or unsupported `.pnest` files report `project-corrupt` or `project-unsupported-version`
 
 ---
 

@@ -1185,3 +1185,77 @@ Phase 3 is complete when:
 - Phase 4+ can extend with XLSX, inline editing, multi-material support
 - No breaking changes to Phase 2 contracts (additive only)
 
+---
+
+## Phase 3 Decisions
+
+### Decision: Parker — Phase 3 project persistence
+
+**Author:** Parker  
+**Date:** 2026-03-14  
+**Status:** Implemented ✅
+
+#### Context
+
+Phase 3 needs local `.pnest` save/open that preserves project metadata, project settings, import state, last nesting output, and material values even when the shared library changes later.
+
+#### Decision
+
+- Persist projects as versioned JSON documents with the root `Project.Version` field set to `Project.CurrentVersion`.
+- Save full `MaterialSnapshots` into each project instead of only library references.
+- Refresh snapshots on save from the current library using the selected material id plus exact part-material name matches, but reopen projects from the saved snapshots without rehydrating from the live library.
+
+#### Consequences
+
+- Historical projects stay reproducible after material-library edits.
+- Save/open logic remains backend-owned and path-based, with no WPF dependency in the domain/service layer.
+- Exact material-name matching stays aligned with import behavior, so snapshot capture is deterministic and explainable.
+
+---
+
+### Decision: Hicks Phase 3 Review Gate
+
+**Author:** Hicks  
+**Date:** 2026-03-14  
+**Status:** Active
+
+#### Context
+
+Review validation must ensure Phase 3 preserves project fidelity across save/open cycles. If snapshots exist, live-library drift must not mutate reopened projects.
+
+#### Decision
+
+Treat project reopen behavior as snapshot-first. If a `.pnest` file carries material snapshots, review will reject any implementation that silently rereads current live-library values in their place.
+
+#### Rationale
+
+Phase 3 exists to preserve project fidelity across save/open. Letting live-library drift mutate reopened jobs would make estimates and nesting results non-reproducible.
+
+#### Impact
+
+Phase 3 scaffolding now locks snapshot restore expectations, explicit project load error codes, and placeholder tests that must turn real before approval.
+
+---
+
+### Decision: Dallas — Phase 3 project UI decision
+
+**Author:** Dallas  
+**Date:** 2026-03-14  
+**Status:** Active
+
+#### Context
+
+The former overview route now behaves as the Project page. Operators need visibility into what is already pinned inside the `.pnest` file versus what changed in the working session before they overwrite a saved project.
+
+#### Decision
+
+The UI shows saved material snapshots separately from the live snapshot that would be written on the next save.
+
+#### Why
+
+Persistence and host prompts should stay explicit about saved-vs-pending snapshot state rather than silently rehydrating from the live material library.
+
+#### Impact
+
+Operators see: "Saved materials (v1): [list] | Pending changes: [list]" to make informed save decisions.
+

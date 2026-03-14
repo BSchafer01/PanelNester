@@ -34,40 +34,29 @@
 - 2026-03-14: **PHASE 2 ASSIGNMENT: Tests & Integration Review Gate**
 - ✓ Completed Phase 2 final integration review gate: reran full regression (63 total, 61 passed, 2 expected skips), verified Web UI production build, spot-checked material CRUD persistence, bridge wiring, import exact-match behavior, failure code surfacing, and Demo Material fallback paths. **Phase 2 APPROVED**. Recorded decision, orchestration log, and session log. Residual risks documented: missing Web UI e2e automation for selector/delete, one stale skipped test to retire early.
 
-## Phase 3 — Project Persistence & Material Snapshots (IN PROGRESS)
+## Phase 3 — Project Persistence & Material Snapshots (COMPLETE)
 
-**Ownership:** Hicks (Tests & integration review) 🚀
+**Ownership:** Hicks (Tests & integration review) ✅
 
-**Assignment:** Test coverage, integration review, smoke guide update
+**Completed Deliverables:**
+1. ✅ `ProjectSerializerTests` — Round-trip, version handling, corrupt file handling  
+2. ✅ `ProjectServiceTests` — New/load/save flows, metadata updates  
+3. ✅ `ProjectBridgeTests` — Request/response contract compliance  
+4. ✅ Updated smoke-test guide for project workflows  
+5. ✅ Final integration review gate APPROVED  
 
-**Deliverables:**
-1. `ProjectSerializerTests` — Round-trip, version handling, corrupt file handling
-2. `ProjectServiceTests` — New/load/save flows, metadata updates
-3. `ProjectBridgeTests` — Request/response contract compliance
-4. Updated smoke-test guide for project workflows
-5. Final integration review gate
+**Test Results:** 79 passed, 3 skipped ✅
 
-**Key Decisions:**
-- Version handling tests ensure forward compatibility
-- Material snapshot behavior tested for edge cases (library changes, snapshot availability, fallback behavior)
-- Smoke guide includes project workflows (new, save, open, metadata edit)
+**Snapshot-First Review Gate:** Validated that projects reopen from snapshots only. No silent live-library rehydration. All success criteria met.
 
-**Parallel Workstreams:**
-- Parker (Domain/Services): `IProjectService` and `ProjectSerializer`
-- Bishop (Desktop bridge): Bridge contracts and handlers
-- Dallas (WebUI): Project page and metadata form
+**Key Validations:**
+- Version handling tested for edge cases (forward compatibility)  
+- Material snapshot behavior edge cases covered (library changes, snapshot availability)  
+- Smoke guide includes project workflows (new, save, open, metadata edit)  
+- Bridge contract compliance verified  
 
-**Execution Timeline:**
-- Days 1-3: Scaffold tests with Parker/Bishop/Dallas, collaborate on contract compliance
-- Day 4: Service tests + bridge tests + smoke guide + integration review gate
-
-**Success Criteria:**
-- All project operations have test coverage
-- Bridge contract compliance verified
-- Smoke guide updated with project workflows
-- Version handling tested for edge cases
-- All tests passing (no new failures beyond Phase 2 baseline)
-- Ready-to-ship verdict for Phase 3 close
+**Next Assignments:**
+- Phase 4: XLSX import validation, inline editing, enhanced error handling  
 
 ## Learnings
 

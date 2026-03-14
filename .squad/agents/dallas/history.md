@@ -69,36 +69,28 @@
   - Orchestration log and session log recorded
   - Material library is now the stable anchor for Phase 3 (projects will reference these materials)
 
-## Phase 3 — Project Persistence & Material Snapshots (IN PROGRESS)
+## Phase 3 — Project Persistence & Material Snapshots (COMPLETE)
 
-**Ownership:** Dallas (WebUI) 🚀
+**Ownership:** Dallas (WebUI) ✅
 
-**Assignment:** Project page and metadata form
+**Completed Deliverables:**
+1. ✅ Project contracts in `contracts.ts`  
+2. ✅ Project page with metadata form (all PRD fields: projectName, projectNumber, customerName, estimator, drafter, pm, date, revision, notes)  
+3. ✅ Project dirty/clean state tracking in app shell  
+4. ✅ Save prompt on navigation when dirty  
+5. ✅ Updated Import and Results pages with "current project" context  
+6. ✅ Material selector shows snapshotted materials for existing projects AND pending live materials for comparison  
 
-**Deliverables:**
-1. Project contracts in `contracts.ts`
-2. Project page with metadata form (all PRD fields: projectName, projectNumber, customerName, estimator, drafter, pm, date, revision, notes)
-3. Project dirty/clean state tracking in app shell
-4. Save prompt on navigation when dirty
-5. Update Import and Results pages to show "current project" context
-6. Material selector shows snapshotted materials for existing projects
+**Key Achievement:** The Project page now displays saved material snapshots separately from live materials. Operators see: "Saved materials (v1): [list] | Pending: [list]" to make informed save decisions before overwriting a `.pnest` file.
 
-**Key Decisions:**
-- Metadata form captures all PRD fields
-- App-shell state tracks dirty status
-- Snapshotted materials from project snapshot at open time
-- Import/Results pages wire to project context
+**UI Patterns:**
+- Metadata form captures all PRD fields with validation  
+- App-shell state tracks dirty status and prompts on navigation  
+- Snapshotted materials locked in at open time  
+- Material selector differentiates saved vs. pending clearly  
 
-**Parallel Workstreams:**
-- Parker (Domain/Services): `IProjectService` and `ProjectSerializer`
-- Bishop (Desktop bridge): Bridge contracts and handlers
-- Hicks (Tests & review): Tests and integration gate
-
-**Execution Timeline:**
-- Day 1: Project page scaffold + contracts.ts types (stub bridge)
-- Day 2: Metadata form + dirty state tracking
-- Day 3: Wire real bridge, material snapshot display
-- Day 4: Bug fixes from integration
+**Next Assignments:**
+- Phase 4: XLSX import UI, inline editing, enhanced error UX  
 
 ## Learnings
 
