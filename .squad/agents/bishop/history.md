@@ -19,3 +19,10 @@
 - ✓ Added focused resolver order tests
 - ✓ Validated `dotnet test` and `npm run build` pass with no regressions
 - ✓ Desktop app now correctly loads Phase 0/1 vertical-slice Web UI when available
+
+## Follow-up Work (2026-03-14)
+
+- ✓ Rethemed the WPF host header and footer bars from the legacy blue cast to neutral VS Code-like dark surfaces
+- ✓ Applied a low-risk native dark titlebar path through DWM immersive dark mode plus caption/text/border color hints instead of rewriting window chrome
+- ✓ Re-ran `dotnet test PanelNester.slnx -nologo` after the host changes; 39 tests executed with 38 passing and 1 existing skip
+- ✓ Session completed (2026-03-14). Orchestration log recorded; solution validation green. Ready for Phase 2.
