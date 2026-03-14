@@ -255,6 +255,31 @@ Approve Phase 0/1 for next implementation step.
 
 ---
 
+### Decision: Desktop Web UI Content Resolution
+
+**Author:** Bishop  
+**Date:** 2026-03-14  
+**Status:** Implemented
+
+#### Context
+
+The desktop app was resolving `WebApp\index.html` placeholder even when a real Phase 0/1 Web UI build existed at `src\PanelNester.WebUI\dist\index.html`. The resolver was checking the app's bin directory before searching ancestor roots.
+
+#### Decision
+
+When the desktop app resolves web content, it must search all ancestor roots for `src\PanelNester.WebUI\dist\index.html` before accepting any bundled placeholder page from `WebApp\index.html`.
+
+#### Rationale
+
+Running the desktop project from `src\PanelNester.Desktop\bin\Debug\net10.0-windows` places a copied `WebApp\index.html` directly under the app base directory. If resolution checks placeholder content while still walking upward, the copied fallback wins too early and hides a valid repo-root Web UI build.
+
+#### Consequences
+
+- Desktop debug runs now prefer the real Phase 0/1 Web UI whenever the built `dist` folder exists.
+- The bundled placeholder remains a legitimate fallback when no Web UI build is available.
+
+---
+
 ### Decision: Hicks Phase 0/1 Smoke-Test Guide
 
 **Author:** Hicks  
