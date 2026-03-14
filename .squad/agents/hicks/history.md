@@ -28,3 +28,4 @@
 - ✓ Produced smoke-test guide (`.squad/smoke-test-guide.md`): four concrete test scenarios (happy path + three failure modes) with exact CSV data, expected error codes, and pass/fail criteria. Includes preflight checklist and Demo Material reference. All 36 tests passing, ready for manual verification.
 - ✓ Bishop resolved Web UI content resolution priority; decision documented in `decisions.md` as Phase 0/1 infrastructure decision
 - ✓ Reviewed Dallas's VS Code dark-theme UI refresh: validated palette alignment, confirmed workflow seams preserved, verified regression (38 passed, 1 skipped). Approved for Phase 2 commencement. Residual note: smoke-test guide test count is stale.
+- ✓ Consolidated smoke-test guide count update: synchronized `.squad/smoke-test-guide.md` preflight expectations with current validated regression gate (38 passed, 1 skipped). Merged decision inbox into `decisions.md`. Recorded orchestration and session logs.

@@ -420,6 +420,34 @@ Approved the VS Code-inspired UI cleanup. The palette and structural cues align 
 
 ---
 
+### Decision: Hicks Smoke-Test Guide Count Update
+
+**Author:** Hicks  
+**Date:** 2026-03-14  
+**Status:** Complete
+
+#### Context
+
+The approved VS Code theme refresh maintained regression stability: 38 passed, 1 skipped. However, `.squad/smoke-test-guide.md` still documented the older count (36 passed, 1 skipped) as the preflight expectation, creating reviewer trust issues.
+
+#### Decision
+
+Update `.squad/smoke-test-guide.md` preflight expectations to reflect the current validated regression gate exactly: `38 passed, 1 skipped`.
+
+#### Rationale
+
+- Reviewers use the smoke guide as a trust anchor before manual validation
+- A stale test count creates false negatives during sign-off even when the code is healthy
+- Synchronized documentation maintains reviewer confidence through Phase 2 commencement
+
+#### Consequences
+
+- `.squad/smoke-test-guide.md` preflight now reflects current baseline
+- No behavioral changes to Phase 0/1 slice
+- Phase 2 material library work may proceed with accurate regression baseline
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus
