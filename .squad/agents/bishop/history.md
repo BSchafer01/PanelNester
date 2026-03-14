@@ -39,6 +39,10 @@
 2. ✅ Handler registrations in `DesktopBridgeRegistration.cs` wired to Parker's `IMaterialRepository`
 3. ✅ Full integration of repository into handler callstack
 4. ✅ Error code definitions: `material-not-found`, `material-name-exists`, `material-in-use`, `material-invalid`
+5. ✅ Aligned `DemoMaterialCatalog` with Phase 2 seed behavior (first-run local-library note)
+6. ✅ Updated `JsonMaterialRepositorySpecs` to assert seeded JSON library metadata
+7. ✅ Updated `CsvImportServiceSpecs` to validate import lookups against real JSON-backed repository
+8. ✅ Updated `DesktopBridgeRoundTripSpecs` for full bridge → repository → import → nest integration
 
 **Interfaces Consumed:**
 - `IMaterialRepository` from Parker ✅ (interface contract stable)
@@ -52,4 +56,6 @@
 - ✅ Bridge contracts match established vocabulary pattern (list/get/create/update/delete)
 - ✅ Handlers wire cleanly to Parker's repository and validation service
 - ✅ All error codes properly mapped and tested
-- ✅ Hicks' integration tests pass; `dotnet test PanelNester.slnx` shows 60 passed, 3 skipped
+- ✅ Import lookups validated against shared material repository (not hardcoded fallback)
+- ✅ `dotnet test PanelNester.slnx` shows 61 passed, 2 skipped (no failures)
+- ✅ 2026-03-14T17:25:20Z: **PHASE 2 DELIVERY COMPLETE** — All test suites passing, round-trip validation confirmed
