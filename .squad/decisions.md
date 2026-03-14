@@ -237,6 +237,115 @@ Phase 4 is the first slice that can damage trust across three already-approved s
 
 ---
 
+### Decision: Parker — Phase 4 Domain Import Contract
+
+**Author:** Parker | **Date:** 2026-03-14 | **Status:** Approved ✅
+
+#### Context
+
+Phase 4 needs CSV, XLSX, and inline row editing to share one validation path without drifting after save/open or after unrelated row edits.
+
+#### Decision
+
+- `PartRow` now persists the original `LengthText`, `WidthText`, and `QuantityText` alongside parsed numeric values.
+- `PartRowValidator` is the single .NET validation path for CSV import, XLSX import, and `IPartEditorService`.
+- `PartEditorService` always revalidates the full row list and returns a complete `ImportResponse` after add/edit/delete operations.
+- `XlsxImportService` imports the first populated worksheet in workbook order; a workbook with no populated worksheet returns `empty-workbook`.
+
+#### Consequences
+
+- Invalid numeric input survives project save/open exactly enough for deterministic revalidation and inline correction.
+- CSV/XLSX parity is enforced in the service layer instead of the UI.
+- Phase 4 bridge/UI work can stay thin: send string payloads in, consume full `ImportResponse` out.
+- **IMPLEMENTATION COMPLETE** (2026-03-14T19:12:06Z): 91 passing tests, zero regressions to Phase 0-3 paths
+
+---
+
+### Decision: Bishop — Phase 4 Import Bridge
+
+**Author:** Bishop | **Date:** 2026-03-14 | **Status:** Approved ✅
+
+#### Context
+
+Phase 4 adds XLSX import parity and service-side part row editing. The desktop bridge needed a stable host-owned seam so the Web UI can request native import flows without re-encoding desktop assumptions in React.
+
+#### Decision
+
+- `import-file` now accepts an optional `filePath`. When omitted, the desktop host opens the native picker with explicit CSV/XLSX filters and returns the selected path alongside the import payload.
+- `add-part-row`, `update-part-row`, and `delete-part-row` all send the full current `parts` list back through `IPartEditorService`, so re-validation stays in .NET and uses Parker's preserved raw field text.
+- `import-csv` remains registered for backward compatibility; new Phase 4 work should target `import-file`.
+
+#### Consequences
+
+- Desktop-owned file selection remains explicit and typed at the boundary.
+- CSV/XLSX import and inline row edits now share the same validation authority in services.
+- Dallas can move Phase 4 UI work onto additive bridge contracts without reviving client-side validation drift.
+- **IMPLEMENTATION COMPLETE** (2026-03-14T19:12:06Z): All bridge contracts typed, tested, and production-ready
+
+---
+
+### Decision: Dallas — Phase 4 Import UI
+
+**Author:** Dallas | **Date:** 2026-03-14 | **Status:** Approved ✅
+
+#### Context
+
+Phase 4 import UI must support native CSV/XLSX file workflows and inline row editing while preserving all Phase 0-3 browser/bridge compatibility.
+
+#### Decision
+
+- Phase 4 import UI now **prefers `import-file`** for the native CSV/XLSX flow and **falls back to `import-csv`** if the host only exposes the legacy import message. That keeps the current dispatcher path working while preserving backward compatibility.
+- Inline row add/edit/delete treats the returned **full `ImportResponse` as the only source of truth** after each operation. The UI does not try to patch rows locally after validation.
+- Row editors/rendering use the preserved raw `lengthText`, `widthText`, and `quantityText` values when available so operators can see and correct the exact spreadsheet text that caused validation problems.
+
+#### Consequences
+
+- File import integrated with native picker flow
+- Inline editing operational with full revalidation
+- Raw text fields visible for operator context
+- Validation messages tied to backend error codes
+- Material/status filtering and sorting working
+- **IMPLEMENTATION COMPLETE** (2026-03-14T19:12:06Z): Production build passing, zero regressions
+
+---
+
+### Decision: Hicks — Phase 4 Review Gate
+
+**Author:** Hicks | **Date:** 2026-03-14 | **Status:** Approved ✅
+
+#### Context
+
+Phase 4 is the first slice that can damage trust across three already-approved seams at once: the Phase 1 CSV import path, the Phase 3 project persistence path, and the user-visible import table in the Web UI. The four non-negotiable review gates must all pass before Phase 4 ships.
+
+#### Decision & Approval Details
+
+**Test Results:**
+- Solution restore/build/test: 93 total tests, **91 passing**, 2 documented skips, 0 failures ✅
+- Web UI production build: Passed ✅
+
+**Four Gates Cleared:**
+1. **Regression Safety:** CSV import, nesting, and `.pnest` persistence behavior unchanged
+2. **Format Parity:** Equivalent CSV/XLSX data yield identical row payloads and validation codes
+3. **Edit Persistence:** Inline changes revalidate immediately and survive project save/open
+4. **Failure Clarity:** Invalid materials, bad numerics, corrupt workbooks, and multi-issue rows all user-visible with specific codes
+
+**Coverage:**
+- ✅ XLSX import: headers, column flexibility, empty/multi-sheet, corrupt files, Unicode
+- ✅ File dispatcher: CSV/XLSX routing, unsupported extensions → error code
+- ✅ Part editor: add/update/delete, non-existent rowId, revalidation with library changes
+- ✅ Bridge contracts: `import-file`, `add-part-row`, `update-part-row`, `delete-part-row`
+- ✅ UI workflow: file import, inline edit/add/delete, validation display, filter/sort
+- ✅ Persistence: project save/open serializes imports, raw text, validation state
+
+#### Consequences
+
+- Phase 4 **APPROVED AND COMPLETE** (2026-03-14T19:12:06Z)
+- Residual risks (Web UI automation, hands-on smoke test) defer to Phase 6 polish pass
+- Phase 5 (Results Viewer & PDF Reporting) ready to begin with validated, editable import state as foundation
+- Full project lifecycle now supports import → edit → validate → run nesting → export workflows
+
+---
+
 ## Historical Reference
 
 Earlier Phase 0, Phase 1, and Phase 2 decisions have been archived to `decisions-archive.md` for historical reference while maintaining operational focus on Phase 3 and 4. All archived decisions remain valid and in-scope for future phases.
