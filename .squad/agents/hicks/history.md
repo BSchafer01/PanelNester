@@ -30,3 +30,39 @@
 - ✓ Reviewed Dallas's VS Code dark-theme UI refresh: validated palette alignment, confirmed workflow seams preserved, verified regression (38 passed, 1 skipped). Approved for Phase 2 commencement. Residual note: smoke-test guide test count is stale.
 - ✓ Consolidated smoke-test guide count update: synchronized `.squad/smoke-test-guide.md` preflight expectations with current validated regression gate (38 passed, 1 skipped). Merged decision inbox into `decisions.md`. Recorded orchestration and session logs.
 - ✗ Reviewed second-pass chrome cleanup: automated regression still green (`npm run build`; `dotnet test .\PanelNester.slnx` => 38 passed, 1 skipped), but supplied runtime evidence (`secondpassUI.png`) still shows blue host header/footer chrome and a light native titlebar. Rejected user-visible acceptance and handed revision ownership to Ripley for cross-layer runtime verification.
+- ✓ Reviewed Ripley's chrome revision: `theme-revision-printwindow.png` now shows a dark titlebar plus dark host header/footer chrome with the legacy blue seam removed. Spot-checks of `MainWindow.xaml`, `NativeTitleBarStyler.cs`, and the fallback page align with the runtime result, and rerun validation stayed green (`npm run build`; `dotnet test .\PanelNester.slnx` => 38 passed, 1 skipped). Approved.
+- 2026-03-14: **PHASE 2 ASSIGNMENT: Tests & Integration Review Gate**
+
+## Phase 2 Scope (Material Library Tests & Verification)
+
+**Ownership:** Hicks (Tests and integration review gate)
+
+**Deliverables:**
+1. `MaterialRepositoryTests` — CRUD operations, persistence round-trip, concurrent access, edge cases
+2. `MaterialValidationTests` — Unique name rejection, dimension bounds, required fields, error codes
+3. `MaterialBridgeTests` — Request/response contract compliance, error mapping, handler behavior
+4. Updated smoke-test guide (.squad/smoke-test-guide.md) — Material workflow scenarios
+5. Final integration review gate before Phase 2 close
+
+**Interfaces Consumed:**
+- Parker's repository and validation services (via integration)
+- Bishop's bridge handlers (via contract compliance)
+
+**Interfaces Owned:**
+- Test suites for all material operations
+- Acceptance criteria matrix for material workflows
+- Updated smoke-test guide with material CRUD scenarios
+
+**Dependencies:** All three workstreams (Parker, Bishop, Dallas) — final review gate
+
+**Parallel Execution:**
+- Days 1-3: Scaffold tests, begin spec-first suites, collaborate with parallel workstreams
+- Day 4: Integration tests, smoke guide update, final gate verdict
+
+**Success Criteria:**
+- All material CRUD operations have test coverage
+- Persistence verified across app restart
+- Bridge contract compliance verified
+- Smoke-test guide updated with material workflows
+- All 38+ tests passing (no new skips)
+- Ready-to-ship verdict for Phase 2 close

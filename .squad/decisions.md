@@ -595,3 +595,218 @@ Clarified surface ownership: titlebar/host chrome are desktop-owned; Web UI CSS 
 - All meaningful changes require team consensus
 - Document architectural decisions here
 - Keep history focused on work, decisions focused on direction
+
+
+## Phase 2 Decisions
+
+### Decision: Phase 2 Material Library Slice
+
+**Author:** Ripley  
+**Date:** 2026-03-14  
+**Status:** Proposed
+
+#### Context
+
+Phase 0/1 proved the vertical slice: CSV import → shelf nesting → results display with a hardcoded Demo Material. Phase 2 must replace that demo material with a real material library that persists locally, supports CRUD, and integrates with the existing import/nesting flow.
+
+#### Scope: Narrowest Practical Slice
+
+Phase 2 adds:
+
+1. **Material CRUD** — Create, read, update, delete materials with the full PRD schema
+2. **Local persistence** — Materials survive app restart via JSON file storage
+3. **Material selection** — Import/nesting flow uses a user-selected material instead of hardcoded demo
+4. **Bridge extension** — New message types for material operations
+
+**Explicitly deferred to Phase 3+:**
+- Project persistence (projects just hold import state in memory)
+- Project-material snapshots (materials are always fetched live from library)
+- Material import/export from external files
+- Material duplication or templating
+
+#### Persistence Choice
+
+**Decision:** JSON file storage for the material library.
+
+**Location:** %LOCALAPPDATA%\PanelNester\materials.json
+
+**Rationale:**
+- Simpler than SQLite for a single-entity library
+- Human-readable and debuggable
+- Sufficient for expected material counts (<100)
+- SQLite introduces unnecessary complexity before project persistence needs it in Phase 3
+
+**Implementation:** A new IMaterialRepository interface in PanelNester.Domain.Contracts with an implementation in PanelNester.Services using System.Text.Json.
+
+#### Architecture Seams
+
+**Domain Layer (PanelNester.Domain)**
+- Models/Material.cs — Already exists, no changes needed
+- Contracts/IMaterialRepository.cs — New: CRUD interface
+
+**Services Layer (PanelNester.Services)**
+- Materials/JsonMaterialRepository.cs — New: JSON file persistence
+- Materials/MaterialValidationService.cs — New: Unique name checks, field validation
+
+**Desktop Layer (PanelNester.Desktop)**
+- Bridge/BridgeContracts.cs — Extend with material message types
+- Bridge/DesktopBridgeRegistration.cs — Register material handlers
+
+**WebUI Layer (PanelNester.WebUI)**
+- src/types/contracts.ts — Add material CRUD message types
+- src/pages/MaterialsPage.tsx — New: Material list + editor UI
+- src/bridge/hostBridge.ts — Add material request helpers
+
+#### Bridge Contract Extension
+
+New message types (following established vocabulary pattern):
+
+\\\
+list-materials         → list-materials-response
+get-material           → get-material-response  
+create-material        → create-material-response
+update-material        → update-material-response
+delete-material        → delete-material-response
+\\\
+
+#### Workstream Splits
+
+**Parker (Domain/Services)**
+
+Deliverables:
+1. IMaterialRepository interface in PanelNester.Domain.Contracts
+2. JsonMaterialRepository implementation in PanelNester.Services/Materials
+3. MaterialValidationService for business rules (unique names, positive dimensions)
+4. Unit tests for repository and validation
+
+Interfaces Owned:
+- IMaterialRepository { GetAllAsync(), GetByIdAsync(id), CreateAsync(material), UpdateAsync(material), DeleteAsync(id) }
+- Repository returns domain Material records
+- Validation throws MaterialValidationException with machine-readable codes
+
+Dependencies: None — can start immediately
+
+**Bishop (Desktop Bridge)**
+
+Deliverables:
+1. Bridge contracts for material CRUD messages in BridgeContracts.cs
+2. Handler registrations in DesktopBridgeRegistration.cs
+3. Wire handlers to Parker's IMaterialRepository
+
+Interfaces Consumed:
+- IMaterialRepository from Parker
+
+Interfaces Owned:
+- Request/response contracts: ListMaterialsRequest, CreateMaterialRequest, etc.
+- Error codes: material-not-found, material-name-exists, material-in-use
+
+Dependencies: Parker's IMaterialRepository interface (not implementation)
+
+**Dallas (WebUI)**
+
+Deliverables:
+1. Material CRUD contracts in contracts.ts
+2. Materials page: list view with add/edit/delete
+3. Material editor component (form for all PRD fields)
+4. Material selector on Import page (dropdown replacing hardcoded demo)
+5. Bridge helper functions for material operations
+
+Interfaces Consumed:
+- Bridge message types from Bishop's contract
+
+Interfaces Owned:
+- UI component props and local state shapes
+- Material form validation (client-side, mirrors service rules)
+
+Dependencies: Bishop's bridge contract types (can stub responses initially)
+
+**Hicks (Tests & Review)**
+
+Deliverables:
+1. MaterialRepositoryTests — CRUD operations, persistence round-trip, concurrent access
+2. MaterialValidationTests — Unique name rejection, dimension bounds, required fields
+3. MaterialBridgeTests — Request/response contract compliance
+4. Updated smoke-test guide for material workflows
+5. Final integration review gate
+
+Interfaces Consumed:
+- Parker's repository and validation services
+- Bishop's bridge handlers
+
+Dependencies: All three workstreams (review gate at end)
+
+#### Parallel Execution Plan
+
+Day 1:
+- Parker: IMaterialRepository interface + JsonMaterialRepository stub
+- Bishop: Bridge contracts (can work from interface, not impl)
+- Dallas: UI scaffold + contracts.ts types (can stub bridge)
+
+Day 2:
+- Parker: Repository implementation + validation service + unit tests
+- Bishop: Handler wiring (once Parker's interface is stable)
+- Dallas: Materials page + editor (using stubbed bridge)
+
+Day 3:
+- Bishop: Integration with Parker's implementation
+- Dallas: Wire real bridge calls, material selector on Import
+- Hicks: Begin test coverage
+
+Day 4:
+- Hicks: Integration tests + smoke guide update + review gate
+
+#### Success Criteria
+
+Phase 2 is complete when:
+
+1. User can create a material with all PRD fields
+2. Materials persist across app restart
+3. User can edit and delete existing materials
+4. Import page shows material dropdown instead of hardcoded demo
+5. Nesting uses the selected material's settings
+6. All existing Phase 0/1 tests still pass
+7. New material CRUD tests pass
+8. Smoke guide updated and verified
+
+#### Consequences
+
+- Demo material becomes a seed entry, not hardcoded behavior
+- Import/nesting flows gain material selection step
+- Phase 3 can build on this persistence pattern for projects
+- No breaking changes to existing Phase 0/1 contracts (additive only)
+
+#### Open Questions (None Blocking)
+
+1. Should we seed the demo material on first run? **Recommended: Yes**
+2. Should delete fail if material is referenced in current import? **Recommended: Yes, with \material-in-use\ error**
+
+---
+
+### Decision: Hicks Theme Revision Review
+
+**Author:** Hicks  
+**Date:** 2026-03-14  
+**Status:** Approved
+
+#### Verdict
+
+Approved.
+
+#### Acceptance
+
+Compared secondpassUI.png against 	heme-revision-printwindow.png. The prior capture still had a light native titlebar and legacy blue host chrome in the top and bottom host bands; the revised capture shows dark titlebar chrome and dark host header/footer with no visible blue seam left.
+
+#### Evidence
+
+The desktop host now defines dark titlebar/footer/header surfaces in src\PanelNester.Desktop\MainWindow.xaml, applies immersive dark caption styling in src\PanelNester.Desktop\NativeTitleBarStyler.cs, and keeps the bundled fallback page on the same dark palette in src\PanelNester.Desktop\WebApp\index.html.
+
+#### Validation
+
+Re-ran 
+pm run build in src\PanelNester.WebUI and dotnet test .\PanelNester.slnx; both passed, with tests at 38 passed / 1 skipped.
+
+#### Risk
+
+Low for this acceptance slice. No further revision lockout needed.
+
+---

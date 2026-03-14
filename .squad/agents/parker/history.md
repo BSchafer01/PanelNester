@@ -12,6 +12,35 @@
 📌 2026-03-14: Phase 0/1 domain and services complete  
 📌 2026-03-14: CSV import, nesting service, and contracts tested  
 📌 2026-03-14: Orchestration and session logs created  
+📌 2026-03-14: **PHASE 2 ASSIGNMENT: Material Library Domain/Services Lead**
+
+## Phase 2 Scope (Material Library CRUD)
+
+**Ownership:** Parker (Domain/Services foundation)
+
+**Deliverables:**
+1. `IMaterialRepository` interface in `PanelNester.Domain.Contracts` — CRUD contract with async methods
+2. `JsonMaterialRepository` implementation in `PanelNester.Services/Materials` — JSON file persistence at `%LOCALAPPDATA%\PanelNester\materials.json`
+3. `MaterialValidationService` in `PanelNester.Services/Materials` — Business rules: unique names, positive dimensions, required fields
+4. Unit tests for both repository and validation service
+
+**Interfaces Owned:**
+- `IMaterialRepository { GetAllAsync(), GetByIdAsync(id), CreateAsync(material), UpdateAsync(material), DeleteAsync(id) }`
+- Repository returns domain `Material` records
+- Validation throws `MaterialValidationException` with machine-readable codes
+
+**Dependencies:** None — can start immediately
+
+**Parallel Workstreams:**
+- Bishop (Desktop bridge contracts and handlers) — depends on this interface, not implementation
+- Dallas (WebUI CRUD UI) — can stub bridge responses initially
+- Hicks (Tests and integration gate) — final workstream dependency
+
+**Success Criteria:**
+- IMaterialRepository interface contract agreed and stable
+- JsonMaterialRepository round-trip tested (write, read, verify persistence across app restart)
+- Validation logic tested for all edge cases (duplicate names, negative dimensions, missing fields)
+- All tests passing before handoff to Bishop/Dallas for integration
 
 ## Learnings
 
