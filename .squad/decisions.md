@@ -621,6 +621,98 @@ Re-review the revised Phase 5 slice after Ripley's correction cycle addressing P
 
 ---
 
+## Phase 5 Follow-Up Corrections — Kickoff
+
+### Directive: User Requirements Clarification
+
+**Author:** Brandon Schafer (via Copilot) | **Date:** 2026-03-14T23:27:53Z | **Status:** Active
+
+**What:** For the Phase 5 viewer/reporting follow-up correction batch:
+1. Viewer must use Three.js (not SVG)
+2. Viewer must not expand unboundedly with larger layouts
+3. Mouse zoom/pan input must be locked to the viewer area
+4. Report graphic must label all panels unambiguously
+5. Utilization must render with proper decimal percentages (not double-multiplied integers)
+
+**Why:** User feedback post-Phase 5 approval identified misalignments between Phase 5 design spec (Three.js) and implementation (SVG), and rendering bugs (missing labels, percentage format error).
+
+---
+
+### Decision: Ripley — Phase 5 Follow-Up Correction Review & Ownership Split
+
+**Author:** Ripley | **Date:** 2026-03-14T23:33:49Z | **Status:** Active
+
+#### Context
+Brandon flagged five issues after Phase 5 approval. Analysis required to split into exact agent ownership and identify root causes.
+
+#### Root Causes Identified
+
+| Issue | Root Cause | Owner | Fix |
+|-------|-----------|-------|-----|
+| **Viewer uses SVG, not Three.js** | Dallas shipped SVG as interim (Phase 5 decision pragmatism). User now explicitly requires Three.js per design spec. | Dallas | Replace SVG with Three.js OrthographicCamera + OrbitControls (rotation locked) |
+| **Viewer grows unbounded** | .sheet-viewer has min-height: 320px and height: 100% with no max-height | Dallas | Add max-height constraint (suggest 480–520px) |
+| **Mouse input not locked to viewer** | SVG viewer uses preventDefault() and pointer capture; Three.js OrbitControls provides native capture | Dallas | OrbitControls automatically contain mouse input to canvas |
+| **PDF missing panel labels** | QuestPdfReportExporter.BuildSheetSvg() renders rectangles only, no <text> elements. Viewer UI renders labels; exporter does not. | Parker | Add <text> labels to BuildSheetSvg() for each placement's PartId |
+| **PDF percentage double-multiply** | FormatPercent() uses alue.ToString("P1"). .NET "P" format multiplies by 100, but ShelfNestingService.ToPercent() already multiplied. 60% enters as 60.0m, formats to 6,000.0% | Parker | Change format from alue.ToString("P1") to $"{value:0.0}%" |
+
+#### Decisions
+
+1. **Three.js is mandatory, not optional** — Phase 5 design spec required it; SVG interim now superseded by user requirement.
+2. **Viewer height must be constrained** — Prevents domination of results page on large layouts.
+3. **All fixes are layer-specific, no cross-layer coordination needed:**
+   - Dallas: WebUI only (Three.js viewer migration + height constraint)
+   - Parker: Services/Exporter only (PDF labels + percentage formatting)
+   - Bishop: No work (no bridge contract changes)
+   - Hicks: Test gate (verify user-visible evidence)
+4. **No domain model or data contract changes** — Rendering and formatting are pure presentation concerns.
+
+#### Ownership Split & Consequences
+
+- **Dallas:** Replace SVG viewer with Three.js, cap viewer max-height, verify mouse containment works
+- **Parker:** Add panel labels to PDF sheet diagram SVG, fix FormatPercent() to use correct format string
+- **Bishop:** No work — data contracts unchanged
+- **Hicks:** Gate on five user-visible evidence checkpoints (see Hicks decision below)
+
+**Parallel Execution:** Dallas and Parker have no dependencies; can work simultaneously.
+
+---
+
+### Decision: Hicks — Phase 5 Follow-Up Correction Acceptance Gate
+
+**Author:** Hicks | **Date:** 2026-03-14T23:33:49Z | **Status:** Active
+
+#### Gate Criteria (User-Visible Evidence Only)
+
+Hicks will gate the follow-up corrections on **repeatable user-visible evidence**, not implementation claims:
+
+1. **Viewer renders with Three.js, not SVG**
+   - Evidence: Developer console shows <canvas> element, not <svg>; Three.js renderer active
+   - Test: Manual verification in live app; automated canvas element check
+
+2. **Viewer controls locked to 2D navigation (zoom & pan only)**
+   - Evidence: Drag interaction does not rotate/orbit/tilt; wheel zoom works; arrow pan works
+   - Test: Manual drag-rotate interaction fails silently; wheel zoom functional; pan controls functional
+
+3. **Viewer stays bounded and mouse input is viewer-local**
+   - Evidence: max-height CSS prevents viewer from crowding Results/report UI on large layouts; wheel over Results page does not zoom viewer
+   - Test: Resize app large; verify viewer max-height; wheel-over-results doesn't affect viewer
+
+4. **PDF sheet diagram labels all panels unambiguously**
+   - Evidence: Exported PDF shows panel labels (part IDs) adjacent to each placement rectangle
+   - Test: Automated PDF text extraction; verify PartId values appear near placement geometry
+
+5. **Utilization renders as decimal percentage, not integer inflation**
+   - Evidence: Exported PDF shows utilization as 60.0% (or similar), not 6000%
+   - Test: Automated PDF text extraction; verify percentage format matches decimal pattern (e.g., \d+\.\d%)
+
+#### Consequences
+- Dallas and Parker can work in parallel; no blocking dependencies
+- Hicks verifies both layers' user-visible output (viewer interaction + PDF content)
+- Phase 5 follow-up considered COMPLETE once all five gates pass
+- Phase 6 design review unblocked after follow-up clearance
+
+---
+
 ## Historical Reference
 
 Earlier Phase 0, Phase 1, and Phase 2 decisions have been archived to `decisions-archive.md` for historical reference while maintaining operational focus on Phase 3–5. All archived decisions remain valid and in-scope for future phases.
@@ -629,3 +721,4 @@ Earlier Phase 0, Phase 1, and Phase 2 decisions have been archived to `decisions
 **Phase 4 Decisions Added:** 2026-03-14T18:34:43Z
 **Phase 5 Decisions Added:** 2026-03-14T19:59:29Z
 **Phase 5 Revision & Re-Review Added:** 2026-03-14T20:17:23Z
+

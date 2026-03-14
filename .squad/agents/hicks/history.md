@@ -126,13 +126,15 @@ All four gates cleared with evidence:
 
 **Status:**
 - **PHASE 5 COMPLETE AND APPROVED** (2026-03-14T20:17:23Z)
-- **PHASE 6 READY TO START** — Polish, edge cases, fidelity tuning, error-surface hardening
+- **PHASE 5 FOLLOW-UP CORRECTION CYCLE AUTHORIZED** (2026-03-14T23:33:49Z)
 
 - 2026-03-14T20:17:23Z: **PHASE 5 RE-REVIEW COMPLETE** — PDF sheet visuals and export failure-path coverage now in place. Hicks re-review: APPROVED ✅
   - `dotnet test .\PanelNester.slnx --nologo` → 105 total, 103 passed, 2 skipped, 0 failures ✅
   - `npm run build` → passed ✅
   - All four reviewer gates cleared: rendering fidelity, PDF accuracy, multi-material determinism, export reliability
   - Phase 5 fully complete. Phase 6 ready to start.
+
+- 2026-03-14T23:33:49Z: **PHASE 5 FOLLOW-UP CORRECTION GATE DRAFTED.** Brandon's post-approval feedback isolated into five user-visible evidence gates: Three.js viewer rendering, 2D-locked controls, viewer height constraint, PDF panel labels, decimal percentage formatting. Acceptance gate documented. Dallas and Parker authorized for parallel execution. Hicks gates on observable user-visible output, not implementation claims.
 
 **Ownership:** Hicks (Tests and integration review gate)
 

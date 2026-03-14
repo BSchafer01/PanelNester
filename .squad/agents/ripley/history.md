@@ -37,9 +37,13 @@ I own architecture, scope control, and reviewer gating for the full product.
   - **PHASE 5 COMPLETE AND APPROVED** (2026-03-14T20:17:23Z)
   - **PHASE 6 READY TO START** — Polish, edge cases, fidelity tuning, error-surface hardening
 
+- 2026-03-14T23:33:49Z: **PHASE 5 FOLLOW-UP CORRECTION CYCLE AUTHORIZED.** Analyzed Brandon's five post-approval feedback items. Root cause isolation: Dallas owns Three.js viewer migration + height constraint (WebUI only); Parker owns PDF label + percentage formatting fixes (Services/Exporter only); Bishop has no work (no bridge changes). Ownership split recorded in `.squad/decisions.md`. Orchestration log recorded. No cross-layer dependencies; parallel execution authorized.
+
 ## Next Steps
 
-- Phase 6 design review ready to begin
+- Phase 5 follow-up corrections authorized (Dallas + Parker parallel execution)
+- Dallas: Three.js viewer migration, viewer max-height constraint
+- Parker: PDF sheet labels, percentage format fix
+- Hicks: Acceptance gate on five user-visible evidence checkpoints
+- Phase 6 design review waits for Phase 5 follow-up clearance
 - Polish scope: viewer refinements, PDF fidelity tuning, performance optimization, error-surface hardening
-- Manual smoke testing: empty-result export workflows, dense-layout readability, viewer/PDF geometry parity
-- All Phase 5 features operational and tested; foundation stable for Phase 6 work
