@@ -856,3 +856,9 @@ PS F:\Users\brand\source\AgentRepos\PanelNester>
 - The desktop host owns the concrete material library path at `%LOCALAPPDATA%\PanelNester\materials.json` via `DesktopStoragePaths`, while `PanelNester.Services.Materials.JsonMaterialRepository` stays path-driven and WPF-agnostic.
 - Phase 2 bridge handlers use `IMaterialService` for CRUD responses and `IMaterialRepository` for import-material lookup so material validation stays aligned with the shared service contracts.
 - The JSON material repository seeds the Phase 1 demo material on first load so existing import/nesting flows keep working until project-scoped material snapshots arrive in Phase 3.
+
+# Dallas Phase 2 Materials
+
+- Import flow now treats the chosen library material as the active nesting target for the current run.
+- Phase 2 only sends imported rows whose `Material` value exactly matches the selected library material; mismatched rows stay visible in the import table instead of being silently coerced.
+- Delete requests include current selector/import context so `material-in-use` blocks removing the actively selected or currently imported material.
