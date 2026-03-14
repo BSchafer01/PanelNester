@@ -1,56 +1,95 @@
 ---
 name: "project-conventions"
-description: "Core conventions and patterns for this codebase"
+description: "Core conventions and patterns for PanelNester codebase"
 domain: "project-conventions"
-confidence: "medium"
-source: "template"
+confidence: "high"
+source: "design-review"
 ---
 
 ## Context
 
-> **This is a starter template.** Replace the placeholder patterns below with your actual project conventions. Skills train agents on codebase-specific practices — accurate documentation here improves agent output quality.
+PanelNester is a WPF desktop app with a WebView2-hosted React UI. Domain logic lives in .NET; visualization in TypeScript/React/Three.js.
 
 ## Patterns
 
-### [Pattern Name]
+### Bridge Communication
 
-Describe a key convention or practice used in this codebase. Be specific about what to do and why.
+All WPF↔WebView2 communication uses JSON-over-postMessage with type/payload envelope:
+
+```typescript
+interface BridgeMessage {
+  type: string;
+  requestId?: string;
+  payload: unknown;
+}
+```
+
+- WPF dispatches by `type` without deserializing `payload` first
+- Use `requestId` for request/response correlation
+- Keep payloads serializable (no functions, circular refs)
+
+### Domain Isolation
+
+Domain project has zero dependencies on WPF, WebView2, or persistence:
+- Models in `PanelNester.Domain/Models/`
+- Contracts (interfaces) in `PanelNester.Domain/Contracts/`
+- Services implement contracts in `PanelNester.Services/`
 
 ### Error Handling
 
-<!-- Example: How does your project handle errors? -->
-<!-- - Use try/catch with specific error types? -->
-<!-- - Log to a specific service? -->
-<!-- - Return error objects vs throwing? -->
+- Domain returns result objects with `success`, `errors`, `warnings` arrays
+- Bridge handlers catch exceptions and return error responses
+- WebUI displays validation messages inline, critical errors as toasts
 
 ### Testing
 
-<!-- Example: What test framework? Where do tests live? How to run them? -->
-<!-- - Test framework: Jest/Vitest/node:test/etc. -->
-<!-- - Test location: test/, __tests__/, *.test.ts, etc. -->
-<!-- - Run command: npm test, etc. -->
+- Framework: xUnit for .NET, Vitest for TypeScript
+- Location: `tests/PanelNester.*.Tests/` for .NET, `src/PanelNester.WebUI/src/**/*.test.ts` for TS
+- Run: `dotnet test` for .NET, `npm test` in WebUI directory
 
 ### Code Style
 
-<!-- Example: Linting, formatting, naming conventions -->
-<!-- - Linter: ESLint config? -->
-<!-- - Formatter: Prettier? -->
-<!-- - Naming: camelCase, snake_case, etc.? -->
+- .NET: C# 12, nullable enabled, file-scoped namespaces
+- TypeScript: Strict mode, no `any` without justification
+- Naming: PascalCase for .NET public members, camelCase for TS
 
 ### File Structure
 
-<!-- Example: How is the project organized? -->
-<!-- - src/ — Source code -->
-<!-- - test/ — Tests -->
-<!-- - docs/ — Documentation -->
+```
+src/
+├── PanelNester.Desktop/    # WPF shell, bridge
+├── PanelNester.Domain/     # Pure models, interfaces
+├── PanelNester.Services/   # Application services
+└── PanelNester.WebUI/      # React frontend
+tests/
+├── PanelNester.Domain.Tests/
+├── PanelNester.Services.Tests/
+└── PanelNester.Desktop.Tests/
+```
 
 ## Examples
 
+```csharp
+// Bridge handler registration
+handlers.Register("import-csv", async (payload) => {
+    var request = Deserialize<ImportRequest>(payload);
+    var result = await importService.ImportAsync(request.FilePath);
+    return new ImportResponse(result);
+});
 ```
-// Add code examples that demonstrate your conventions
+
+```typescript
+// Calling .NET from React
+const result = await hostBridge.invoke<NestResponse>('run-nesting', {
+  parts: validParts,
+  material: selectedMaterial,
+  kerfWidth: 0.125
+});
 ```
 
 ## Anti-Patterns
 
-<!-- List things to avoid in this codebase -->
-- **[Anti-pattern]** — Explanation of what not to do and why.
+- **Domain depending on WPF** — Keep domain pure; inject dependencies via interfaces.
+- **Binary payloads over bridge** — Stick to JSON; no ArrayBuffer or Blob.
+- **Tight coupling between pages** — Use shared types from `contracts.ts`, not direct imports across pages.
+- **Hardcoding file paths** — Always use bridge to request native file dialogs.
