@@ -102,13 +102,13 @@
 - ✓ **Web UI build passing**
 - ✓ **PHASE 3 UNBLOCKED:** Hicks' review gate can now proceed with complete Web UI implementation
 
-## Phase 5 — Results Viewer & PDF Reporting (REJECTED ❌)
+## Phase 5 — Results Viewer & PDF Reporting (APPROVED ✅)
 
-**Ownership:** Dallas (WebUI) — LOCKED OUT
+**Ownership:** Dallas (WebUI)
 
 **Assignment:** Results page refactor, Three.js viewer component, report page UI
 
-**Implementation Status (2026-03-14T19:59:29Z):**
+**Implementation Status (2026-03-14T20:17:23Z):**
 - ✅ `SheetViewer` component with orthographic 2D rendering
 - ✅ Results page refactored for multi-material display (per-material cards, summary totals)
 - ✅ Report page with editable fields (company, title, project name/number, date, notes)
@@ -119,11 +119,11 @@
 - ✅ Production build passing
 - ✅ Zero regressions to Phase 0–4 UI flows
 
-**Rejection Reasons:**
-1. **PDF Sheet Visuals Missing** (Critical) — Viewer renders correctly, but PDF exports lack geometry; PRD §6.7 requires sheet diagrams.
-2. **Export Failure-Path Coverage Insufficient** (Critical) — Phase 5 matrix calls for tests covering cancelled save, file-write failure, and no-result scenarios.
-
-**Locked Out:** Dallas cannot participate in revision cycle. Ripley (or non-author reviewer) owns next phase.
+**Revision & Re-Review Status:**
+- Ripley's correction cycle: Added PDF SVG sheet diagram rendering to Parker's export pipeline
+- Hicks re-review: APPROVED after confirming live-geometry PDF diagrams render correctly
+- UI layer validation confirmed: Results viewer geometry matches PDF export geometry
+- Full integration gate cleared: **PHASE 5 COMPLETE**
 
 ## Phase 4 — Full Import Pipeline UI (COMPLETE ✅)
 

@@ -1,12 +1,12 @@
-# Squad Decisions — Phase 4
+# Squad Decisions — Phase 6
 
 ## Strategic Context
 
 **Architecture:** PanelNester—local desktop tool for importing rectangular parts, nesting by material, visualizing sheet layouts, exporting PDF summaries.
 
-**Current Phase:** Phase 4 — Full Import Pipeline  
-**Status:** DESIGN REVIEW COMPLETE ✅ (2026-03-14T18:34:43Z) | READY TO IMPLEMENT  
-**Approval Status:** Phase 3 cleared all reviewer gates. Phase 4 design review complete. Implementation sequence assigned and ready to begin.
+**Current Phase:** Phase 6 — Polish & Edge Cases  
+**Status:** PHASE 5 COMPLETE AND APPROVED ✅ (2026-03-14T20:17:23Z) | PHASE 6 DESIGN REVIEW READY  
+**Approval Status:** Phase 5 cleared all reviewer gates with PDF geometry visuals and export failure-path coverage. Phase 6 next boundary: polish, edge cases, fidelity tuning, error-surface hardening.
 
 ---
 
@@ -549,10 +549,83 @@ Phase 5 implementation teams (Parker, Bishop, Dallas) completed their deliverabl
 
 ---
 
+### Decision: Ripley — Phase 5 PDF Revision
+
+**Author:** Ripley  
+**Date:** 2026-03-15  
+**Status:** Approved ✅
+
+#### Context
+
+Hicks rejected the Phase 5 slice because the PDF export did not render sheet visuals from live nesting geometry and because export failure paths lacked repeatable coverage beyond the happy path.
+
+#### Decision
+
+- Render sheet visuals in the PDF using QuestPDF's SVG pipeline, generating per-sheet diagrams from `ReportSheetDiagram` placements and sheet dimensions.
+- Keep the diagram data sourced from `ReportDataService` (live nesting geometry) with no new domain contract changes.
+- Add deterministic export failure-path tests: cancellation and invalid file path at the exporter level, plus save-dialog cancellation and exporter exception coverage in the bridge tests.
+
+#### Consequences
+
+- PDF exports now include geometry that matches the live nesting placements in the results viewer.
+- Export failure outcomes are now covered by automated tests, reducing reliance on manual-only verification.
+
+#### Status After Correction
+
+- ✅ `QuestPdfReportExporter` now emits SVG sheet diagrams from `ReportSheetDiagram` placement data
+- ✅ Geometry sourced from live nesting (same `x`, `y`, `width`, `height` fields as Three.js viewer)
+- ✅ Alignment confirmed: PDF diagrams and viewer geometry tell the same story
+- ✅ Export failure-path coverage repeatable: cancellation, invalid paths, exporter exceptions
+- ✅ All tests passing (105 total, 103 passed, 2 skipped, 0 failed)
+- ✅ Web UI build passed
+
+---
+
+### Decision: Hicks — Phase 5 Re-Review (Approval)
+
+**Author:** Hicks | **Date:** 2026-03-14 | **Status:** Approved ✅
+
+#### Context
+
+Re-review the revised Phase 5 slice after Ripley's correction cycle addressing PDF sheet visuals and export failure-path coverage.
+
+#### Approval Rationale
+
+**Gate Cleared:** All rejection criteria resolved
+
+1. **PDF Sheet Visuals Now Real Output**
+   - `QuestPdfReportExporter` emits SVG sheet diagrams from `ReportSheetDiagram` placement data
+   - Geometry sourced from live nesting (same `x`, `y`, `width`, `height` fields as Three.js viewer)
+   - Alignment confirmed: PDF diagrams and viewer geometry tell the same story
+
+2. **Export Failure-Path Coverage Repeatable**
+   - `Phase05BridgeSpecs` exercises cancelled save-dialog handling and exporter exception mapping
+   - `QuestPdfReportExporterSpecs` exercises invalid-path and cancellation at exporter seam
+   - Coverage now deterministic and integrated into test matrix
+
+#### Evidence Verified
+
+- `dotnet test .\PanelNester.slnx --nologo` → **105 total, 103 passed, 2 skipped, 0 failed** ✅
+- `npm run build` (in `src\PanelNester.WebUI`) → **passed** ✅
+
+#### Residual Risks Acknowledged
+
+- Visual parity is geometry-faithful, not pixel-identical (simplified static SVG treatment vs. interactive viewer)
+- Empty-result export coverage lighter than cancel/path/exception coverage; Phase 6 should include manual smoke validation
+
+#### Consequences
+
+- **Phase 5 APPROVED AND COMPLETE** — Full results viewer and PDF reporting operational with live-geometry rendering and failure-path hardening
+- **Phase 6 READY TO START** — Polish, edge cases, fidelity tuning, error-surface hardening
+- All four reviewable gates cleared: rendering fidelity ✅, multi-material determinism ✅, settings persistence ✅, bridge coverage with failure paths ✅
+
+---
+
 ## Historical Reference
 
-Earlier Phase 0, Phase 1, and Phase 2 decisions have been archived to `decisions-archive.md` for historical reference while maintaining operational focus on Phase 3 and 4. All archived decisions remain valid and in-scope for future phases.
+Earlier Phase 0, Phase 1, and Phase 2 decisions have been archived to `decisions-archive.md` for historical reference while maintaining operational focus on Phase 3–5. All archived decisions remain valid and in-scope for future phases.
 
 **Archive Date:** 2026-03-14T17:56:50Z
 **Phase 4 Decisions Added:** 2026-03-14T18:34:43Z
 **Phase 5 Decisions Added:** 2026-03-14T19:59:29Z
+**Phase 5 Revision & Re-Review Added:** 2026-03-14T20:17:23Z

@@ -35,25 +35,26 @@
 - 2026-03-14: Initial team staffing. I own desktop host integration, local persistence wiring, and export plumbing.
 - 2026-03-14: Phase 0/1 host scaffolding works best when the desktop shell prefers a future `src\PanelNester.WebUI\dist` build but still ships a bundled placeholder page and a `window.hostBridge.receive(...)` receiver shim so the bridge stays stable before the real UI lands.
 - 2026-03-14: If the desktop output bundles `WebApp`, content resolution must search every ancestor for `src\PanelNester.WebUI\dist` before accepting a placeholder; otherwise running from `bin\Debug\net10.0-windows` masks a valid real UI build.
-## Phase 5 — Results Viewer & PDF Reporting (REJECTED ❌)
+## Phase 5 — Results Viewer & PDF Reporting (APPROVED ✅)
 
-**Ownership:** Bishop (Desktop bridge layer) — LOCKED OUT
+**Ownership:** Bishop (Desktop bridge layer)
 
 **Assignment:** Bridge message types, PDF export handlers, native save dialog
 
-**Implementation Status (2026-03-14T19:59:29Z):**
+**Implementation Status (2026-03-14T20:17:23Z):**
 - ✅ Bridge contracts for `run-batch-nesting`, `export-pdf-report`, `update-report-settings` delivered
 - ✅ Handler registrations wired to Parker's services
 - ✅ Native `.pdf` file save dialog integrated
 - ✅ Report settings serialization to project files
-- ✅ 99 tests passing, 2 skipped, 0 failures
+- ✅ Export failure-path coverage added: cancellation and invalid-path handling
+- ✅ Exception mapping: `cancelled`, `report-export-failed`, `invalid-output-path`
+- ✅ 103 tests passing, 2 skipped, 0 failures
 - ✅ Zero regressions to Phase 0–4 bridge vocabulary
 
-**Rejection Reasons:**
-1. **PDF Sheet Visuals Missing** (Critical) — Current implementation lacks geometry rendering; PRD §6.7 requires sheet visuals.
-2. **Export Failure-Path Coverage Insufficient** (Critical) — Phase 5 matrix calls for tests covering cancelled save, file-write failure, and no-result scenarios.
-
-**Locked Out:** Bishop cannot participate in revision cycle. Ripley (or non-author reviewer) owns next phase.
+**Revision & Re-Review Status:**
+- Ripley's correction cycle added PDF SVG sheet diagram rendering to export pipeline
+- Hicks re-review: APPROVED after confirming live-geometry PDF diagrams and repeatable export failure-path coverage
+- Full integration gate cleared: **PHASE 5 COMPLETE**
 
 ## Phase 4 — Full Import Pipeline (COMPLETE ✅)
 

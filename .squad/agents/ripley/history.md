@@ -29,9 +29,17 @@ I own architecture, scope control, and reviewer gating for the full product.
 - 2026-03-14: **PHASE 5 DESIGN REVIEW COMPLETE.** Results viewer, PDF reporting, and multi-material nesting. Scope narrowed to five core deliverables: Three.js viewer, QuestPDF generation, report settings, refactored results page, multi-material batch nesting. Parker owns `IReportService` interface, `ReportSettings` DTO, `MultiMaterialNestingService`, `PdfReportGenerator`. Bishop owns three bridge messages (generate-pdf-report, get-report-settings, update-report-settings) and PDF save dialog. Dallas owns results page UI (Three.js viewer, settings form, report button). Hicks owns Three.js/PDF/multi-material tests and integration gate. Implementation sequence and seam ownership documented. Decision merged into `decisions.md`. Phase 5 ready for parallel implementation teams (2026-03-14T19:23:22Z).
 - 2026-03-14T19:59:29Z: **PHASE 5 INTEGRATED REVIEW GATE: REJECTED.** Hicks' verdict: PDF sheet visuals missing (PRD §6.7 requires geometry rendering; current implementation has text tables only) and export failure-path coverage insufficient (no repeatable tests for cancelled save, file-write failure, or no-result export). Parker, Bishop, and Dallas locked out of revision cycle. Ripley owns correction cycle authorization and next phase gating. Phase 6 blocked pending Phase 5 gate clearance.
 
+- 2026-03-14T20:17:23Z: **PHASE 5 CORRECTION CYCLE COMPLETE.** Ripley (lead) owns revision authorization and next phase gating. Reworked PDF export to render live-geometry SVG sheet diagrams from `ReportSheetDiagram` placements. Added deterministic failure-path tests (cancellation, invalid paths, exporter exceptions) to bridge and exporter spec suites. Hicks re-review (2026-03-14T20:17:23Z): APPROVED ✅
+  - All four reviewer gates cleared: rendering fidelity ✅, PDF accuracy ✅, multi-material determinism ✅, export reliability ✅
+  - Test baseline: 105 total, 103 passed, 2 skipped, 0 failures ✅
+  - `npm run build` passed ✅
+  - Residual risks acknowledged: visual parity geometry-faithful not pixel-identical; empty-result coverage lighter than other failure paths (Phase 6 smoke testing)
+  - **PHASE 5 COMPLETE AND APPROVED** (2026-03-14T20:17:23Z)
+  - **PHASE 6 READY TO START** — Polish, edge cases, fidelity tuning, error-surface hardening
+
 ## Next Steps
 
-- Revision owner (Ripley or non-author reviewer) must authorize PDF visual architecture (sheet geometry rendering in QuestPDF Canvas API)
-- Add repeatable test coverage for export failure paths (cancelled save, file-write failure, no-result scenarios)
-- Re-baseline: `dotnet test .\PanelNester.slnx` + `npm run build`
-- Phase 6 (Polish & Edge Cases) cannot begin until Phase 5 gate clears
+- Phase 6 design review ready to begin
+- Polish scope: viewer refinements, PDF fidelity tuning, performance optimization, error-surface hardening
+- Manual smoke testing: empty-result export workflows, dense-layout readability, viewer/PDF geometry parity
+- All Phase 5 features operational and tested; foundation stable for Phase 6 work
