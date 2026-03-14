@@ -862,3 +862,52 @@ PS F:\Users\brand\source\AgentRepos\PanelNester>
 - Import flow now treats the chosen library material as the active nesting target for the current run.
 - Phase 2 only sends imported rows whose `Material` value exactly matches the selected library material; mismatched rows stay visible in the import table instead of being silently coerced.
 - Delete requests include current selector/import context so `material-in-use` blocks removing the actively selected or currently imported material.
+
+---
+
+## Decision: Phase 2 Material Library Slice — Final Test Gate Approval
+
+**Author:** Hicks
+**Date:** 2026-03-14
+**Status:** Approved
+
+### Context
+
+Phase 2 material library implementation complete. Required final verification of CRUD persistence, bridge wiring, import material selection behavior, error code surfacing, and Demo Material fallback handling.
+
+### Verdict
+
+**APPROVED** — Phase 2 clears gate.
+
+### Evidence
+
+- Regression suite: **63 total, 61 passed, 2 expected skips**
+- Web UI production build: **Green**
+- Material CRUD persistence: **Live** (%LOCALAPPDATA%\PanelNester\materials.json, deterministic writes, Phase 2 demo entry seeded on first load)
+- Bridge wiring: **Live** (material CRUD routed through IMaterialService, error codes forwarded)
+- Import material selection: **Live** (exact match, no silent fallback to Demo Material)
+- Failure codes surfaced: **All three live** (material-name-exists, material-in-use, material-not-found)
+
+### Scope Checked
+
+- src/PanelNester.Domain
+- src/PanelNester.Services 
+- src/PanelNester.Desktop
+- src/PanelNester.WebUI
+- Test suite coverage
+- PRD compliance
+
+### Residual Risks
+
+1. No browser-level UI automation for material selector/delete affordances—current coverage relies on service/desktop tests and code inspection
+2. Placeholder test MaterialLibrarySpecs.Import_flow_uses_selected_project_materials_instead_of_the_phase_one_demo_material remains skipped; should retire or replace early to keep regression gate honest
+
+### Next Boundary
+
+**Phase 3: Project persistence and material snapshots**—live-library references will need durable project-scoped behavior.
+
+### Consequences
+
+- Phase 2 material library slice is production-ready
+- Phase 3 can proceed with confidence that material CRUD and exact-match import behavior are stable
+- Early Phase 3 work: retire skipped test and add Web UI e2e coverage for material selector/delete flow
