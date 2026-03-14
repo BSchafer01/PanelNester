@@ -843,3 +843,16 @@ PS F:\Users\brand\source\AgentRepos\PanelNester>
 - Review gate decision: Phase 2 will be rejected if any post-selection import or delete path silently falls back to `Demo Material`. The approved failure codes are `material-name-exists`, `material-in-use`, and `material-not-found`.
 - Scaffolding approach: keep contract tests runnable now (JSON material round-trip, duplicate-name, in-use delete, exact-match import selection), and leave the live JSON repository and bridge round-trip tests skipped until those seams exist.
 
+## Phase 2 Materials — Parker & Bishop (2026-03-14T17:16:57Z)
+
+# Parker — Phase 2 materials
+
+- Material library persistence lives at `%LOCALAPPDATA%\PanelNester\materials.json` by default in the backend repository implementation, so desktop wiring does not need to hardcode a separate storage contract.
+- Material names are treated as unique with `OrdinalIgnoreCase` comparisons to prevent ambiguous library entries, but CSV/import matching remains exact `Ordinal` text so user-facing imports stay deterministic and explainable.
+- `material-in-use` is enforced at the material service/bridge seam with additive request context (`selectedMaterialId`, imported material names) until Phase 3 project persistence and material snapshots exist.
+
+# Bishop Phase 2 Materials
+
+- The desktop host owns the concrete material library path at `%LOCALAPPDATA%\PanelNester\materials.json` via `DesktopStoragePaths`, while `PanelNester.Services.Materials.JsonMaterialRepository` stays path-driven and WPF-agnostic.
+- Phase 2 bridge handlers use `IMaterialService` for CRUD responses and `IMaterialRepository` for import-material lookup so material validation stays aligned with the shared service contracts.
+- The JSON material repository seeds the Phase 1 demo material on first load so existing import/nesting flows keep working until project-scoped material snapshots arrive in Phase 3.

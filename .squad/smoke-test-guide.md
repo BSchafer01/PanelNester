@@ -13,7 +13,7 @@ dotnet build
 dotnet test
 ```
 
-**Expected outcome:** `Build succeeded` + `38 passed, 1 skipped` (WebView2 integration test deferred).
+**Expected outcome:** `Build succeeded` + `dotnet test` completes with zero failures. Skips should be limited to the documented WebView2/material-library placeholders that are still intentionally blocked.
 
 ---
 
@@ -198,9 +198,36 @@ Panel-B,12,36,0,Demo Material
 
 ---
 
+## Phase 2 Material Library Preview
+
+> Activate this section once the material library slice lands. Until then, the skipped Hicks tests are the source of truth for what is still blocked.
+
+### Test Case 5: Duplicate Material Name
+
+1. Create a material named `Baltic Birch`.
+2. Attempt to create or rename another material to `Baltic Birch`.
+3. **Pass:** Operation is rejected with `material-name-exists`; the original material remains unchanged.
+4. **Fail:** UI silently overwrites, trims into a collision, or returns a generic error.
+
+### Test Case 6: Delete Material In Use
+
+1. Select `Baltic Birch` into the current project and import at least one row that references it.
+2. Attempt to delete `Baltic Birch`.
+3. **Pass:** Operation is blocked with `material-in-use`; import state remains intact.
+4. **Fail:** Material disappears, imported rows orphan silently, or the app falls back to `Demo Material`.
+
+### Test Case 7: Import Selection Exact Match
+
+1. Select only `Baltic Birch` into the current project.
+2. Import rows for `Baltic Birch`, `baltic birch`, and `Unknown Material`.
+3. **Pass:** exact match row succeeds; the other two rows report `material-not-found`.
+4. **Fail:** case-insensitive matching sneaks through, or missing materials are auto-created without telling the user.
+
+---
+
 ## Acceptance Criteria
 
-- [ ] Preflight: `dotnet test` reports 38 passed, 1 skipped
+- [ ] Preflight: `dotnet test` reports zero failures, with only documented placeholder skips remaining
 - [ ] Happy path: All 3 parts import as `valid`
 - [ ] Happy path: Nesting places all 7 instances on 1–2 sheets
 - [ ] Happy path: Results show sheet count, utilization, and zero unplaced items
@@ -209,6 +236,9 @@ Panel-B,12,36,0,Demo Material
 - [ ] Invalid numeric: Marked `error` with `invalid-numeric` code
 - [ ] Zero quantity: Marked `error` with `non-positive-quantity` code
 - [ ] No crashes, hangs, or silent failures on any error path
+- [ ] Phase 2 duplicate create/update rejects with `material-name-exists`
+- [ ] Phase 2 in-use delete rejects with `material-in-use`
+- [ ] Phase 2 selected-material import mismatch rejects with `material-not-found`
 
 ---
 
