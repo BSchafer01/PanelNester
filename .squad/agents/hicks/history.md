@@ -1,0 +1,12 @@
+# Hicks History
+
+## Project Context
+
+- **Requested by:** Brandon Schafer
+- **Project:** PanelNester
+- **Stack:** C#/.NET desktop host, WPF shell, WebView2 UI, React + TypeScript web app, Three.js viewer, local JSON/SQLite persistence, CsvHelper/ClosedXML import, QuestPDF reporting
+- **Description:** Local desktop tool for importing rectangular parts, nesting them by material, visualizing sheet layouts, and exporting PDF summaries.
+
+## Learnings
+
+- 2026-03-14: Initial team staffing. I own acceptance criteria, regression coverage, and reviewer verdicts.
