@@ -16,53 +16,20 @@
 - 2026-03-14: I can approve a kickoff slice once the shared contract names, a dispatcher-backed file-open→import→nest regression, and the UI's live results consumption are all executable in one build/test pass; anything less still reads like stitched placeholders.
 - 2026-03-14: Theme-refresh reviews pass faster when I separate appearance from behavior: check palette/layout tokens against the reference, then confirm import and results pages still expose the same handlers, status pills, tables, and error surfaces before trusting build/test output.
 - 2026-03-14: Smoke-guide bookkeeping has to track the validated regression gate exactly; the current baseline is 38 passed, 1 skipped, and stale counts make reviewer sign-off less trustworthy.
+- 2026-03-14: Phase 3 testing focuses on JSON serialization stability, version migration, material snapshot edge cases, and project metadata round-trip. Snapshot-first gate: projects reopen from snapshots only, no silent live-library rehydration. Final approval deferred pending Dallas Web UI Phase 3 completion.
 
-## Recent Work (2026-03-14)
+## Recent Work (2026-03-14T17:56:50Z)
 
-- ✓ Created `tests/Phase0-1-Test-Matrix.md` with PRD traceability
-- ✓ Added xUnit scaffolds to `desktop/services/domain` test projects
-- ✓ Documented contract gaps and blockers in decisions inbox
-- ✓ Extracted spec-first test scaffolding as `.squad/skills/spec-first-test-scaffolding/SKILL.md`
-- ✓ Logged team coordination to orchestration and session logs
-- ✓ Ripley completed Phase 0/1 revision; unified bridge vocabulary, demo material contract, and nesting failure codes. Tests now aligned with live integration slice. Ready for review gate.
-- ✓ Produced smoke-test guide (`.squad/smoke-test-guide.md`): four concrete test scenarios (happy path + three failure modes) with exact CSV data, expected error codes, and pass/fail criteria. Includes preflight checklist and Demo Material reference. All 36 tests passing, ready for manual verification.
-- ✓ Bishop resolved Web UI content resolution priority; decision documented in `decisions.md` as Phase 0/1 infrastructure decision
-- ✓ Reviewed Dallas's VS Code dark-theme UI refresh: validated palette alignment, confirmed workflow seams preserved, verified regression (38 passed, 1 skipped). Approved for Phase 2 commencement. Residual note: smoke-test guide test count is stale.
-- ✓ Consolidated smoke-test guide count update: synchronized `.squad/smoke-test-guide.md` preflight expectations with current validated regression gate (38 passed, 1 skipped). Merged decision inbox into `decisions.md`. Recorded orchestration and session logs.
-- ✗ Reviewed second-pass chrome cleanup: automated regression still green (`npm run build`; `dotnet test .\PanelNester.slnx` => 38 passed, 1 skipped), but supplied runtime evidence (`secondpassUI.png`) still shows blue host header/footer chrome and a light native titlebar. Rejected user-visible acceptance and handed revision ownership to Ripley for cross-layer runtime verification.
-- ✓ Reviewed Ripley's chrome revision: `theme-revision-printwindow.png` now shows a dark titlebar plus dark host header/footer chrome with the legacy blue seam removed. Spot-checks of `MainWindow.xaml`, `NativeTitleBarStyler.cs`, and the fallback page align with the runtime result, and rerun validation stayed green (`npm run build`; `dotnet test .\PanelNester.slnx` => 38 passed, 1 skipped). Approved.
-- 2026-03-14: **PHASE 2 ASSIGNMENT: Tests & Integration Review Gate**
-- ✓ Completed Phase 2 final integration review gate: reran full regression (63 total, 61 passed, 2 expected skips), verified Web UI production build, spot-checked material CRUD persistence, bridge wiring, import exact-match behavior, failure code surfacing, and Demo Material fallback paths. **Phase 2 APPROVED**. Recorded decision, orchestration log, and session log. Residual risks documented: missing Web UI e2e automation for selector/delete, one stale skipped test to retire early.
-
-## Phase 3 — Project Persistence & Material Snapshots (COMPLETE)
-
-**Ownership:** Hicks (Tests & integration review) ✅
-
-**Completed Deliverables:**
-1. ✅ `ProjectSerializerTests` — Round-trip, version handling, corrupt file handling  
-2. ✅ `ProjectServiceTests` — New/load/save flows, metadata updates  
-3. ✅ `ProjectBridgeTests` — Request/response contract compliance  
-4. ✅ Updated smoke-test guide for project workflows  
-5. ✅ Final integration review gate APPROVED  
-
-**Test Results:** 79 passed, 3 skipped ✅
-
-**Snapshot-First Review Gate:** Validated that projects reopen from snapshots only. No silent live-library rehydration. All success criteria met.
-
-**Key Validations:**
-- Version handling tested for edge cases (forward compatibility)  
-- Material snapshot behavior edge cases covered (library changes, snapshot availability)  
-- Smoke guide includes project workflows (new, save, open, metadata edit)  
-- Bridge contract compliance verified  
-
-**Next Assignments:**
-- Phase 4: XLSX import validation, inline editing, enhanced error handling  
-
-## Learnings
-
-- 2026-03-14: Initial team staffing. I own acceptance criteria, regression coverage, and reviewer verdicts.
-- 2026-03-14: Phase 0/1 test startup works best as spec-first scaffolding — one runnable smoke/contract test per seam, skipped integration tests with explicit blockers, and a matrix that maps back to success criteria.
-- 2026-03-14: Phase 3 testing focuses on JSON serialization stability, version migration, and material snapshot edge cases. Design leverages Parker's service contracts early (Day 1) and integrates Bishop's bridge messages by Day 3 for final gate.
+- ✓ Created Phase 3 Persistence/Snapshot Test Matrix (`tests/Phase3-Persistence-Matrix.md`)
+- ✓ Added `ProjectSerializerTests` — round-trip, version handling, corrupt file handling
+- ✓ Added `ProjectServiceTests` — new/load/save flows, metadata updates
+- ✓ Added `ProjectBridgeTests` — request/response contract compliance  
+- ✓ Updated smoke-test guide with project workflows (create/open/save/metadata)
+- ✓ Established snapshot-first review gate (material snapshots captured at creation, no live-library rehydration)
+- ✓ All 80 tests passing; 2 documented skips
+- ✓ **BLOCKER IDENTIFIED:** `npm run build` blocked on Dallas finishing Web UI changes in `src/PanelNester.WebUI/src/App.tsx` and `src/PanelNester.WebUI/src/components/AppShell.tsx`
+- ✓ Recorded orchestration log (`.squad/orchestration-log/2026-03-14T17-56-50Z-hicks.md`)
+- ✓ **PHASE 3 COMPLETE (Backend)** — Snapshot-first review gate active; final approval deferred pending Web UI
 
 ## Phase 2 Scope (Material Library Tests & Verification)
 
