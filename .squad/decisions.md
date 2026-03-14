@@ -448,6 +448,148 @@ Update `.squad/smoke-test-guide.md` preflight expectations to reflect the curren
 
 ---
 
+---
+
+## Second-Pass Theme Revision Decisions
+
+### Decision: Bishop Second-Pass Titlebar Theming
+
+**Author:** Bishop  
+**Date:** 2026-03-14  
+**Status:** Proposed
+
+#### Decision
+
+- Keep the desktop window on standard WPF chrome and extend the dark theme with native DWM titlebar attributes instead of building a custom titlebar.
+- Implementation: enable immersive dark mode with the Windows 10 legacy/current attribute fallback, then apply caption, text, and border colors that match the host's neutral VS Code-like shell surfaces.
+- Rationale: this preserves native move/resize behavior and keeps the change low-risk while removing the last blue-tinted host chrome mismatch with the Web UI.
+
+---
+
+### Decision: Neutralize Second-Pass Web UI Placeholder Accents
+
+**Author:** Dallas  
+**Date:** 2026-03-14  
+**Status:** Proposed
+
+#### Context
+
+The remaining obvious header/footer bars in the latest screenshot appear to come from the desktop host, but the Web UI still had a couple of blue-leaning accents that made the dark shell feel less cohesive.
+
+#### Decision
+
+Keep the Phase 0/1 Web UI on the existing VS Code dark surface stack, but make placeholder/supporting chrome neutral where it is not carrying semantic meaning:
+
+- capability tokens use muted text plus neutral borders instead of blue text
+- the viewer placeholder sheet outline uses subtle neutral border/fill instead of a blue dashed accent
+- active, navigation, and action accents stay unchanged so operator affordances remain obvious
+
+#### Consequences
+
+- The Web UI reads closer to the native VS Code dark shell without churn to layout or behavior.
+- The desktop titlebar/footer mismatch remains a host-owned follow-up rather than a web styling problem.
+
+---
+
+### Decision: Hicks Second-Pass Theme Review
+
+**Author:** Hicks  
+**Date:** 2026-03-14  
+**Status:** Rejected
+
+#### Context
+
+Reviewed the second-pass chrome cleanup for the remaining header/footer blue styling and the request to carry the dark theme into the desktop titlebar.
+
+#### Verification
+
+1. `npm run build` in `src\PanelNester.WebUI` ✅
+2. `dotnet test .\PanelNester.slnx` ✅ — 38 passed, 1 skipped
+3. Runtime evidence review via `secondpassUI.png` ❌
+
+#### Verdict
+
+Reject this pass for user-visible acceptance.
+
+#### Rationale
+
+1. The supplied runtime screenshot still shows the desktop host header and footer in the older blue chrome instead of the intended neutral dark surfaces.
+2. The native titlebar is still light/white in the screenshot, so the dark theme is not yet carrying into the titlebar in the actual rendered app.
+3. Source changes in `MainWindow.xaml`, `MainWindow.xaml.cs`, `NativeTitleBarStyler.cs`, and the Web UI stylesheet are directionally correct, but acceptance has to follow the rendered result, not code intent.
+
+#### Required Follow-up
+
+- Reproduce the running desktop host after a fresh build and confirm the neutral dark chrome is what actually ships.
+- Verify the native titlebar styling path is effective on the target runtime/OS rather than only present in source.
+- Provide updated runtime evidence after the rebuilt host is launched.
+
+#### Revision Owner
+
+Per reviewer lockout, route the revision to **Ripley** for cross-layer runtime verification and rework, not the original authors.
+
+---
+
+### Decision: Host-Owned Chrome Must Be Themed In Desktop Layer
+
+**Author:** Ripley  
+**Date:** 2026-03-14  
+**Status:** Implemented
+
+#### Context
+
+The prior UI polish pass updated the React shell, but reviewer evidence still showed a blue desktop header/footer and a light system title bar. Those surfaces are not fully controlled by the Web UI bundle.
+
+#### Decision
+
+- Treat title bar, top host band, and bottom status band as desktop-owned chrome and theme them in WPF/C#.
+- Keep the Web UI on the VS Code dark palette, but also retheme the bundled desktop `WebApp` fallback so the host does not regress to legacy blue when `src\PanelNester.WebUI\dist` is missing or stale.
+- Use explicit dark caption colors through `NativeTitleBarStyler` and a custom WPF title bar so runtime chrome stays dark even outside the WebView surface.
+
+#### Consequences
+
+- Theme acceptance for PanelNester must be verified at runtime across both WebView content and host chrome.
+- Future polish work cannot assume CSS-only changes are sufficient when the visible surface spans WPF and WebView2.
+- The fallback host page remains a first-class verification seam and must stay visually aligned with the shipped shell.
+
+---
+
+### Decision: Ripley Second-Pass Theme Cleanup Design Review & Seams
+
+**Author:** Ripley  
+**Date:** 2026-03-14  
+**Status:** Complete (Archived)
+
+#### Scope
+
+Header, footer, and titlebar dark-blue styling consolidation.
+
+#### Key Findings
+
+1. **Web UI header** already correctly styled with `var(--vsc-bg-sidebar)` (#252526)
+2. **WPF footer** already aligned with dark theme (#111827)
+3. **Blue accent** visible in screenshots is viewer placeholder outline (Phase 5 semantic cue, intentional)
+4. **Titlebar** is OS-level chrome requiring WPF-layer dark mode attributes, not CSS-only change
+
+#### Recommendations Executed
+
+- **Dallas:** No Web UI header changes needed; placeholder accent is intentional design
+- **Bishop:** Apply native dark titlebar via DWM attributes; extend client area if Option B selected
+- **Both:** Parallel-safe work with low risk
+
+#### Verification
+
+All recommendations implemented and verified:
+- `npm run build` passed
+- `dotnet test` passed (38 passed, 1 skipped)
+- Runtime screenshot shows dark titlebar and neutral host surfaces
+- Bundled fallback page rethemed to match shipped UI
+
+#### Rationale
+
+Clarified surface ownership: titlebar/host chrome are desktop-owned; Web UI CSS is not sufficient for rendering changes outside WebView bounds. Detailed surface inventory and implementation plan enabled clean parallel work and reduced rework risk.
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus
