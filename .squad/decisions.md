@@ -157,14 +157,72 @@ Phase 1 needs a stable backend seam before material CRUD, persistence, and the v
 
 ---
 
-### Design Review: Phase 0 + Phase 1 Kickoff
+### Decision: Hicks Phase 0/1 Batch Review
+
+**Author:** Hicks  
+**Date:** 2026-03-14  
+**Status:** Rejected for next-step integration
+
+#### Context
+
+Initial Phase 0/1 batch was not reproducibly verifiable due to bridge vocabulary mismatch, missing live integration, and nesting failure code drift.
+
+#### Verdict & Rationale
+
+1. **Solution targets .NET 10 but verification stops at restore/build** — no .NET tests can run yet
+2. **Bridge vocabulary mismatch:** Desktop host exposes `host.ready`, `dialog.openFile`, `import.csv` while Web UI initializes with `bridge-handshake` and `open-file-dialog`
+3. **Vertical slice remained stubbed:** File-open, CSV import, and nesting are `not-ready`; React shell renders placeholder data instead of live invocations
+4. **Nesting failure codes drifted:** Service reports `part-too-large` and `no-space` instead of agreed `outside-usable-sheet`, `no-layout-space`, `invalid-input`, `empty-run`
+
+#### Team Impact
+
+- Do not call this batch an integrated Phase 0/1 slice
+- Close bridge contract drift before more UI or viewer work lands
+- Land one real import → nest → display round-trip before expanding scope
+
+---
+
+### Decision: Ripley Phase 0/1 Revision
 
 **Author:** Ripley  
 **Date:** 2026-03-14  
-**Status:** Active  
-**Scope:** Foundation scaffold + vertical slice handoff
+**Status:** Proposed for merge
 
-See `.squad/decisions/inbox/ripley-phase0-1-design-review.md` (comprehensive architectural guidance on solution structure, seams, contracts, risks, and success criteria).
+#### Context
+
+Hicks rejected the initial batch because the desktop host, Web UI, and services still behaved like parallel placeholders instead of one integrated slice. Contract drift was the main failure mode.
+
+#### Decision
+
+Close Phase 0 and Phase 1 on one live vertical slice with unified vocabulary and failure codes:
+
+1. **One bridge vocabulary** across C# and TypeScript:
+   - `bridge-handshake`
+   - `open-file-dialog`
+   - `import-csv`
+   - `run-nesting`
+   - `*-response` for correlated replies
+
+2. **One demo material contract**:
+   - `Demo Material`
+   - `96" x 48"` sheet
+   - `0.125"` default spacing
+   - `0.5"` default edge margin
+   - `0.0625"` demo kerf in the Web UI flow
+
+3. **One bounded nesting failure vocabulary**:
+   - `outside-usable-sheet`
+   - `no-layout-space`
+   - `invalid-input`
+   - `empty-run`
+
+4. **No placeholder-only host seams** — desktop host must actually open file dialog, invoke CSV import, invoke nesting, and return live payloads.
+
+#### Consequences
+
+- Bridge layer favors domain import/nesting contracts directly, reducing DTO drift
+- Empty runs treated as run-level failures; invalid rows collapse to `invalid-input`; oversize/heuristic misses stay distinct
+- Phase 0/1 review gate focuses on integrated slice and its tests, not deferred viewer/reporting
 
 ---
 

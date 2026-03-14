@@ -12,6 +12,7 @@
 - 2026-03-14: Initial team staffing. I own acceptance criteria, regression coverage, and reviewer verdicts.
 - 2026-03-14: Phase 0/1 test startup works best as spec-first scaffolding — one runnable smoke/contract test per seam, skipped integration tests with explicit blockers, and a matrix that maps back to success criteria.
 - 2026-03-14: Phase 0/1 test deliverables complete. 35 tests (26 passing, 9 skipped). Test matrix created, xUnit scaffolds deployed, spec-first approach extracted as reusable skill.
+- 2026-03-14: Cross-layer kickoff reviews need three early gates before I trust the slice: a runnable toolchain, one shared bridge vocabulary across host and Web UI, and one non-placeholder round-trip through the real seams.
 
 ## Recent Work (2026-03-14)
 
@@ -20,3 +21,4 @@
 - ✓ Documented contract gaps and blockers in decisions inbox
 - ✓ Extracted spec-first test scaffolding as `.squad/skills/spec-first-test-scaffolding/SKILL.md`
 - ✓ Logged team coordination to orchestration and session logs
+- ✓ Ripley completed Phase 0/1 revision; unified bridge vocabulary, demo material contract, and nesting failure codes. Tests now aligned with live integration slice. Ready for review gate.
