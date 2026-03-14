@@ -346,9 +346,213 @@ Phase 4 is the first slice that can damage trust across three already-approved s
 
 ---
 
+## Phase 5 Decisions
+
+### Decision: Ripley — Phase 5 Results Viewer & PDF Reporting Design Review
+
+**Author:** Ripley | **Date:** 2026-03-14 | **Status:** Proposed
+
+#### Context
+
+Phase 4 (full import pipeline) is approved and complete: 91 passing tests, 2 documented skips, 0 failures. The PRD's next boundary is **Results Viewer & PDF Reporting** (§6.6, §6.7). The codebase is ready: nesting runs against validated/edited import data, results persist in `.pnest` projects, and the results page has a Three.js placeholder waiting to go live.
+
+**Critical gap identified during review:** The current nesting pipeline is **single-material only**. `run-nesting` takes one `Material`, one set of parts, and one `kerfWidth`. The PRD expects a single "run nesting" action that produces per-material summaries and sheet layouts across all imported materials (§6.6: "For each material, show…"). Neither the viewer nor the PDF can meet PRD spec without multi-material orchestration. Phase 5 must include this prerequisite.
+
+#### Phase 5 Slice Definition (In Scope)
+
+1. **Multi-Material Batch Nesting Orchestration** — Groups valid parts by material name, resolves each material from the library, calls `INestingService.NestAsync()` per group, and aggregates results.
+2. **Three.js 2D Sheet Viewer** — Interactive sheet visualization. Orthographic 2D camera, sheet outline with edge margins, part rectangles with labels, zoom/pan, hover tooltips, click-to-inspect.
+3. **QuestPDF Report Service** — Backend PDF generation. Includes header information, per-material summary tables, simplified 2D sheet diagrams (rectangles matching placement coordinates), unplaced items list, and user-editable notes. Report exported via native save dialog.
+4. **Report Page UI** — New React page with editable report fields (company name, report title, project/job name, project/job number, date, notes). Pre-fills from project metadata. Export button triggers PDF generation + native save dialog.
+5. **Updated Results Page** — Refactored to display multi-material results: per-material summary cards (PRD §6.6), sheet browser per material, aggregate totals, and the live Three.js viewer replacing the placeholder.
+
+#### New Domain Models
+
+```csharp
+public sealed record MaterialNestResult
+{
+    public string MaterialName { get; init; } = string.Empty;
+    public Material MaterialSpec { get; init; } = new();
+    public NestResponse Result { get; init; } = new();
+}
+
+public sealed record BatchNestResponse
+{
+    public bool Success { get; init; }
+    public IReadOnlyList<MaterialNestResult> MaterialResults { get; init; }
+        = Array.Empty<MaterialNestResult>();
+    public int TotalSheets { get; init; }
+    public int TotalPlaced { get; init; }
+    public int TotalUnplaced { get; init; }
+    public decimal OverallUtilization { get; init; }
+}
+
+public sealed record ReportSettings
+{
+    public string CompanyName { get; init; } = string.Empty;
+    public string ReportTitle { get; init; } = string.Empty;
+    public string ProjectJobName { get; init; } = string.Empty;
+    public string ProjectJobNumber { get; init; } = string.Empty;
+    public DateTime? ReportDate { get; init; }
+    public string Notes { get; init; } = string.Empty;
+}
+```
+
+#### New Contracts
+
+```csharp
+public interface IBatchNestingService
+{
+    Task<BatchNestResponse> NestAllAsync(
+        IReadOnlyList<PartRow> parts,
+        IReadOnlyList<Material> materials,
+        decimal kerfWidth,
+        CancellationToken cancellationToken = default);
+}
+
+public interface IReportService
+{
+    Task<byte[]> GenerateReportAsync(
+        Project project,
+        BatchNestResponse nestingResult,
+        ReportSettings reportSettings,
+        CancellationToken cancellationToken = default);
+}
+```
+
+#### Bridge Vocabulary (Additive)
+
+| Request Type | Response Type | Purpose |
+|---|---|---|
+| `run-batch-nesting` | `run-batch-nesting-response` | Run nesting across all materials at once |
+| `export-pdf-report` | `export-pdf-report-response` | Generate PDF and save via native dialog |
+| `update-report-settings` | `update-report-settings-response` | Store edited report fields in project |
+
+#### Seam Ownership
+
+- **Parker:** Domain models (`BatchNestResponse`, `MaterialNestResult`, `ReportSettings`), `IBatchNestingService`, `IReportService`, `BatchNestingService` implementation, `QuestPdfReportService` implementation
+- **Bishop:** Bridge messages (`run-batch-nesting`, `export-pdf-report`, `update-report-settings`), file dialog for PDF save, handler registration
+- **Dallas:** TypeScript contracts, `SheetViewer.tsx` component (orthographic 2D), Results page refactor, Report page UI, bridge invocations
+- **Hicks:** Batch nesting tests, PDF generation tests, bridge round-trip tests, integration gate
+
+#### Consequences
+
+- Nesting becomes multi-material in one action, matching the PRD's primary workflow (§7.1)
+- Three.js viewer replaces the deferred placeholder with interactive sheet visualization
+- PDF reporting enables the complete user workflow: import → nest → view → export
+- Bridge vocabulary grows additively (3 new messages); no breaking changes to Phase 0–4
+- Report settings persist in project files without a version bump
+- Phase 6 (Polish & Edge Cases) can focus on viewer refinements, PDF fidelity tuning, and performance optimization
+
+---
+
+### Decision: Parker — Phase 5 Domain Implementation
+
+**Author:** Parker | **Date:** 2026-03-14 | **Status:** Proposed
+
+#### Decision
+
+- Report settings live in `ProjectSettings.ReportSettings` and are persisted in `.pnest`.
+- When a report setting field is `null`, it is populated from project metadata (`CustomerName`, `ProjectName`, `ProjectNumber`, `Date`, `Notes`) with `ReportTitle` defaulting to `{ProjectName} Nesting Report`.
+- `BatchNestResponse.LegacyResult` is set to the selected material's result (if provided), otherwise the first result in deterministic material-name order.
+
+#### Consequences
+
+- Keeps editable report fields explicit, project-scoped, and deterministic without a version bump.
+- Preserves a stable single-result payload for backward compatibility while enabling multi-material batches.
+
+---
+
+### Decision: Bishop — Phase 5 Bridge Wiring
+
+**Author:** Bishop | **Date:** 2026-03-14 | **Status:** Proposed
+
+#### Decision
+
+- Phase 5 desktop bridge stays additive: `run-batch-nesting` uses Parker's `BatchNestRequest`/`BatchNestResponse` directly, while `update-report-settings` and `export-pdf-report` get explicit host-owned request/response envelopes.
+- `update-report-settings` routes through `IProjectService.UpdateMetadataAsync` with the existing project metadata unchanged so report fields keep Parker's metadata-derived defaults and persist without bumping the `.pnest` version.
+- `export-pdf-report` is host-owned end to end: the desktop side builds `ReportData`, opens the native save dialog with an explicit `.pdf` default extension/filter, and renders QuestPDF output locally so the web layer never owns file I/O or PDF bytes.
+
+#### Consequences
+
+- Bridge contracts remain clean and ownership boundaries explicit.
+- Report field synchronization stays deterministic without complex sync logic.
+- PDF generation and file I/O remain fully under desktop host control.
+
+---
+
+### Decision: Dallas — Phase 5 Results UI
+
+**Author:** Dallas | **Date:** 2026-03-14 | **Status:** Proposed
+
+#### Decision
+
+- The Phase 5 results viewer ships behind a standalone `SheetViewer` component with pure data props (`sheet`, `placements`, `selectedPlacementId`, `onSelectPlacement`) and an SVG-based orthographic renderer for now.
+- Report settings live in explicit Web UI project state and save with `ProjectSettings.ReportSettings`; host-side `update-report-settings` and `export-pdf-report` are additive sync/export seams, not alternate sources of truth.
+
+#### Consequences
+
+- The SVG renderer keeps sheet geometry deterministic and easy to compare against the tables while the bridge/reporting seams settle.
+- Bishop/Parker can swap the renderer implementation later without changing the results page contract, as long as the `SheetViewer` props stay stable.
+- Hicks can review one consistent story across results tables, viewer geometry, project save/open, and PDF export inputs.
+
+---
+
+### Decision: Hicks — Phase 5 Review Gate (Rejection)
+
+**Author:** Hicks | **Date:** 2026-03-14 | **Status:** REJECTED
+
+#### Context
+
+Phase 5 implementation teams (Parker, Bishop, Dallas) completed their deliverables for results viewer, PDF reporting, and report settings. Hicks conducted the full integrated review gate against the four non-negotiable gates defined in Phase 5 design review.
+
+#### Rejection Verdict
+
+**REJECTED** — Phase 5 does not clear all four reviewer gates.
+
+**What Passed:**
+- ✅ **Rendering Fidelity:** Three.js viewer displays placement geometry with zoom/pan/hover/click
+- ✅ **Multi-Material Determinism:** Batch nesting runs each material independently, results merge consistently, preserved in `LastBatchNestingResult`
+- ✅ **Settings Persistence:** Report settings editable, normalized from project metadata, serialize with project
+- ⚠️ **Bridge Coverage:** Round-trip tested for success paths (`run-batch-nesting`, `update-report-settings`, `export-pdf-report`)
+
+**Why Rejected:**
+1. **PDF Sheet Visuals Missing** (Critical) — PRD §6.7 requires sheet visuals in PDF report. Current `QuestPdfReportExporter` renders text tables only, no sheet diagrams/geometry. PDF accuracy gate **FAILED**.
+2. **Export Failure-Path Coverage Insufficient** (Critical) — Phase 5 matrix explicitly calls for repeatable coverage of:
+   - Cancelled PDF save dialog
+   - File-write / export failure
+   - No-result export attempt
+   Current tests only cover success path. Export reliability gate **FAILED**.
+
+#### Locked-Out Agents
+
+**Revision owner must be Ripley** (or another non-author not in original Phase 5 implementation set).
+
+- Parker locked out
+- Bishop locked out
+- Dallas locked out
+
+#### Required Corrections Before Re-Review
+
+1. Add actual PDF sheet visuals derived from same placement/sheet payload as Three.js viewer
+2. Add repeatable coverage for:
+   - Cancelled PDF save dialog
+   - File-write / export failure
+   - No-result export attempt
+3. Re-run baseline: `dotnet test .\PanelNester.slnx` + `npm run build`
+
+#### Consequences
+
+- Phase 5 remains open pending correction cycle. Phase 6 should **not** start until PDF/reporting slice clears this gate.
+- Ripley may authorize conditional approval if architecture review passes.
+- Teams have clear reviewer feedback and concrete next steps for rework.
+
+---
+
 ## Historical Reference
 
 Earlier Phase 0, Phase 1, and Phase 2 decisions have been archived to `decisions-archive.md` for historical reference while maintaining operational focus on Phase 3 and 4. All archived decisions remain valid and in-scope for future phases.
 
 **Archive Date:** 2026-03-14T17:56:50Z
 **Phase 4 Decisions Added:** 2026-03-14T18:34:43Z
+**Phase 5 Decisions Added:** 2026-03-14T19:59:29Z

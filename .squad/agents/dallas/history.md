@@ -102,10 +102,57 @@
 - ✓ **Web UI build passing**
 - ✓ **PHASE 3 UNBLOCKED:** Hicks' review gate can now proceed with complete Web UI implementation
 
+## Phase 5 — Results Viewer & PDF Reporting (REJECTED ❌)
+
+**Ownership:** Dallas (WebUI) — LOCKED OUT
+
+**Assignment:** Results page refactor, Three.js viewer component, report page UI
+
+**Implementation Status (2026-03-14T19:59:29Z):**
+- ✅ `SheetViewer` component with orthographic 2D rendering
+- ✅ Results page refactored for multi-material display (per-material cards, summary totals)
+- ✅ Report page with editable fields (company, title, project name/number, date, notes)
+- ✅ Bridge handlers for `run-batch-nesting`, `update-report-settings`, `export-pdf-report`
+- ✅ TypeScript contracts for `BatchNestResponse`, `MaterialNestResult`, `ReportSettings`
+- ✅ Three.js integration (`npm install three @types/three`)
+- ✅ Zoom/pan/hover/click interactions operational
+- ✅ Production build passing
+- ✅ Zero regressions to Phase 0–4 UI flows
+
+**Rejection Reasons:**
+1. **PDF Sheet Visuals Missing** (Critical) — Viewer renders correctly, but PDF exports lack geometry; PRD §6.7 requires sheet diagrams.
+2. **Export Failure-Path Coverage Insufficient** (Critical) — Phase 5 matrix calls for tests covering cancelled save, file-write failure, and no-result scenarios.
+
+**Locked Out:** Dallas cannot participate in revision cycle. Ripley (or non-author reviewer) owns next phase.
+
+## Phase 4 — Full Import Pipeline UI (COMPLETE ✅)
+
+**Ownership:** Dallas (WebUI) ✅
+
+**Completed Deliverables:**
+1. ✅ Import page refactor supporting native file picker
+2. ✅ Inline row editing controls (update, delete, add part rows)
+3. ✅ Live validation feedback on row edits
+4. ✅ Filter by material and validation status
+5. ✅ Column sorting
+6. ✅ Raw text field visibility for error context
+7. ✅ Preserved `lengthText`, `widthText`, `quantityText` display in editor
+
+**Test Results:**
+- Web UI production build ✓
+- All integration tests passing (93 total, 2 skipped) ✅
+
+**Key Achievement:** Import UI now supports both CSV and XLSX with inline editing. Validation feedback is immediate and specific (error codes, reason descriptions). Operators can correct invalid rows in-app without returning to their spreadsheet.
+
+**Integration Gate:** Phase 4 cleared all four non-negotiable gates (regression safety, format parity, edit persistence, failure clarity).
+
+---
+
 ## Learnings
 
 - 2026-03-14: Initial team staffing. I own web UI flows, viewer behavior, and operator-facing clarity.
 - 2026-03-14: Phase 0/1 UI scaffold works best as a contract-first shell—typed bridge DTOs, a `window.hostBridge.receive(...)` seam, and read-only pages keep Bishop/Parker unblocked without fake product behavior.
 - 2026-03-14: Phase 3 introduces project-scoped UI: a metadata editor, dirty/clean state tracking, and snapshotted materials. Design keeps page components clean by consuming stable bridge contracts from Bishop while data flows through app-shell state.
 - 2026-03-14: Project lifecycle UI requires two-part state management: session-scoped state (current project metadata, dirty flag) and workflow state (navigating vs saving). Material snapshots are separate from live library to preserve historical configuration clarity.
+- 2026-03-14T19:59:29Z: Phase 5 rejection: Results viewer and report UI are visually complete, but missing critical reviewer evidence for PDF visual fidelity (sheet geometry rendering) and export reliability (failure paths). UI-layer completeness is necessary but not sufficient for integrated gate sign-off.
 

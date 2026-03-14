@@ -64,9 +64,32 @@
 - Dallas: UI integration (show saved vs. pending snapshots)  
 - Bishop: Desktop bridge implementation  
 
+## Phase 5 — Results Viewer & PDF Reporting (REJECTED ❌)
+
+**Ownership:** Parker (Domain/Services foundation) — LOCKED OUT
+
+**Assignment:** Batch nesting service, PDF report generation, report settings persistence
+
+**Implementation Status (2026-03-14T19:59:29Z):**
+- ✅ `BatchNestResponse`, `MaterialNestResult`, `ReportSettings` models delivered
+- ✅ `IBatchNestingService` and `IReportService` interfaces implemented
+- ✅ `BatchNestingService` (delegates to shelf algorithm per-material) operational
+- ✅ `QuestPdfReportService` (text tables, unplaced items, notes sections) deployed
+- ✅ Report settings persist in project files without version bump
+- ✅ Multi-material determinism validated; batch results merge correctly
+- ✅ 99 tests passing, 2 skipped, 0 failures
+- ✅ Zero regressions to Phase 0–4 paths
+
+**Rejection Reasons:**
+1. **PDF Sheet Visuals Missing** (Critical) — Current `QuestPdfReportExporter` renders text tables only; PRD §6.7 requires sheet diagrams/geometry.
+2. **Export Failure-Path Coverage Insufficient** (Critical) — Phase 5 matrix calls for cancelled save dialog, file-write failure, and no-result export tests; current coverage only validates success path.
+
+**Locked Out:** Parker cannot participate in revision cycle. Ripley (or non-author reviewer) owns next phase.
+
 ## Learnings
 
 - 2026-03-14: Initial team staffing. I own import, validation, domain services, and the nesting engine.
 - 2026-03-14: Phase 0/1 backend contracts stay cleaner if import keeps quantity on compact `PartRow` records, nesting expands instances just-in-time, and all sheet geometry stays in `decimal` with kerf treated as added spacing instead of part resizing.
 - 2026-03-14: Parallel agent execution and decision-driven architecture allow teams to de-risk at seams early and move fast once contracts stabilize.
 - 2026-03-14: Phase 3 extends Phase 2 architecture: projects persist as JSON files with metadata, settings, and material snapshots. Design keeps repo/serializer seams clean by versioning the schema early and deferring XLSX/multi-material/export to later phases.
+- 2026-03-14T19:59:29Z: Phase 5 rejection: PDF reporting requires both sheet visuals (geometry rendering) and comprehensive failure-path coverage. Success-path validation is necessary but not sufficient for reviewer sign-off on mission-critical export workflows.

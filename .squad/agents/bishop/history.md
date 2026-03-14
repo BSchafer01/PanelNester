@@ -35,9 +35,61 @@
 - 2026-03-14: Initial team staffing. I own desktop host integration, local persistence wiring, and export plumbing.
 - 2026-03-14: Phase 0/1 host scaffolding works best when the desktop shell prefers a future `src\PanelNester.WebUI\dist` build but still ships a bundled placeholder page and a `window.hostBridge.receive(...)` receiver shim so the bridge stays stable before the real UI lands.
 - 2026-03-14: If the desktop output bundles `WebApp`, content resolution must search every ancestor for `src\PanelNester.WebUI\dist` before accepting a placeholder; otherwise running from `bin\Debug\net10.0-windows` masks a valid real UI build.
+## Phase 5 — Results Viewer & PDF Reporting (REJECTED ❌)
+
+**Ownership:** Bishop (Desktop bridge layer) — LOCKED OUT
+
+**Assignment:** Bridge message types, PDF export handlers, native save dialog
+
+**Implementation Status (2026-03-14T19:59:29Z):**
+- ✅ Bridge contracts for `run-batch-nesting`, `export-pdf-report`, `update-report-settings` delivered
+- ✅ Handler registrations wired to Parker's services
+- ✅ Native `.pdf` file save dialog integrated
+- ✅ Report settings serialization to project files
+- ✅ 99 tests passing, 2 skipped, 0 failures
+- ✅ Zero regressions to Phase 0–4 bridge vocabulary
+
+**Rejection Reasons:**
+1. **PDF Sheet Visuals Missing** (Critical) — Current implementation lacks geometry rendering; PRD §6.7 requires sheet visuals.
+2. **Export Failure-Path Coverage Insufficient** (Critical) — Phase 5 matrix calls for tests covering cancelled save, file-write failure, and no-result scenarios.
+
+**Locked Out:** Bishop cannot participate in revision cycle. Ripley (or non-author reviewer) owns next phase.
+
+## Phase 4 — Full Import Pipeline (COMPLETE ✅)
+
+**Ownership:** Bishop (Desktop bridge layer) ✅
+
+**Assignment:** Import bridge extensions (XLSX, file dispatcher), part-row editing handlers
+
+**Delivered (2026-03-14T19:12:06Z):**
+1. ✅ `import-file` message type supporting both CSV and XLSX with optional file-picker path
+2. ✅ File dialog integration with explicit CSV/XLSX filter
+3. ✅ `add-part-row`, `update-part-row`, `delete-part-row` message types
+4. ✅ Handler wiring to Parker's `IPartEditorService`
+5. ✅ Full `ImportResponse` returned after each edit operation (no partial updates)
+6. ✅ Preserved raw text field handling for validation error context
+7. ✅ Backward compatibility: `import-csv` message remains functional
+
+**Test Results:**
+- `dotnet test PanelNester.slnx` → 93 passed, 2 skipped, 0 failures ✅
+- Bridge round-trip tests: CSV/XLSX import, row add/edit/delete, error handling ✅
+- All Phase 0–3 bridge messages continue working without regression ✅
+
+**Key Achievement:** Import pipeline unified under one contract (`import-file`); CSV and XLSX share identical validation path via Parker's revalidation service. Inline editing operational with full revalidation after each change.
+
+**Integration Gate:** Phase 4 cleared all four non-negotiable gates (regression safety, format parity, edit persistence, failure clarity).
+
+---
+
+## Learnings
+
+- 2026-03-14: Initial team staffing. I own desktop host integration, local persistence wiring, and export plumbing.
+- 2026-03-14: Phase 0/1 host scaffolding works best when the desktop shell prefers a future `src\PanelNester.WebUI\dist` build but still ships a bundled placeholder page and a `window.hostBridge.receive(...)` receiver shim so the bridge stays stable before the real UI lands.
+- 2026-03-14: If the desktop output bundles `WebApp`, content resolution must search every ancestor for `src\PanelNester.WebUI\dist` before accepting a placeholder; otherwise running from `bin\Debug\net10.0-windows` masks a valid real UI build.
 - 2026-03-14: Phase 2 material library bridge was cleanly integrated by consuming `IMaterialRepository` interface while materializing CsvImport and Bridge round-trip specs.
 - 2026-03-14: Phase 3 extends the bridge with project lifecycle messages. Design keeps handler seams clean by consuming stable `IProjectService` interface from Parker while Dallas consumes the same bridge contracts on the UI side. Material snapshots captured at project creation preserve nesting configuration across sessions.
 - 2026-03-14T17:56:50Z: **PHASE 3 COMPLETE** — Project bridge contracts, handlers, service integration, and snapshot preservation all delivered and tested (80 passing, 2 skips).
+- 2026-03-14T19:59:29Z: Phase 5 rejection: Export workflows demand both visual completeness (sheet diagrams) and comprehensive error-path coverage (cancelled saves, file-write failures). Bridge contracts alone are insufficient without proof of mission-critical reliability pathways.
 
 ## Recent Work (2026-03-14T18:14:59Z)
 

@@ -75,27 +75,49 @@
 
 **Ownership:** Hicks (Tests and integration review gate)
 
-**Gate Status (2026-03-14T19:23:22Z):** DESIGN REVIEW COMPLETE — Phase 5 ready to implement
+**Gate Status (2026-03-14T19:23:22Z):** DESIGN REVIEW COMPLETE → (2026-03-14T19:59:29Z) INTEGRATED REVIEW: REJECTED ❌
 
 **Four Non-Negotiable Review Gates:**
-1. **Rendering fidelity** — Three.js viewer displays all materials with correct colors, geometry, and user interactions
-2. **PDF accuracy** — QuestPDF reports include all nesting results, settings, and cut lists with correct layout and pagination
-3. **Multi-material determinism** — Each material independently runs shelf algorithm, results merge consistently
-4. **Settings persistence** — Report settings save/load with project, PDF generation uses persisted values
+1. **Rendering fidelity** — Three.js viewer displays all materials with correct colors, geometry, and user interactions ✅ PASSED
+2. **PDF accuracy** — QuestPDF reports include sheet visuals matching placement coordinates ❌ FAILED (missing geometry)
+3. **Multi-material determinism** — Each material independently runs shelf algorithm, results merge consistently ✅ PASSED
+4. **Settings persistence** — Report settings save/load with project, PDF generation uses persisted values ✅ PASSED
 
-**Test Coverage Plan:**
-- Three.js Rendering Tests: mesh generation, material-color mapping, camera framing, user interaction (pan/zoom/rotate)
-- PDF Generation Tests: content layout, section ordering, field population, multi-page handling, table rendering
-- Multi-Material Nesting Tests: material isolation, deterministic merge, shelf algorithm per-material
-- Report Settings Tests: CRUD operations, project persistence, PDF generation integration
-- Bridge Round-Trip Tests: `generate-pdf-report`, `get-report-settings`, `update-report-settings`
-- Integration Tests: end-to-end results workflow from nesting completion through PDF export
+**Test Results (2026-03-14T19:59:29Z):**
+- `dotnet test .\PanelNester.slnx` → **99 passed, 2 skipped, 0 failures**
+- `npm run build` → **passed**
+- Bridge round-trip tests: `run-batch-nesting`, `update-report-settings`, `export-pdf-report` (success paths only)
+- Integration tests: multi-material nesting, project persistence, Three.js viewer rendering
 
-**Deliverables:**
-1. Phase 5 Test Matrix (`tests/Phase5-Results-Viewer-PDF-Reporting-Test-Matrix.md`) — ✓ COMPLETE
-2. Smoke Test Guide Phase 5 Extension — ✓ COMPLETE
-3. Service/Bridge/Three.js tests (parametrized against Parker contracts) — Ready for Batch 1
-4. Integration tests — Ready for Batch 3
+**Rejection Verdict:**
+
+Two critical gaps prevent gate clearance:
+
+1. **PDF Sheet Visuals Missing (Critical)** — PRD §6.7 requires sheet visuals in PDF reports. Current `QuestPdfReportExporter` renders text tables of placements and unplaced items but **does not** render sheet diagrams/geometry. That fails the PDF accuracy gate.
+
+2. **Failure-Surface Coverage Too Thin (Critical)** — Phase 5 matrix explicitly calls for repeatable coverage of:
+   - Cancelled PDF save dialog
+   - File-write / export failure
+   - No-result export attempt
+   Current tests only cover the success path. Export reliability cannot be claimed without failure-path evidence.
+
+**Locked-Out Agents:**
+- Parker (revision locked)
+- Bishop (revision locked)
+- Dallas (revision locked)
+- Revision owner: Ripley (or non-author reviewer) must authorize next phase
+
+**Required Corrections Before Re-Review:**
+1. Add actual PDF sheet visuals (QuestPDF Canvas rectangles matching Three.js placement payload)
+2. Add repeatable test coverage for export failure paths
+3. Re-run baseline: `dotnet test .\PanelNester.slnx` + `npm run build`
+
+**Next Boundary:**
+- Phase 5 remains open pending correction cycle
+- Phase 6 should **not** start until Phase 5 gate clears
+- Ripley owns authorization for revision architect and timeline
+
+---
 
 **Phase 2 Scope (Material Library Tests & Verification)
 
