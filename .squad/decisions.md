@@ -321,6 +321,60 @@ Produce `.squad/smoke-test-guide.md` with:
 
 ---
 
+### Decision: VS Code Dark Theme for Web UI
+
+**Author:** Dallas  
+**Date:** 2026-03-14  
+**Status:** Implemented
+
+#### Context
+
+Before starting Phase 2 material CRUD, Brandon requested the Web UI be restyled to match VS Code's dark theme for a more professional, IDE-like feel.
+
+#### Decision
+
+Restyle the Phase 0/1 Web UI to adopt VS Code dark theme conventions without introducing a theme framework or changing Phase 0/1 behavior.
+
+#### Changes Made
+
+1. **Color palette replaced with VS Code defaults:**
+   - Editor background: `#1e1e1e`
+   - Activity bar: `#181818`
+   - Sidebar: `#252526`
+   - Borders: `#2d2d30`
+   - Text: `#cccccc` (primary), `#9da0a6` (muted)
+   - Accent: `#007acc`
+
+2. **Structural styling flattened:**
+   - Removed backdrop-filter blur and radial gradients
+   - Reduced border-radius from 14–20px to 0–4px
+   - Removed decorative shadows
+   - Panels separated by 1px borders instead of gaps
+
+3. **Navigation simplified to VS Code-like activity bar:**
+   - 48px vertical rail with abbreviated labels (OVR/IMP/RES)
+   - Active state shown by left accent border
+   - Sidebar moved to right with bridge status and activity log
+
+4. **Typography scaled to 13px base with monospace for data:**
+   - Tables, tokens, and timestamps use Consolas/monospace
+   - Headers are compact (13–14px) with muted eyebrow labels
+
+#### Rationale
+
+- VS Code's visual language is familiar to developers and operators
+- Flat surfaces and restrained colors reduce cognitive load
+- No external theme library needed—CSS custom properties suffice
+- Build passes; no behavior changes required
+
+#### Consequences
+
+- Future UI additions should follow the same palette (use `var(--vsc-*)` custom properties)
+- Icon-based navigation may need adjustment if more routes are added
+- Sidebar collapses on narrower viewports; consider a toggle in Phase 6 polish
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus
