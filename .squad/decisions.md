@@ -722,3 +722,55 @@ Earlier Phase 0, Phase 1, and Phase 2 decisions have been archived to `decisions
 **Phase 5 Decisions Added:** 2026-03-14T19:59:29Z
 **Phase 5 Revision & Re-Review Added:** 2026-03-14T20:17:23Z
 
+
+
+---
+
+## Phase 5 Follow-Up Corrections (2026-03-14)
+
+# Dallas — Phase 5 follow-up viewer
+
+- Replaced the results viewer's SVG renderer with a Three.js implementation that keeps the existing `SheetViewer` prop surface intact for the page layer.
+- Locked navigation to 2D with `OrthographicCamera` + `OrbitControls`: rotation is disabled, pan stays screen-space, and mouse interactions are reduced to pan/zoom.
+- Capped the viewer footprint in CSS (`clamp(280px, 44vh, 520px)`) so bigger layouts fit inside the camera instead of consuming more page height.
+- Viewer wheel/context input is captured on the canvas while hovered to keep zoom/pan interactions inside the viewport and prevent page scrolling from stealing the gesture.
+- ResultsPage lazy-loads the viewer so Three.js stays off the initial application chunk until operators actually open results.
+
+
+---
+
+# Parker — Phase 5 follow-up report
+
+- Date: 2026-03-14
+- Decision: Keep the utilization and panel-label fixes inside `QuestPdfReportExporter` instead of changing bridge/report payload contracts.
+- Details:
+  - `FormatPercent` now treats utilization inputs as already-percent values and appends a literal `%`, so `60.0m` renders as `60.0%`.
+  - `BuildSheetSvg()` now renders deterministic panel labels from `NestPlacement.PartId`, ordered by placement coordinates to keep sheet visuals reproducible.
+- Rationale: The nesting/report data model already carries the correct geometry and utilization numbers; this correction is strictly an export-formatting concern and keeps UI/bridge seams stable.
+
+
+---
+
+## Hicks — Phase 5 Follow-Up Review
+
+**Verdict:** APPROVED
+
+### What I verified
+
+- The Results page is wired to the live `SheetViewer` Three.js path, not the old placeholder.
+- `SheetViewer` uses an `OrthographicCamera` plus `OrbitControls` with rotation locked off, so the viewer stays in 2D pan/zoom mode.
+- Viewer sizing is capped with `height: clamp(280px, 44vh, 520px)` / `max-height: 520px`, which closes the runaway real-estate issue in code.
+- Viewer wheel and pointer handling explicitly prevent page scroll leakage while hovered.
+- `QuestPdfReportExporter` now adds SVG text labels for each placement's `PartId`.
+- Utilization formatting now treats values as already-percent values, so `60m` renders as `60.0%` instead of `6000%`.
+
+### Validation rerun
+
+- `npm run build` in `src\PanelNester.WebUI` ✅
+- `dotnet test .\PanelNester.slnx --nologo` ✅ — **107 total, 105 passed, 2 skipped, 0 failed**
+
+### Residual risk
+
+- The key viewer acceptance checks remain mostly manual/user-visible behaviors; this CLI review can verify the implementation path and passing regressions, but one live smoke pass in the desktop/WebView2 host is still the right last-mile check for hover ownership and large-window feel.
+- WebUI build still warns that the lazily loaded `SheetViewer` chunk is large (>500 kB minified), so viewer startup/perf should stay on the Phase 6 watchlist.
+

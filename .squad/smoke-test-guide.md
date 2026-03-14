@@ -354,6 +354,44 @@ Panel-B,12,36,0,Demo Material
 
 ---
 
+## Phase 5 Follow-Up Correction Batch
+
+> Use this section for Brandon's follow-up notes after the original Phase 5 slice. These checks are corrective: Hicks is defining the gate, not issuing a new approval here. Pair this with `tests\Phase5-Followup-Correction-Test-Matrix.md`.
+
+### Test Case 20: Viewer Is the Live Three.js Path and Stays Locked to 2D
+
+1. Import a valid file, run nesting, and open the Results page.
+2. Interact with the live viewer using the navigation controls kept in scope for this batch.
+3. Attempt the full range of likely viewer gestures: wheel zoom, drag pan, double-click/reset if present, and any rotate/orbit gesture the control library would normally allow.
+4. **Pass:** the live results viewer is the Three.js-backed path rather than a placeholder/static fallback; zoom and pan work smoothly; the camera stays in plan view/top-down mode; rotate/orbit/tilt is disabled, ignored, or reset immediately; the viewer still matches the active sheet's placements, labels, and utilization story.
+5. **Fail:** the UI falls back to a placeholder/static renderer, allows accidental 3D tilt/orbit, or drifts from the current result tables/cards.
+
+### Test Case 21: Viewer Size and Mouse Ownership Stay Bounded
+
+1. Open the same result on a normal desktop window, then enlarge the app to a much larger window.
+2. Observe how much vertical space the viewer consumes relative to the surrounding summary, sheet list, and report-edit controls.
+3. With the pointer outside the viewer, use the mouse wheel and normal page scrolling.
+4. Move the pointer into the viewer and use wheel zoom and drag pan.
+5. Drag inside the viewer, then release and move the pointer back to the page outside the viewer.
+6. **Pass:** the viewer grows enough to stay readable but does not monopolize the Results page; summary/report UI remains comfortably reachable; while the pointer is over the viewer, wheel/drag input affects the viewer only; once the pointer leaves or the drag ends, page scrolling and other mouse input behave normally again.
+7. **Fail:** the viewer expands so much that it crowds out the rest of the page, page scrolling still fires while zooming/panning inside the viewer, or pointer capture gets "stuck" after leaving the viewer.
+
+### Test Case 22: Report Graphic Labels Every Panel Unambiguously
+
+1. Produce a nesting result with more than one placed panel and export the PDF report.
+2. Inspect each sheet graphic in the exported report, not just the placement summary text.
+3. **Pass:** every placed panel is identifiable from the graphic itself with a visible label using the part/panel ID; if a panel is too small to carry an in-shape label, the report provides an adjacent legend/callout that removes ambiguity.
+4. **Fail:** the report graphic shows anonymous rectangles, labels are missing for some panels, or the reviewer has to guess which shape corresponds to which part.
+
+### Test Case 23: Utilization Percentages Use Decimal Fractions Exactly Once
+
+1. Run or load a result with a known utilization near 60% so the incorrect `6000%` class of bug would be obvious.
+2. Compare the utilization shown in the Results page summary cards, per-sheet details, and exported PDF.
+3. **Pass:** utilization values are treated as decimal fractions and rendered exactly once as percentages (`0.6` → `60.0%`, or the agreed precision); overall and per-sheet values stay numerically consistent across UI and PDF.
+4. **Fail:** any surface shows `6000%`, `0.6%`, raw decimal values, or a rounding rule that disagrees with the other user-visible surfaces.
+
+---
+
 ## Acceptance Criteria
 
 - [ ] Preflight: `dotnet test` reports zero failures and `npm run build` succeeds, with only documented placeholder skips remaining
@@ -376,6 +414,11 @@ Panel-B,12,36,0,Demo Material
 - [ ] Phase 5 PDF export includes the agreed editable fields plus current summary, sheet visuals, and unplaced/invalid output
 - [ ] Phase 5 export failures stay user-visible and non-destructive
 - [ ] Phase 5 report persistence behavior matches Ripley's final scope and is explicit on save/open
+- [ ] Phase 5 follow-up: the live viewer uses the Three.js interaction path and stays locked to 2D/top-down navigation
+- [ ] Phase 5 follow-up: viewer sizing stays bounded as the window grows and does not crowd out summary/report UI
+- [ ] Phase 5 follow-up: mouse wheel/drag input is owned by the viewer only while the pointer is inside it, then returns cleanly to the page
+- [ ] Phase 5 follow-up: exported report graphics label each placed panel unambiguously
+- [ ] Phase 5 follow-up: utilization values treat decimal fractions correctly and never render as `6000%`-style double-multiplied percentages
 
 ---
 

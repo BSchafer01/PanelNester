@@ -87,6 +87,22 @@
 
 **Locked Out:** Parker cannot participate in revision cycle. Ripley (or non-author reviewer) owns next phase.
 
+## Phase 5 Follow-Up: Report Formatting Fixes (2026-03-14T23:47:32Z)
+
+**Assignment:** PDF panel labels, utilization percentage formatting
+
+**Deliverables:**
+- ✅ `QuestPdfReportExporter` now renders deterministic SVG text labels from `NestPlacement.PartId`
+- ✅ Labels ordered by placement coordinates to ensure reproducible sheet visuals
+- ✅ `FormatPercent()` fixed: treats inputs as already-percent values (60.0m → 60.0% instead of 6000%)
+- ✅ Fix confined to export formatting layer; bridge/report data contracts unchanged
+- ✅ Exporter tests updated for label rendering and percent formatting validation
+- ✅ 105 total tests: 103 passed, 2 skipped, 0 failed
+- ✅ Zero regressions to Phase 0–4 domain/service paths
+- ✅ Hicks re-review: APPROVED ✅
+
+**Status:** COMPLETE — Phase 5 follow-up integrated and approved
+
 ## Learnings
 
 - 2026-03-14: Initial team staffing. I own import, validation, domain services, and the nesting engine.

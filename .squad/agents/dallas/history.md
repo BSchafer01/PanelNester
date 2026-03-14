@@ -125,6 +125,20 @@
 - UI layer validation confirmed: Results viewer geometry matches PDF export geometry
 - Full integration gate cleared: **PHASE 5 COMPLETE**
 
+## Phase 5 Follow-Up: Viewer Refinement (2026-03-14T23:47:32Z)
+
+**Assignment:** Bounded viewer behavior, input isolation, lazy loading optimization
+
+**Deliverables:**
+- ✅ Viewer height constraint: `clamp(280px, 44vh, 520px)` / `max-height: 520px` prevents layout creep
+- ✅ `OrthographicCamera` + `OrbitControls` locked to 2D (rotation disabled, pan screen-space)
+- ✅ Wheel/drag input captured on canvas while hovered—page scroll isolation working
+- ✅ Results page lazy-loads viewer to keep Three.js off initial application chunk
+- ✅ Zero regressions to all prior phases
+- ✅ Hicks re-review: APPROVED ✅
+
+**Status:** COMPLETE — Phase 5 follow-up integrated and approved
+
 ## Phase 4 — Full Import Pipeline UI (COMPLETE ✅)
 
 **Ownership:** Dallas (WebUI) ✅
