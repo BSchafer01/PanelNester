@@ -375,6 +375,51 @@ Restyle the Phase 0/1 Web UI to adopt VS Code dark theme conventions without int
 
 ---
 
+### Decision: Hicks VS Code Theme Review & Approval
+
+**Author:** Hicks  
+**Date:** 2026-03-14  
+**Status:** Approved
+
+#### Context
+
+Dallas completed the VS Code dark-theme styling refresh for Phase 0/1 before Phase 2 commencement. Hicks performed independent regression and reviewer gate to validate dark-theme alignment, workflow preservation, and build stability.
+
+#### Verdict
+
+Approved the VS Code-inspired UI cleanup. The palette and structural cues align with the reference image (`UIColorPalette.png`) for the stated goal: dark editor surface, darker activity/sidebar rails, muted body text, bright headings, and VS Code blue accent/button treatment. The left activity bar, editor-like panels, and right utility sidebar preserve the overall Visual Studio Code feel without disturbing the Phase 0/1 slice's workflow seams.
+
+#### Verification
+
+1. **Theme review**
+   - CSS tokens match the expected VS Code dark family: `#1e1e1e` editor background, `#252526` sidebar, `#181818` activity rail, `#007acc` accent, `Segoe UI` at compact desktop sizing
+   - Reference image sampling showed dominant near-black neutrals, which is consistent with the updated stylesheet
+   - Component/page updates remain presentational: no bridge contract, import payload, or nesting payload shapes were changed
+
+2. **Regression gate**
+   - Web UI build passed via `npm run build`
+   - Solution build passed via `dotnet build .\PanelNester.slnx`
+   - Solution tests passed via `dotnet test .\PanelNester.slnx --no-build` with **38 passed, 1 skipped**
+
+3. **Workflow preservation**
+   - Import page still exposes CSV validation, warnings, and errors required by the smoke guide
+   - Results page still renders sheet counts, utilization, placements, and unplaced items
+   - App shell/navigation changes are cosmetic and do not alter route wiring
+
+#### Rationale
+
+- Static verification and regression checks are strong; dark-theme styling successfully applied
+- Phase 0/1 regression gate now includes dark-theme styling checkpoint
+- No rework required before Phase 2 material library work
+
+#### Consequences
+
+- Phase 0/1 is approved for next phase commencement
+- Future UI additions should follow VS Code palette conventions
+- Residual docs note: `.squad/smoke-test-guide.md` test count is stale (expects 36 passed, actual 38 passed) — requires docs-only follow-up
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus

@@ -14,6 +14,8 @@
 - 2026-03-14: Phase 0/1 test deliverables complete. 35 tests (26 passing, 9 skipped). Test matrix created, xUnit scaffolds deployed, spec-first approach extracted as reusable skill.
 - 2026-03-14: Cross-layer kickoff reviews need three early gates before I trust the slice: a runnable toolchain, one shared bridge vocabulary across host and Web UI, and one non-placeholder round-trip through the real seams.
 - 2026-03-14: I can approve a kickoff slice once the shared contract names, a dispatcher-backed file-open→import→nest regression, and the UI's live results consumption are all executable in one build/test pass; anything less still reads like stitched placeholders.
+- 2026-03-14: Theme-refresh reviews pass faster when I separate appearance from behavior: check palette/layout tokens against the reference, then confirm import and results pages still expose the same handlers, status pills, tables, and error surfaces before trusting build/test output.
+- 2026-03-14: Smoke-guide bookkeeping has to track the validated regression gate exactly; the current baseline is 38 passed, 1 skipped, and stale counts make reviewer sign-off less trustworthy.
 
 ## Recent Work (2026-03-14)
 
@@ -25,3 +27,4 @@
 - ✓ Ripley completed Phase 0/1 revision; unified bridge vocabulary, demo material contract, and nesting failure codes. Tests now aligned with live integration slice. Ready for review gate.
 - ✓ Produced smoke-test guide (`.squad/smoke-test-guide.md`): four concrete test scenarios (happy path + three failure modes) with exact CSV data, expected error codes, and pass/fail criteria. Includes preflight checklist and Demo Material reference. All 36 tests passing, ready for manual verification.
 - ✓ Bishop resolved Web UI content resolution priority; decision documented in `decisions.md` as Phase 0/1 infrastructure decision
+- ✓ Reviewed Dallas's VS Code dark-theme UI refresh: validated palette alignment, confirmed workflow seams preserved, verified regression (38 passed, 1 skipped). Approved for Phase 2 commencement. Residual note: smoke-test guide test count is stale.

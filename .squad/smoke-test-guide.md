@@ -13,7 +13,7 @@ dotnet build
 dotnet test
 ```
 
-**Expected outcome:** `Build succeeded` + `36 passed, 1 skipped` (WebView2 integration test deferred).
+**Expected outcome:** `Build succeeded` + `38 passed, 1 skipped` (WebView2 integration test deferred).
 
 ---
 
@@ -200,7 +200,7 @@ Panel-B,12,36,0,Demo Material
 
 ## Acceptance Criteria
 
-- [ ] Preflight: `dotnet test` reports 36 passed
+- [ ] Preflight: `dotnet test` reports 38 passed, 1 skipped
 - [ ] Happy path: All 3 parts import as `valid`
 - [ ] Happy path: Nesting places all 7 instances on 1–2 sheets
 - [ ] Happy path: Results show sheet count, utilization, and zero unplaced items
