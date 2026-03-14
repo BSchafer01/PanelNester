@@ -186,7 +186,7 @@ Initial Phase 0/1 batch was not reproducibly verifiable due to bridge vocabulary
 
 **Author:** Ripley  
 **Date:** 2026-03-14  
-**Status:** Proposed for merge
+**Status:** Implemented
 
 #### Context
 
@@ -223,6 +223,76 @@ Close Phase 0 and Phase 1 on one live vertical slice with unified vocabulary and
 - Bridge layer favors domain import/nesting contracts directly, reducing DTO drift
 - Empty runs treated as run-level failures; invalid rows collapse to `invalid-input`; oversize/heuristic misses stay distinct
 - Phase 0/1 review gate focuses on integrated slice and its tests, not deferred viewer/reporting
+
+---
+
+### Decision: Hicks Phase 0/1 Re-review
+
+**Author:** Hicks  
+**Date:** 2026-03-14  
+**Status:** Approved
+
+#### Context
+
+Second review of Phase 0/1 vertical slice after contract unification. Verifies the slice is production-ready for manual smoke testing and Phase 2 commencement.
+
+#### Decision
+
+Approve Phase 0/1 for next implementation step.
+
+#### Rationale
+
+1. **Contract drift is closed.** Desktop bridge types, Web UI bridge types, and desktop tests use unified vocabulary: `bridge-handshake`, `open-file-dialog`, `import-csv`, `run-nesting`.
+2. **Vertical slice is live.** Desktop host wires native file dialog, `CsvImportService`, and `ShelfNestingService`; React shell consumes live import/nesting payloads instead of placeholders.
+3. **Gating contracts are stable.** `Demo Material`, demo kerf, and bounded nesting failure codes align across domain, services, Web UI, and tests.
+4. **Checks are repeatable.** `dotnet build`, `dotnet test`, and Web UI build all pass; desktop round-trip exercises file-open → import → nesting on real services.
+
+#### Consequences
+
+- Phase 0/1 acts as a regression gate before scope widens to Phase 2 material library
+- Manual smoke-test guide (`smoke-test-guide.md`) confirms readiness across CSV import, nesting, error handling, and results display
+- No rework expected before Phase 2 begins
+
+---
+
+### Decision: Hicks Phase 0/1 Smoke-Test Guide
+
+**Author:** Hicks  
+**Date:** 2026-03-14  
+**Status:** Complete
+
+#### Context
+
+Team needs a practical, runnable smoke-test checklist for verifying Phase 0/1 vertical slice without requiring full UI automation, Three.js viewer, or PDF export tooling.
+
+#### Decision
+
+Produce `.squad/smoke-test-guide.md` with:
+
+1. **Preflight checklist** — `dotnet restore`, `dotnet build`, `dotnet test` (expects 36 passed, 1 skipped WebView2 integration test)
+2. **Happy-path scenario** — Three-row CSV with valid parts → import succeeds → nesting places all 7 instances on 1–2 sheets → results display utilization
+3. **Four failure-mode test cases:**
+   - Oversized part (100"×50" → `outside-usable-sheet` error)
+   - Unknown material → `material-not-found` error
+   - Invalid numeric text → `invalid-numeric` error
+   - Zero quantity → `non-positive-quantity` error
+4. **Expected outcomes** for each step (pass vs. fail conditions, no crashes/hangs)
+5. **Demo Material reference** (96"×48" sheet, 0.5" edge margin, 0.125" spacing, 0.0625" kerf)
+6. **Acceptance criteria** — 9-item checklist covering CSV validation, nesting placement, error codes, and UI rendering
+
+#### Rationale
+
+- **Concrete examples:** Copy-paste CSV rows with no guessing at format
+- **Error code specificity:** Verifies error messages match agreed vocabulary, not generic "error"
+- **Failure modes as first-class tests:** Proves oversized parts, bad materials, and invalid input do not crash or hang
+- **Bridge/import/nesting coverage:** Exercises SC1–SC5 from test matrix without full UI automation
+
+#### Consequences
+
+- Manual smoke test gates Phase 0/1 completeness
+- No new tooling required; all scenarios use existing service layer APIs
+- Failure mode tells you which seam needs investigation (CSV import, nesting, results display, error handling)
+- When all nine acceptance criteria pass, Phase 0/1 is ready for Phase 2 material library work
 
 ---
 
