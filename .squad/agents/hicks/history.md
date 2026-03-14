@@ -71,6 +71,32 @@
 3. Service/Bridge tests (parametrized against Parker contracts) — Ready for Batch 1
 4. Integration tests — Ready for Batch 3
 
+## Phase 5 Scope (Results Viewer & PDF Reporting Tests & Integration Gate)
+
+**Ownership:** Hicks (Tests and integration review gate)
+
+**Gate Status (2026-03-14T19:23:22Z):** DESIGN REVIEW COMPLETE — Phase 5 ready to implement
+
+**Four Non-Negotiable Review Gates:**
+1. **Rendering fidelity** — Three.js viewer displays all materials with correct colors, geometry, and user interactions
+2. **PDF accuracy** — QuestPDF reports include all nesting results, settings, and cut lists with correct layout and pagination
+3. **Multi-material determinism** — Each material independently runs shelf algorithm, results merge consistently
+4. **Settings persistence** — Report settings save/load with project, PDF generation uses persisted values
+
+**Test Coverage Plan:**
+- Three.js Rendering Tests: mesh generation, material-color mapping, camera framing, user interaction (pan/zoom/rotate)
+- PDF Generation Tests: content layout, section ordering, field population, multi-page handling, table rendering
+- Multi-Material Nesting Tests: material isolation, deterministic merge, shelf algorithm per-material
+- Report Settings Tests: CRUD operations, project persistence, PDF generation integration
+- Bridge Round-Trip Tests: `generate-pdf-report`, `get-report-settings`, `update-report-settings`
+- Integration Tests: end-to-end results workflow from nesting completion through PDF export
+
+**Deliverables:**
+1. Phase 5 Test Matrix (`tests/Phase5-Results-Viewer-PDF-Reporting-Test-Matrix.md`) — ✓ COMPLETE
+2. Smoke Test Guide Phase 5 Extension — ✓ COMPLETE
+3. Service/Bridge/Three.js tests (parametrized against Parker contracts) — Ready for Batch 1
+4. Integration tests — Ready for Batch 3
+
 **Phase 2 Scope (Material Library Tests & Verification)
 
 **Ownership:** Hicks (Tests and integration review gate)

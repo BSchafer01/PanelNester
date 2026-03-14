@@ -303,6 +303,57 @@ Panel-B,12,36,0,Demo Material
 
 ---
 
+## Phase 5 Results Viewer & PDF Reporting Preview
+
+> Activate this section once Ripley locks the Phase 5 scope. Current code still renders a `SheetViewerPlaceholder`, the Web UI has no PDF export controls, and the host handshake exposes no report/export capability yet, so these checks are scaffolding, not a release verdict.
+
+### Test Case 15: Viewer Matches the Latest Nesting Run
+
+1. Import a valid file, run nesting, and open the Results page.
+2. Compare the visible result cards/tables with the interactive sheet viewer.
+3. If more than one sheet exists, switch between sheets in the viewer and the surrounding detail UI.
+4. **Pass:** the viewer shows the same generated sheets, part placements, dimensions, rotation flags, and utilization story already present in the latest `NestResponse`; sheet outline and unused area are visually clear.
+5. **Fail:** the viewer stays a placeholder, omits placements that exist in the tables, invents geometry not backed by the nesting result, or becomes the only place where critical result data is visible.
+
+### Test Case 16: Viewer Interactions Stay Informational, Not Destructive
+
+1. With a nested result open, use the Phase 5 viewer interactions Ripley keeps in scope (expected: zoom, pan, hover tooltip, click-to-inspect).
+2. Hover a placed part, click it, and navigate away and back if the page keeps selection state.
+3. **Pass:** interactions reveal metadata without mutating the underlying result, counts, or placement coordinates; selection details stay consistent with the placement table and unplaced list.
+4. **Fail:** zoom/pan/selection corrupts the displayed result, changes counts, loses the active result silently, or disagrees with the placement table about which part is selected.
+
+### Test Case 17: Report Edits Drive PDF Output From Current Project Data
+
+1. Produce a nesting result, then open the Phase 5 report-edit UI.
+2. Edit all PRD report fields in one pass: Company Name, Report Title, Project / Job Name, Project / Job Number, Date, and Notes.
+3. Export the PDF to a known path.
+4. **Pass:** the PDF reflects the edited report fields plus the latest nesting result, including summary content, sheet count/utilization context, sheet visuals, and unplaced/invalid items.
+5. **Fail:** export ignores edited fields, uses stale project data, drops unplaced/invalid items, or requires rerunning nesting to see report-field changes.
+
+### Test Case 18: Export Failures Stay Actionable and Non-Destructive
+
+1. Attempt a PDF export under at least one failure condition Ripley keeps in scope (for example cancel the save dialog, choose a locked path, or export without a current nesting result).
+2. Observe the desktop host and Web UI behavior.
+3. **Pass:** the app surfaces a specific, user-visible outcome, does not crash, and does not leave the current project/result state corrupted.
+4. **Fail:** export failure is silent, leaves behind a partial/blank file without warning, resets the active result, or falls back to a generic error with no actionable path forward.
+
+### Test Case 19: Save/Open Restores Report Context Exactly If Phase 5 Persists It
+
+1. Produce a nesting result and edit the report fields.
+2. Save the project, close it, and reopen the same `.pnest` file.
+3. **Pass:** if Ripley decides report fields persist with the project, the reopened project restores those exact report edits alongside the same `lastNestingResult`; if Ripley keeps report edits transient, the reopen behavior is explicit and documented instead of ambiguous.
+4. **Fail:** reopened projects silently mix saved and live report data, restore stale report edits from another run, or mutate the saved nesting result while trying to reconstruct the report state.
+
+### Phase 5 Assumptions to Reconcile With Ripley
+
+- The current domain/UI seam is still single-material (`NestRequest` takes one material and `NestResponse` exposes one `MaterialSummary`), while the PRD expects a summary by material; Ripley needs to decide whether Phase 5 expands that contract or intentionally stays scoped to the current single-material result flow.
+- Whether editable report fields persist inside `.pnest`, stay transient until export, or reuse existing project metadata fields without mutating the saved project record unexpectedly.
+- Whether the PDF must include invalid import rows in addition to `unplacedItems`, since current nesting results persist unplaced output but not a dedicated report-ready invalid-item section.
+- Whether the desktop bridge adds a new `export-pdf` capability/message with native save-dialog ownership or the Web UI generates the file directly.
+- Whether viewer state (selected sheet, zoom/pan, clicked part) must survive reruns and save/open, or reset whenever a new nesting result becomes current.
+
+---
+
 ## Acceptance Criteria
 
 - [ ] Preflight: `dotnet test` reports zero failures and `npm run build` succeeds, with only documented placeholder skips remaining
@@ -320,6 +371,11 @@ Panel-B,12,36,0,Demo Material
 - [ ] Phase 3 save/open preserves all PRD metadata fields and kerf
 - [ ] Phase 3 reopened projects show snapshotted material values instead of silently rereading the live library
 - [ ] Phase 3 corrupt or unsupported `.pnest` files report `project-corrupt` or `project-unsupported-version`
+- [ ] Phase 5 viewer renders the latest nesting result without drifting from the summary, sheet, placement, or unplaced tables
+- [ ] Phase 5 viewer interactions stay informational and do not mutate the active nesting result
+- [ ] Phase 5 PDF export includes the agreed editable fields plus current summary, sheet visuals, and unplaced/invalid output
+- [ ] Phase 5 export failures stay user-visible and non-destructive
+- [ ] Phase 5 report persistence behavior matches Ripley's final scope and is explicit on save/open
 
 ---
 
