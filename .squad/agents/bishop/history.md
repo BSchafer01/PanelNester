@@ -55,11 +55,36 @@
 - Path: `F:\Users\brand\source\AgentRepos\PanelNester\installer\PanelNester.Installer\bin\Release\PanelNester-PerUser.msi`
 - Status: Single-file, non-admin installable, Hicks approved ✅
 
+## App Icon Branding & MSI Rebuild (APPROVED ✅)
+
+**Ownership:** Bishop (icon generation, branding wiring, MSI rebuild)
+
+**Assignment:** Multi-resolution ICO from 7 PNG sources; desktop + installer branding; artifact rebuild
+
+**Delivered (2026-03-15T19:56:47Z):**
+1. ✅ Generated multi-resolution icon: `src\PanelNester.Desktop\Assets\PanelNester.ico` (16×16, 24×24, 32×32, 48×48, 64×64, 128×128, 256×256 frames)
+2. ✅ Each ICO frame byte-matches corresponding source PNG from `IconImages\`
+3. ✅ Desktop branding wired: `<ApplicationIcon>`, `MainWindow.Icon`, custom titlebar binding
+4. ✅ Installer branding wired: WiX `PanelNesterAppIcon` resource → Start Menu shortcut; `ARPPRODUCTICON` in MSI metadata
+5. ✅ Rebuilt MSI from repo-root: `installer\PanelNester.Installer\bin\Release\PanelNester-PerUser.msi`
+6. ✅ Per-user scope preserved; non-admin install/launch/uninstall succeeds
+7. ✅ Clean uninstall; no WebView2 residue under install root
+
+**Test Results:**
+- Solution: 134 total / 132 passed / 2 skipped / 0 failed
+- MSI build: ✅ success
+
+**Review Gate Outcome:**
+- Hicks verdict: **APPROVED ✅** (all four must-pass checks)
+- ICO provenance validated; desktop surfaces pick up icon correctly; installer branding WiX-current scope; per-user lifecycle clean
+
 ## Learnings
 
 - 2026-03-14: Initial team staffing. I own desktop host integration, local persistence wiring, and export plumbing.
 - 2026-03-14: Phase 0/1 host scaffolding works best when the desktop shell prefers a future `src\PanelNester.WebUI\dist` build but still ships a bundled placeholder page and a `window.hostBridge.receive(...)` receiver shim so the bridge stays stable before the real UI lands.
 - 2026-03-14: If the desktop output bundles `WebApp`, content resolution must search every ancestor for `src\PanelNester.WebUI\dist` before accepting a placeholder; otherwise running from `bin\Debug\net10.0-windows` masks a valid real UI build.
+- 2026-03-15: Icon wiring across WPF shell (exe embedding, titlebar binding) and WiX installer (Start Menu shortcut, ARP metadata) is cleaner when reusing one canonical `.ico` across all surfaces instead of splitting assets; MSI `Icon` table carries installer branding without needing separate shortcut file.
+
 ## Phase 5 — Results Viewer & PDF Reporting (APPROVED ✅)
 
 **Ownership:** Bishop (Desktop bridge layer)
@@ -123,6 +148,7 @@
 - 2026-03-15T16:55:00Z: A maintainable per-user MSI seam for this WPF/WebView2 app is a repo-owned WiX SDK project that runs the WebUI build, publishes the desktop app to a staging folder, replaces the published `WebApp` placeholder with the real `dist` output, and harvests that staged payload into a `%LocalAppData%`-scoped install location. WiX ICE38/60/64/91 must be suppressed for this shape because harvested file components under a user-profile install root trigger legacy MSI validation noise even though the package scope is intentionally per-user.
 - 2026-03-15T17:18:00Z: Retargeting this per-user installer seam from .NET 10 to .NET 8 only required updating the application/test TFMs and TFM-sensitive tests; the WiX project itself stayed stable because it publishes `PanelNester.Desktop.csproj` directly. The most trustworthy post-retarget packaging check is the staged publish runtimeconfig at `installer\PanelNester.Installer\obj\desktop-publish\PanelNester.Desktop.runtimeconfig.json`—its `runtimeOptions.tfm` must match the intended framework before blessing the MSI.
 - 2026-03-15T17:31:00Z: WiX's `Compressed="yes"` alone still allows a sidecar cabinet; for a genuinely single-file distributable MSI, the package authoring must set `<MediaTemplate EmbedCab="yes" />`. A reliable verification pair is: release output contains only the `.msi` and `.wixpdb`, and the MSI `Media.Cabinet` value resolves to `#cab1.cab`, proving the cabinet is embedded instead of external.
+- 2026-03-15T18:00:00Z: For branded WPF shells with custom chrome, the safest seam is one shared multi-resolution `.ico`: use it as the desktop project's `<ApplicationIcon>`, set `Window.Icon` so taskbar/Alt+Tab/native shell surfaces inherit it, bind any custom titlebar glyph to that same `Window.Icon`, and reuse the same asset in WiX for `ARPPRODUCTICON` plus shortcut `Icon` so uninstall/start-menu branding stays aligned with the built exe.
 
 ## Recent Work (2026-03-14T18:14:59Z)
 

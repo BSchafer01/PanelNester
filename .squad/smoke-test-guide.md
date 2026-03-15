@@ -18,6 +18,10 @@ Set-Location ..\..
 
 **Expected outcome:** `Build succeeded`, `dotnet test` completes with zero failures, and `npm run build` completes without TypeScript/Vite errors. Skips should be limited to the documented WebView2/material-library placeholders that are still intentionally blocked.
 
+**Runtime prerequisites for validation:**
+- Local build/test commands require a `.NET 8.0.x` SDK.
+- The per-user MSI is framework-dependent, so installed-app validation requires the x64 **.NET 8 Desktop Runtime** and **Microsoft Edge WebView2 Runtime** on the target machine.
+
 ---
 
 ## Happy-Path Smoke Test
@@ -193,7 +197,7 @@ Panel-B,12,36,0,Demo Material
 
 ## Next Steps If Smoke Test Fails
 
-1. **Build fails:** Check dotnet version (requires .NET 10.0.x) and NuGet package restore.
+1. **Build fails:** Check the installed dotnet SDK version (requires `.NET 8.0.x` for local build/test) and NuGet package restore.
 2. **Tests fail:** Rerun `dotnet test` with `--verbosity detailed` to see which test breaks.
 3. **Import crashes:** Check CSV headers match `Id`, `Length`, `Width`, `Quantity`, `Material` (exact case, any order).
 4. **Nesting crashes:** Check that all imported parts have valid numeric dimensions and a known material name.

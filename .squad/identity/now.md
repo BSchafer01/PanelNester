@@ -1,11 +1,11 @@
 ---
-updated_at: 2026-03-15T16:05:40Z
-focus_area: Per-user MSI packaging
+updated_at: 2026-03-15T16:48:18Z
+focus_area: .NET 8 retarget
 active_issues: []
 ---
 
 # What We're Focused On
 
-The current active slice is installer packaging: a per-user MSI for PanelNester that does not require administrator rights. The team added a WiX-based installer seam, staged the real desktop and WebUI payloads, and corrected WebView2 state placement so uninstall does not leave residue in the install directory.
+The current active slice is a framework retarget from .NET 10 to .NET 8 across the app, tests, and installer flow. The team moved the relevant TFMs, kept the per-user MSI seam working, and updated active validation docs so review/smoke guidance matches the new runtime target.
 
-This work preserves the current desktop behavior while making local distribution and installation more production-ready.
+This work preserves the existing non-admin installer behavior and WebView2 cleanup improvements while making the package viable on machines that do not have .NET 10 installed.

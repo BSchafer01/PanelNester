@@ -18,12 +18,16 @@ Use this when a Windows desktop app needs a real `.msi` artifact, must install w
 4. Set the WiX package scope to `perUser` and install under a user-writable path such as `%LocalAppData%\Programs\{Product}`.
 5. Add only user-scoped shell integration (for example, Start Menu shortcuts backed by `HKCU` key paths) so the installer stays non-admin.
 6. Expect legacy MSI ICE validation noise when harvesting many files into a user-profile root; document and suppress the specific ICEs you intentionally accept rather than moving the install to a machine-wide folder.
+7. If the installer publishes the desktop project directly, framework retargets usually belong in the application/test projects, not the WiX project; verify the staged publish output by checking `obj\desktop-publish\*.runtimeconfig.json` for the expected `runtimeOptions.tfm`.
+8. If distribution must be a single `.msi`, do not rely on `Compressed="yes"` alone—set `<MediaTemplate EmbedCab="yes" />` so WiX embeds `cab1.cab` into the MSI instead of writing a sidecar cabinet. Validate by checking the release folder has no external `.cab` and, if needed, confirm the MSI `Media.Cabinet` value is `#cab1.cab`.
+9. When the desktop app needs branding, generate one canonical multi-resolution `.ico` and reuse that exact file everywhere: WPF `<ApplicationIcon>` for the built `.exe`, `Window.Icon` for taskbar/Alt+Tab/native shell pickup, any custom titlebar image bound to `Window.Icon`, and WiX `<Icon>` + `ARPPRODUCTICON`/shortcut `Icon` so installer and uninstall surfaces stay consistent with the shipped executable.
 
 ## Examples
 
 - `installer\PanelNester.Installer\PanelNester.Installer.wixproj`
 - `installer\PanelNester.Installer\Product.wxs`
 - `dotnet build .\installer\PanelNester.Installer\PanelNester.Installer.wixproj -c Release -nologo`
+- `installer\PanelNester.Installer\obj\desktop-publish\PanelNester.Desktop.runtimeconfig.json`
 
 ## Anti-Patterns
 

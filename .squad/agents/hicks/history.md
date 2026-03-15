@@ -48,6 +48,8 @@ I own acceptance criteria, regression coverage, and reviewer verdicts for the fu
 
 - ✓ **SINGLE-FILE MSI EMBEDDING APPROVED** (2026-03-15T17:24:18Z) — Bishop changed WiX media authoring to `<MediaTemplate EmbedCab="yes" />` to embed cabinet inside MSI, eliminating external `cab1.cab` dependency. Per-user scope, .NET 8 pipeline, WebView2 lifecycle unchanged. Release output: `PanelNester-PerUser.msi` only (no external CAB). All validation green: installer build, solution tests (134/132), WebUI build. Hicks review gate passed all four must-pass checks. Artifact ready for distribution.
 
+- ✓ **APP ICON BRANDING & MSI REBUILD APPROVED** (2026-03-15T19:56:47Z) — Gate authored: four must-pass checks (ICO provenance, desktop embedding, WiX installer wiring, per-user lifecycle). Bishop delivered multi-resolution ICO from 7 PNG sources (`IconImages\`), wired across desktop `<ApplicationIcon>` + `MainWindow.Icon` + titlebar binding, and WiX `PanelNesterAppIcon` resource + Start Menu shortcut + `ARPPRODUCTICON` metadata. Rebuilt MSI. **Verdict: APPROVED ✅** — ICO byte-matches source PNGs; desktop exe branding verified (Explorer/taskbar/Alt+Tab); Start Menu shortcut resolves via Windows Installer cache; per-user lifecycle clean (non-admin install/launch/uninstall, no residue). Tests: 134 total / 132 passed / 2 skipped / 0 failed.
+
 ### Per-User MSI Cycle Summary (Full Lifecycle)
 
 **Agents:** Bishop (delivery), Hicks (gate + reviews), Ripley (revision)
@@ -95,3 +97,7 @@ Final Review (Hicks): APPROVED ✅ — All four gates satisfied. Artifact ready 
 - Framework retarget re-review should separate three checks: executable targeting (`TargetFramework`/WPF/runtimeconfig), active reviewer docs, and user-facing prerequisite callouts. Approval is earned only when all three agree on the same runtime story.
 - Single-file MSI review needs two separate proofs: the Release output shape must collapse to one `.msi` with no external `.cab`, and the installed payload must still be complete enough to launch. Either half missing means the packaging story is still untrusted.
 - Single-file MSI approval is stronger when the embedded-cab story is proven three ways at once: WiX metadata requests embedding, the built Release folder has no sibling `.cab`, and a real install/launch/uninstall cycle still preserves a complete payload and clean install root.
+- App-icon review is two problems, not one: first prove the `.ico` was generated from the supplied size-specific source images, then prove Windows shell surfaces actually resolve that embedded icon from the built exe.
+- For current WiX packaging, shortcut branding should be judged by installed behavior first; separate shortcut/ARP icon authoring is only required when the installer explicitly claims those extra branding surfaces.
+- For PNG-backed `.ico` files, the strongest provenance proof is the icon directory itself: if each embedded frame payload byte-matches the supplied `16x16` through `256x256` PNGs, the generation story is trustworthy without guessing from screenshots.
+- WiX shortcut icon checks should inspect the installer-cached icon file named by the `.lnk` `IconLocation`; the shortcut's own extracted icon hash can differ from the target exe even when the cached icon resource is correct.

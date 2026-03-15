@@ -1832,3 +1832,66 @@ The fix stays in the WPF host, where the bug belonged. `ShellContentHost` now ge
 **Gate validation:** ✅ All four pass gates confirmed  
 **Risk assessment:** Low (narrowly scoped, no shell path changes, restores cleanly)
 
+---
+
+## Bishop — app icon branding
+
+- Generated a single canonical icon at `src\PanelNester.Desktop\Assets\PanelNester.ico` from the provided `IconImages\16x16.png`, `24x24.png`, `32x32.png`, `48x48.png`, `64x64.png`, `128x128.png`, and `256x256.png` source files.
+- Reused that same `.ico` across all current branding seams instead of splitting assets: desktop `<ApplicationIcon>`, `Window.Icon`, custom titlebar image binding, WiX `ARPPRODUCTICON`, and the Start Menu shortcut `Icon`.
+- Chose not to add a separate installed icon file because the executable now embeds the icon and WiX carries the same artwork in the MSI `Icon` table for Add/Remove Programs and shortcut metadata.
+
+---
+
+## Hicks reviewer gate — app icon / MSI branding slice
+
+Approve this slice only when all four checks pass:
+
+1. **ICO provenance + coverage is real.** The shipped `.ico` must be generated from the provided `IconImages\16x16.png`, `24x24.png`, `32x32.png`, `48x48.png`, `64x64.png`, `128x128.png`, and `256x256.png` inputs, with one clean square entry per size and preserved transparency. Reject if the file is single-resolution, missing a provided size, or clearly rebuilt from some other source asset.
+2. **Desktop surfaces pick up the embedded icon.** The desktop project must embed that `.ico` into `PanelNester.Desktop.exe`, and a built app must show the branded icon anywhere Windows should source it from the exe: Explorer preview/properties, taskbar / Alt+Tab, and the installed executable itself. If the custom WPF title bar still intentionally omits an inline glyph, that is fine; the shell-facing surfaces still must brand correctly.
+3. **Installer branding matches current WiX support.** In the current WiX authoring, the Start Menu shortcut is trusted only if it resolves to the branded exe icon after install. Do not require a separate shortcut icon file unless the authoring explicitly adds one. Likewise, do not claim Add/Remove Programs icon coverage unless `Product.wxs` adds the matching ARP icon wiring; otherwise treat ARP icon branding as out of scope for this slice.
+4. **The rebuilt MSI still behaves like the existing per-user package.** Rebuilding from repo-root workflow must still produce `PanelNester-PerUser.msi`, keep `Scope="perUser"` / LocalAppData install behavior intact, install without elevation, launch successfully from the installed path or Start Menu shortcut, and uninstall without breaking the prior per-user cleanliness expectations.
+
+Minimum evidence expected from the implementing slice:
+
+- the generated `.ico` file plus proof of the source PNG set used to make it
+- the desktop project reference that embeds the icon into the exe
+- one installed-app proof that the shortcut/taskbar branding resolves correctly
+- one fresh MSI rebuild + install/launch/uninstall pass in standard-user context
+
+---
+
+## Hicks review — app icon branding / MSI slice
+
+**Verdict:** APPROVED
+
+### Why this passes
+
+- `src\PanelNester.Desktop\Assets\PanelNester.ico` is genuinely multi-resolution: it contains `16x16`, `24x24`, `32x32`, `48x48`, `64x64`, `128x128`, and `256x256`.
+- The `.ico` provenance is trustworthy. Each embedded frame payload in the `.ico` byte-matches the corresponding source PNG in `IconImages\`.
+- Desktop branding is wired in the right places for this WPF shell:
+  - `PanelNester.Desktop.csproj` sets `ApplicationIcon` to `Assets\PanelNester.ico`
+  - `MainWindow.xaml` sets `Icon="Assets\PanelNester.ico"`
+  - the custom title bar image binds to `Window.Icon`
+- Built branding resolves correctly. The Release desktop exe and the installed exe both resolve to the same branded icon as the shipped `.ico`.
+- Installer branding is wired where the current WiX authoring supports it:
+  - `Product.wxs` defines `PanelNesterAppIcon`
+  - the Start Menu shortcut uses that icon resource
+  - `ARPPRODUCTICON` is present in the MSI metadata
+- The rebuilt MSI still behaves like the trusted per-user package:
+  - `dotnet test .\PanelNester.slnx -c Release` passed with `134 total / 132 passed / 2 skipped / 0 failed`
+  - `dotnet build .\installer\PanelNester.Installer\PanelNester.Installer.wixproj -c Release` produced `installer\PanelNester.Installer\bin\Release\PanelNester-PerUser.msi`
+  - install landed under `%LOCALAPPDATA%\Programs\PanelNester`
+  - installed app launched successfully
+  - Start Menu shortcut targeted the installed exe
+  - first launch did not recreate `*.exe.WebView2` residue under the install root
+  - uninstall removed the install root and shortcut cleanly
+
+### Review note
+
+The Start Menu shortcut resolves through the Windows Installer cached icon path under `%APPDATA%\Microsoft\Installer\...`; that cached icon matches the shipped app icon, so shortcut branding is accepted.
+
+**Reviewed by:** Hicks  
+**Date:** 2026-03-15  
+**Gate validation:** ✅ All four pass gates confirmed  
+**Verdict:** APPROVED
+
