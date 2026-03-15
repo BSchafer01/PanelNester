@@ -103,6 +103,36 @@
 
 **Status:** COMPLETE — Phase 5 follow-up integrated and approved
 
+## Phase 6 — FlatBuffers `.pnest` Migration (2026-03-15T00:52:22Z)
+
+**Ownership:** Parker (Persistence layer lead) ✅
+
+**Assignment:** Implement FlatBuffers `.pnest` migration and resolve the current save crash in the persistence layer.
+
+**Deliverables:**
+- ✅ FlatBuffers schema (`.fbs` format) and generated C# types
+- ✅ PNST-header persistence format (4-byte magic header + FlatBuffers binary payload)
+- ✅ Dual-read compatibility: existing JSON `.pnest` files open without corruption, newly saved files use FlatBuffers binary
+- ✅ Deterministic duplicate-material snapshot handling (consistent ordering across save/reload cycles)
+- ✅ Persistence test coverage: crash reproduction (before/after fix), legacy JSON load, FlatBuffers round-trip, precision validation (decimal ↔ double), edge cases (empty projects, large results, null results), cancelled/failed save recovery
+- ✅ Save crash fix integrated into `ProjectService`
+
+**Test Results:**
+- 110/112 tests passing
+- 2 skipped (documented)
+- Zero regressions to Phase 0–5 domain/service paths
+- WebUI build verified
+
+**Key Decisions:**
+- FlatBuffers binary chosen for compression, determinism, and schema evolution safety
+- Dual-read gate ensures graceful legacy JSON support during transition
+- Decimal → double precision verified within acceptable tolerance for dimensional data
+- Snapshot determinism achieved through sorted material ordering before serialization
+
+**Hicks Review:** ✅ APPROVED (2026-03-15T00:52:22Z) — All validation gates cleared; migration ready for merge
+
+**Status:** COMPLETE — Migration approved and ready for production
+
 ## Learnings
 
 - 2026-03-14: Initial team staffing. I own import, validation, domain services, and the nesting engine.
