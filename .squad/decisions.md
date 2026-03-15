@@ -898,3 +898,207 @@ Re-verify the Phase 5 bugfix batch (Dallas camera fix + Bishop PDF save-dialog h
 - **Phase 6 READY TO START** — Polish, edge cases, fidelity tuning, error-surface hardening
 - Viewer camera behavior + PDF export usability now match user requirements and desktop-host expectations
 
+---
+
+## Phase 6+ Decisions (FlatBuffers Migration)
+
+### 2026-03-15T00:16:03Z: User Directive
+
+**By:** Brandon Schafer (via Copilot)
+
+**Decision:** `.pnest` save files should move to Google FlatBuffers for persistence, and the current project save crash should be fixed as part of that work.
+
+**Why:** User request — captured for team memory.
+
+---
+
+### Decision: Ripley — FlatBuffers Migration + Save Crash Design Review
+
+**Author:** Ripley | **Date:** 2026-03-15 | **Status:** Approved
+
+#### Context
+
+Brandon requests `.pnest` project files move from JSON to Google FlatBuffers for persistence, and reports a save crash that must be fixed concurrently. This review defines the file-format strategy, backward compatibility approach, schema design, ownership split, risks, and implementation sequence.
+
+Current baseline: 108 tests (106 passed, 2 skipped, 0 failures), solution builds clean, WebUI builds clean.
+
+#### 1. File Format Strategy
+
+**Binary FlatBuffers with 8-byte header envelope:**
+
+```
+[4 bytes] Magic: "PNST" (0x504E5354)
+[2 bytes] Format version: uint16 (2 = FlatBuffers; 1 = legacy JSON)
+[2 bytes] Reserved flags (zero for now)
+[N bytes] FlatBuffers binary payload
+```
+
+The 8-byte header enables format detection: if the first 4 bytes equal `PNST`, parse the version field and dispatch to the FlatBuffers reader. Otherwise, rewind and attempt JSON deserialization (legacy v1 files have no magic header — they start with `{`).
+
+#### 2. Backward Compatibility — Read-Both, Write-New
+
+| Operation | Behavior |
+|---|---|
+| **Open** legacy JSON `.pnest` | Detect no `PNST` magic → JSON path → deserialize → load normally |
+| **Open** FlatBuffers `.pnest` | Detect `PNST` magic, version 2 → FlatBuffers path |
+| **Save / Save As** | Always writes FlatBuffers format (version 2) |
+| **Re-open in older build** | Not supported. One-way migration per file. |
+
+This is acceptable for a local single-user desktop tool. No server sync, no multi-version fleet.
+
+#### 3. FlatBuffers Schema
+
+Schema lives at `src/PanelNester.Services/Persistence/Schema/panelnester.fbs`. Generated C# committed alongside (not built on every compile).
+
+Key type-mapping decisions:
+
+| C# Domain Type | FlatBuffers Type | Rationale |
+|---|---|---|
+| `decimal` | `float64` | Panel dimensions need ≤4 decimal places; double gives 15+ significant digits. Conversion at serialization boundary. |
+| `DateTime?` | `string` | ISO 8601 date string. Nullable by FlatBuffers default (null/empty). |
+| `decimal?` (CostPerSheet) | `float64` + `bool has_cost_per_sheet` | FlatBuffers scalars can't be null. Companion bool is explicit. |
+| `IReadOnlyList<T>` | `[T]` (vector) | Direct mapping. Empty vector = no items. |
+
+**Naming:** FlatBuffers uses `snake_case` fields per convention. The C# generated code and manual mapping layer convert to PascalCase at the serialization boundary. The domain model records are NOT modified — all mapping lives in the serializer.
+
+**Schema versioning rule:** Fields may only be appended. Never reorder, rename, or remove fields once shipped. FlatBuffers guarantees forward/backward compat under this constraint.
+
+Full schema tables: `Project`, `ProjectMetadata`, `ProjectSettings`, `ReportSettings`, `Material`, `ProjectState`, `PartRow`, `NestResponse`, `NestSheet`, `NestPlacement`, `UnplacedItem`, `MaterialSummary`, `BatchNestResponse`, `MaterialNestResult`.
+
+#### 4. Save Crash Analysis
+
+Without a stack trace, the most probable crash paths (in order of likelihood):
+
+1. **`CaptureMaterialSnapshotsAsync` — duplicate key in `ToDictionary`:** If the material library has duplicate names (e.g., manually edited JSON), `liveMaterials.ToDictionary(m => m.Name)` throws `ArgumentException`. This escapes `ProjectService.SaveAsync`'s catch block (which only catches `ProjectPersistenceException`). The bridge dispatcher's catch-all converts it to a `host-error` response, but the WebUI's error handler may not present it cleanly.
+
+2. **Unhandled edge case in `mapMetadataToBridge`:** The TS function sends `date` as a date-only string (e.g., `"2026-03-15"`). The C# `ProjectMetadata.Date` is `DateTime?`. System.Text.Json handles ISO 8601 date-only strings since .NET 7, but user-typed freeform date strings would fail JSON deserialization, surfacing as a `BridgeDispatchException`.
+
+3. **Large payload / WebView2 message limit:** Projects with many nesting results generate large JSON bridge payloads. Unlikely for v1 project sizes, but worth noting.
+
+**Recommendation:** Parker should diagnose the crash BEFORE starting the FlatBuffers migration. The fix should wrap `CaptureMaterialSnapshotsAsync` failures in `ProjectPersistenceException` and/or deduplicate dictionary keys defensively. Hicks should write a crash-reproduction test.
+
+#### 5. Seam Ownership
+
+**Parker (Domain/Services):**
+- Fix the save crash (diagnose + patch `ProjectService.SaveAsync` / `CaptureMaterialSnapshotsAsync`)
+- Write `panelnester.fbs` schema
+- Run `flatc --csharp` to generate C# code, commit generated files
+- Add `Google.FlatBuffers` NuGet to `PanelNester.Services.csproj`
+- Implement `FlatBufferProjectSerializer` (new class, same save/load signatures as `ProjectSerializer`)
+- Add format-detection wrapper in `ProjectSerializer` that reads magic bytes and dispatches to JSON or FlatBuffers path
+- Handle `decimal ↔ double` conversion
+- Handle nullable `decimal?` with companion bools
+
+**Bishop (Desktop bridge):**
+- No bridge contract changes. Serialization format is transparent to the bridge — the bridge sends/receives `Project` domain objects, not raw bytes.
+- Verify file dialogs still work with `.pnest` extension (no change expected).
+- Bishop is available for other work during this slice.
+
+**Hicks (Testing):**
+- Save crash reproduction test (before fix)
+- FlatBuffers round-trip tests: save → load → assert equivalence
+- Legacy JSON migration tests: load a JSON `.pnest` → verify loads correctly
+- Precision tests: `decimal ↔ double` conversion for kerf widths, sheet dimensions, edge margins, costs
+- Edge cases: empty project, project with no materials, project with large nesting results, project with null nesting results
+- Integration gate: new → save → open → edit → save → verify
+
+**Dallas (WebUI):**
+- No changes. The WebUI sends/receives `ProjectRecord` through the bridge. The serialization format is a services-layer concern.
+
+#### 6. Risks
+
+| Risk | Severity | Mitigation |
+|---|---|---|
+| `decimal` → `double` precision loss | Low | Panel dimensions need ≤4 decimal places. Double gives 15+. Test explicit round-trip values. |
+| Schema evolution violations | Medium | Document the append-only rule. Schema changes require Ripley review. |
+| `flatc` build tool availability | Low | Commit generated C# files. Only re-run `flatc` when schema changes. |
+| Save crash carried into new format | High | Fix crash FIRST (Batch 1), before any FlatBuffers code. |
+| One-way migration surprises users | Low | Local single-user tool. No version fleet. Acceptable. |
+| FlatBuffers NuGet version pinning | Low | Pin to latest stable. No transitive dependency conflicts with existing packages. |
+
+#### 7. Dependencies & Tooling
+
+- **NuGet:** `Google.FlatBuffers` (latest stable) → `PanelNester.Services.csproj`
+- **Build tool:** `flatc` compiler (download from FlatBuffers GitHub releases). Used offline; generated C# committed to repo.
+- **No Domain project changes.** Domain records stay pure. All FlatBuffers mapping lives in `PanelNester.Services/Persistence/`.
+- **No Desktop project changes.** Bridge layer is format-agnostic.
+- **No WebUI changes.** Format is transparent.
+
+#### 8. Implementation Sequence
+
+**Batch 1 — Fix crash + Schema (Parker + Hicks parallel):**
+- Parker: Diagnose save crash, patch `CaptureMaterialSnapshotsAsync` / error handling
+- Parker: Write `.fbs` schema, run `flatc`, add NuGet package, commit generated code
+- Hicks: Write save crash reproduction test, verify fix
+
+**Batch 2 — Serializer implementation (Parker + Hicks parallel):**
+- Parker: Implement `FlatBufferProjectSerializer` (write path + read path)
+- Parker: Implement format-detection wrapper (magic bytes → dispatch)
+- Parker: Wire new serializer into `ProjectService` (transparent swap, same `ProjectSerializer` interface)
+- Hicks: Round-trip tests, precision tests, legacy load tests
+
+**Batch 3 — Integration gate (Hicks + Bishop):**
+- Hicks: Full integration pass (new → save → open → edit → save → verify)
+- Hicks: Legacy migration pass (open JSON `.pnest` → save → reopen → verify FlatBuffers format)
+- Bishop: Verify desktop integration (file dialogs, bridge round-trip unchanged)
+
+#### 9. Out of Scope
+
+- Compression (future flag in header, not v1)
+- Encryption (future flag in header, not v1)
+- Multi-file project bundles (not v1)
+- Schema migration tooling (not needed until schema version 3)
+- WebUI changes (format is transparent to the bridge)
+
+#### Consequences
+
+- Save crash fixed before new serialization work begins
+- `.pnest` files transition from JSON to FlatBuffers binary — smaller, faster, schema-validated
+- Existing JSON `.pnest` files remain openable (format detection reads magic bytes)
+- Domain model records untouched — all FlatBuffers mapping is a services-layer concern
+- Bridge contracts unchanged — serialization format is transparent to desktop/WebUI
+- Schema versioning is append-only — future fields added without breaking existing files
+- Parker owns the full services-layer implementation; Bishop is freed for other work
+
+---
+
+### Decision: Hicks — FlatBuffers Save Gate & Migration Test Plan
+
+**Author:** Hicks | **Date:** 2026-03-15 | **Status:** Approved
+
+#### Context
+
+Brandon requested `.pnest` saves move from JSON to Google FlatBuffers while also fixing the current project-save crash/failure path.
+
+#### Decision
+
+Keep the `.pnest` extension stable, but require a dual-read transition gate: PanelNester must still open existing JSON `.pnest` files, and any newly saved `.pnest` file must use the new FlatBuffers encoding.
+
+#### Why
+
+The repo already ships JSON `.pnest` artifacts (`sample-project.pnest`) and current persistence tests are built around saved metadata, material snapshots, part-row validation state, and last nesting results. A format swap without legacy-open coverage would turn old customer/project files into silent regressions.
+
+#### Testing Impact
+
+Hicks's gate now requires:
+1. Proof that new saves are no longer JSON text (format detection via magic bytes)
+2. Proof that a legacy JSON `.pnest` can still open and be re-saved
+3. Proof that cancelled/failed saves remain non-destructive and do not poison the next save attempt
+
+#### Migration Test Coverage
+
+- Save crash reproduction test (before fix applied)
+- Legacy JSON load tests (existing `.pnest` files still open)
+- FlatBuffers round-trip tests (save → load → equivalence)
+- Precision tests (decimal ↔ double conversions)
+- Edge cases (empty projects, large nesting results, null results)
+- Cancelled/failed save non-destructiveness (no data corruption on next save)
+
+#### Consequences
+
+- FlatBuffers adoption gate ensures backward compatibility
+- Legacy project files remain usable indefinitely
+- Migration path clear for users with existing `.pnest` archives
+- Save crash fix verified before format transition
+- Non-destructive save recovery prevents data loss on failures
+

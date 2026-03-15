@@ -34,6 +34,8 @@
 - ✓ **PHASE 5 FOLLOW-UP COMPLETE** (2026-03-14T23:47:32Z) — Viewer refinement + report formatting
 - ✓ **PHASE 5 BUGFIX BATCH APPROVED** (2026-03-15T00:07:11Z) — Camera lock + PDF save-dialog hardening
 
+- 2026-03-15T00:23:56Z: **FLATBUFFERS MIGRATION GATE APPROVED.** Brandon requested `.pnest` saves move from JSON to Google FlatBuffers + fix current project save crash. Approved dual-read transition gate: existing JSON `.pnest` files must still open/re-save, newly saved files must be FlatBuffers binary. Test matrix includes: crash reproduction (before/after fix), legacy JSON load, FlatBuffers round-trip, precision (decimal ↔ double), edge cases (empty projects, large results, null results), cancelled/failed save recovery. Three-phase gate aligned with Ripley's Batch 1/2/3 sequence. Orchestration log recorded. Ready to write crash reproduction test once Parker delivers Batch 1 schema + crash fix.
+
 ## Phase 4 Scope (Import Pipeline Tests & Integration Gate)
 
 **Ownership:** Hicks (Tests and integration review gate)

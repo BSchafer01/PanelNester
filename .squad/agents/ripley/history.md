@@ -39,11 +39,11 @@ I own architecture, scope control, and reviewer gating for the full product.
 
 - 2026-03-14T23:33:49Z: **PHASE 5 FOLLOW-UP CORRECTION CYCLE AUTHORIZED.** Analyzed Brandon's five post-approval feedback items. Root cause isolation: Dallas owns Three.js viewer migration + height constraint (WebUI only); Parker owns PDF label + percentage formatting fixes (Services/Exporter only); Bishop has no work (no bridge changes). Ownership split recorded in `.squad/decisions.md`. Orchestration log recorded. No cross-layer dependencies; parallel execution authorized.
 
+- 2026-03-15T00:23:56Z: **FLATBUFFERS MIGRATION DESIGN REVIEW COMPLETE.** User directive captured: `.pnest` save files should move to Google FlatBuffers while fixing the current project save crash. Specified 8-byte PNST header format, dual-read backward compatibility strategy, save crash root-cause analysis (duplicate key in `CaptureMaterialSnapshotsAsync`), FlatBuffers schema (type mappings, append-only versioning rule), seam ownership split (Parker owns serializers, Bishop unchanged, Hicks owns test matrix, Dallas unchanged), three-batch implementation sequence (Batch 1: crash fix + schema; Batch 2: serializer implementation; Batch 3: integration gate). All decisions merged to `decisions.md`. Orchestration log recorded. Ready to hand off to Parker + Hicks for Batch 1 (crash diagnosis + schema definition).
+
 ## Next Steps
 
-- Phase 5 follow-up corrections authorized (Dallas + Parker parallel execution)
-- Dallas: Three.js viewer migration, viewer max-height constraint
-- Parker: PDF sheet labels, percentage format fix
-- Hicks: Acceptance gate on five user-visible evidence checkpoints
-- Phase 6 design review waits for Phase 5 follow-up clearance
-- Polish scope: viewer refinements, PDF fidelity tuning, performance optimization, error-surface hardening
+- FlatBuffers Batch 1 (Parker + Hicks parallel): Diagnose save crash, write `.fbs` schema, generate C# code, add NuGet package, write crash reproduction test
+- Parker: Patch `CaptureMaterialSnapshotsAsync`, create `panelnester.fbs`, run `flatc`, commit generated code
+- Hicks: Write save crash reproduction test, verify fix
+- Phase 6 design review waits for FlatBuffers Batch 1 completion

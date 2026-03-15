@@ -427,6 +427,50 @@ Panel-B,12,36,0,Demo Material
 
 ---
 
+## Phase 6 Save Batch — FlatBuffers `.pnest` Migration + Save-Crash Hardening
+
+> Hicks will not clear this batch on implementation claims alone. The app has to prove three things together: new `.pnest` saves are truly FlatBuffers on disk, legacy JSON `.pnest` projects stay readable during the transition, and the current project-save crash/failure path becomes a stable, user-visible non-crash outcome.
+
+### Test Case 28: New `.pnest` Saves Write FlatBuffers and Reopen Without Drift
+
+1. Create or open a project with non-default metadata, imported rows, a selected material, and a current nesting result.
+2. Save As to `phase6-flatbuffers-save.pnest`.
+3. Inspect the saved file in a plain text editor, then reopen that exact file in PanelNester.
+4. **Pass:** the file is no longer readable JSON text, the app reopens it successfully, and metadata, import rows, material snapshots, selected material, and the latest nesting result all match the pre-save state.
+5. **Fail:** the file is still JSON, reopen loses or mutates persisted data, or the save/open sequence crashes or silently resets the session.
+
+### Test Case 29: Legacy JSON `.pnest` Files Still Open and Can Be Re-Saved
+
+1. Open a known-good legacy JSON `.pnest` fixture (for example a pre-migration project copy or `sample-project.pnest`).
+2. Verify the project loads with its metadata, imported parts, material snapshots, and last nesting result intact.
+3. Save that project to a new `.pnest` path, close it, and reopen the newly saved file.
+4. **Pass:** the legacy JSON file opens without manual conversion, the re-saved file uses the new FlatBuffers encoding, and the reopened project still matches the legacy source data.
+5. **Fail:** old `.pnest` files now break without an explicit migration outcome, or the re-save drops snapshots, row validation state, or nesting/report context.
+
+### Test Case 30: Project Save Dialog Stays Interactive Through Rename and Save
+
+1. Start from an unsaved or dirty project and invoke **Save** or **Save As** so the native project save dialog opens.
+2. Rename the file, edit the folder if practical, and complete the save to a known path.
+3. **Pass:** the dialog stays responsive, accepts filename edits, respects the chosen folder/name, writes a `.pnest` file to that exact path, and the app does not crash or freeze.
+4. **Fail:** the save dialog itself crashes the host, becomes uneditable, dismisses prematurely, or writes somewhere other than the user-selected path.
+
+### Test Case 31: Corrupt or Unsupported `.pnest` Files Fail Cleanly Across Both Formats
+
+1. Prepare one broken legacy JSON `.pnest` file and one broken FlatBuffers `.pnest` file (for example truncated bytes, random byte edits, or an unsupported version marker).
+2. Attempt to open both files while another valid project is already open.
+3. **Pass:** each failure surfaces a specific, user-visible outcome (`project-corrupt`, `project-unsupported-version`, or an explicitly documented legacy-compatibility message), and the currently open project remains intact.
+4. **Fail:** either format crashes the app, clears the active session, or falls back to a generic error that gives the user no actionable clue.
+
+### Test Case 32: Cancelled or Failed Project Save Does Not Leave Partial State or Poison the Next Attempt
+
+1. Start a project save, then either cancel the dialog or intentionally choose a target that should fail cleanly.
+2. Confirm the current project remains open, dirty state is still accurate, and no partial `.pnest` artifact is left behind at the failed target.
+3. Immediately run Save/Save As again to a valid path and reopen the resulting file.
+4. **Pass:** the first attempt ends with a clear non-crash outcome, the second attempt succeeds without restarting the app, and the reopened file contains the latest project state rather than stale or partially saved data.
+5. **Fail:** one failed/cancelled attempt breaks the next save, clears unsaved work, leaves behind a corrupt partial file, or requires an app restart before saving works again.
+
+---
+
 ## Acceptance Criteria
 
 - [ ] Preflight: `dotnet test` reports zero failures and `npm run build` succeeds, with only documented placeholder skips remaining
@@ -458,6 +502,11 @@ Panel-B,12,36,0,Demo Material
 - [ ] Phase 5 bugfix batch: viewer interaction remains 2D-only after the camera fix (zoom/pan allowed, tilt/orbit/roll blocked)
 - [ ] Phase 5 bugfix batch: the native PDF save dialog remains interactive long enough to rename the file, change location, and press Save without crashing
 - [ ] Phase 5 bugfix batch: the exported PDF lands at the exact filename/path chosen in the dialog, and cancel/failure does not break the next export attempt
+- [ ] Phase 6 FlatBuffers batch: new `.pnest` saves are binary FlatBuffers on disk and reopen with no metadata, import-row, snapshot, selected-material, or nesting-result drift
+- [ ] Phase 6 FlatBuffers batch: existing JSON `.pnest` fixtures remain openable during the transition and can be re-saved into the new format without data loss
+- [ ] Phase 6 FlatBuffers batch: corrupt or unsupported `.pnest` files fail with specific, user-visible outcomes while the current session stays intact
+- [ ] Phase 6 FlatBuffers batch: the native project save dialog stays interactive through rename/folder changes and writes to the exact path chosen by the user
+- [ ] Phase 6 FlatBuffers batch: cancelled or failed project saves leave no partial project artifact, preserve dirty state, and do not block the next valid save attempt
 
 ---
 
