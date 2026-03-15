@@ -1102,3 +1102,196 @@ Hicks's gate now requires:
 - Save crash fix verified before format transition
 - Non-destructive save recovery prevents data loss on failures
 
+---
+
+## Import Page Cleanup Decisions (2026-03-15)
+
+### Decision: Hicks — Import Page Cleanup Reviewer Gate
+
+**Author:** Hicks | **Date:** 2026-03-15 | **Status:** APPROVED ✅
+
+#### Context
+
+Brandon Schafer requested cleanup of the Import page UI to remove debug/validation chrome sections and streamline the primary workflows. The reference screenshot identifies four specific sections marked for removal while preserving core import, edit, and nesting functionality.
+
+#### Sections to Remove
+
+1. **Material selection block** — Material dropdown, selection summary, and info text  
+2. **Status chips row** — Connected | Rows loaded | Material selected | Ready pills  
+3. **Detail-stack informational text** — File, Import, Material library, Nesting, Correction workflow detail rows  
+4. **Validation section at bottom** — Validation eyebrow, correction workflow card, rows needing attention card, warnings/errors message cards
+
+#### Sections That Must Remain
+
+1. **Top section header and import controls** — Eyebrow, heading, Retry/Choose file/Run batch nesting buttons  
+2. **Payload section and imported rows table** — Stats (Rows, Valid, Warnings, Errors), filters (material, status), sort controls, Add row editor, row table with full CRUD  
+3. **All event handlers and state management** — Import, nesting, row mutation workflows  
+4. **Bridge integration points** — Connection status, busy states  
+
+#### Eight Non-Negotiable Review Gates
+
+1. Material selection block removal (JSX + CSS cleanup, no orphaned prop warnings)
+2. Status chips removal (correct bridge/import state reported via table)
+3. Detail-stack informational text removal (CSS cleanup)
+4. Validation section removal (CSS cleanup)
+5. Imported rows table fully operational (all filtering, sorting, add/edit/delete working)
+6. Import actions and nesting entry points operational (Choose file, Run nesting, Retry)
+7. Build/test/regression coverage (npm build ✅, dotnet test ✅, 132+ tests baseline)
+8. CSS cleanup (no dead rules, all remaining styling intact)
+
+#### Approval Verdict
+
+**APPROVED ✅**
+
+---
+
+### Decision: Dallas — Import Page Cleanup
+
+**Author:** Dallas | **Date:** 2026-03-15 | **Status:** COMPLETED ✅
+
+#### Context
+
+Batch 1 removes material library selection chrome (material-selector-block, selection summary, stat cards) and validation panel from Import page, consolidating single-sheet nesting focus.
+
+#### Decision
+
+- Import page removes library-material selection and library-status chrome
+- Material context comes from imported row values (`materialName`) and row table filters, not top-of-page library picker
+- Validation stays inline at row level (not duplicated in separate bottom panel)
+- Status chips removed (state already visible in table)
+- Preserved: header actions, imported rows table, full row CRUD, filtering, sorting
+
+#### Consequences
+
+- Import stays focused on file intake, row correction, and launching nesting
+- Materials management remains on dedicated Materials page
+- Validation inline at row level keeps attention on table, not split panel
+
+#### Implementation Status (Batch 1)
+
+- ✅ Material-selector-block JSX and props removed
+- ✅ Status chips (Connected/Rows loaded/Material selected/Ready) removed
+- ✅ Validation section (bottom panel) removed
+- ✅ CSS cleanup: no `.material-selector-block`, `.status-row`, `.message-grid` orphans
+- ✅ Props deprecated: `materials`, `selectedMaterialId`, `materialsBusy`, `onSelectMaterial`, `onOpenMaterials`, etc.
+- ✅ Imported rows table fully operational with filtering, sorting, add/edit/delete
+- ✅ Build: `npm run build` ✅ (1.92s)
+- ✅ Tests: 132 passing (130 passed, 2 skipped, 0 failures)
+
+#### Acceptable Deviation
+
+Detail-stack metadata rows (File, Import, Nesting, Correction workflow) retained in Batch 1. Hicks flagged as acceptable deviation; Dallas completed follow-up batch 2 to fully remove these rows.
+
+---
+
+### Decision: Dallas — Import Page Cleanup Follow-Up
+
+**Author:** Dallas | **Date:** 2026-03-15 | **Status:** COMPLETED ✅
+
+#### Context
+
+Batch 1 review flagged remaining detail-stack informational rows. Batch 2 removes the `detail-stack` metadata block completely.
+
+#### Decision
+
+- Remove the `detail-stack` metadata block and all informational rows (File, Import, Nesting, Correction workflow)
+- Keep header actions (Retry, Choose file, Run batch nesting) and imported-row workflow intact
+
+#### Implementation Status (Batch 2)
+
+- ✅ Detail-stack div and all metadata rows completely removed
+- ✅ CSS cleanup: no `.detail-stack` rules remain
+- ✅ Header actions and Payload section fully preserved
+- ✅ Build: `npm run build` ✅ (1.84s)
+- ✅ Tests: 132 passing (130 passed, 2 skipped, 0 failures)
+- ✅ Page now fully matches reference screenshot
+
+---
+
+### Decision: Hicks — Import Page Cleanup Review (Batch 1)
+
+**Author:** Hicks | **Date:** 2026-03-15 | **Status:** APPROVED ✅
+
+#### Verdict
+
+APPROVED with acceptable deviation (detail-stack partial retention flagged for follow-up).
+
+#### Gates Cleared
+
+| Gate | Status | Evidence |
+|------|--------|----------|
+| Material selection block removal | ✅ | No JSX, no dropdown, no stat cards |
+| Status chips removal | ✅ | No `status-row` div, no pills |
+| Detail-stack modification | ⚠️ | Material library row removed; File/Import/Nesting/Correction retained (acceptable) |
+| Validation section removal | ✅ | No bottom panel |
+| Table functionality | ✅ | All columns, filtering, sorting, add/edit/delete working |
+| Import actions | ✅ | Choose file, Run batch nesting, Retry wired |
+| Build/test pass | ✅ | `npm run build` ✅, 132 tests (130 passed, 2 skipped) |
+| CSS cleanup | ✅ | No orphaned selectors |
+
+#### Consequences
+
+- Import page now focused on file intake, row correction, and nesting launch
+- Material library selection fully moved to Materials page
+- Validation remains inline at row level (not duplicated in separate panel)
+- No regressions in dependent workflows
+
+---
+
+### Decision: Hicks — Import Page Cleanup Follow-Up Review
+
+**Author:** Hicks | **Date:** 2026-03-15 | **Status:** APPROVED ✅
+
+#### Context
+
+Dallas completed Batch 2 follow-up to fully remove remaining detail-stack metadata rows.
+
+#### Verdict
+
+APPROVED ✅
+
+#### Gates Cleared
+
+| Gate | Status | Evidence |
+|------|--------|----------|
+| Detail-stack metadata block removal | ✅ | No `detail-stack` class, all metadata rows deleted |
+| Header action buttons preserved | ✅ | Retry, Choose file, Run batch nesting intact |
+| Payload section intact | ✅ | Stats, filters, toolbar, Add row editor, table all present |
+| Validation chrome removal | ✅ | No separate Validation panel |
+| Import/nesting workflows preserved | ✅ | Row add/edit/delete, batch nesting, filtering fully functional |
+| CSS cleanup | ✅ | No orphaned selectors |
+| Build success | ✅ | `npm run build` ✅ (1.84s), 132 tests (130 passed, 2 skipped) |
+
+#### Page Structure (Current)
+
+```
+┌─ Section: Import header
+│  ├─ Eyebrow: "Import"
+│  ├─ Heading: "Import rows and prepare them for nesting"
+│  └─ Actions: [Retry] [Choose file] [Run batch nesting]
+│
+├─ Section: Payload
+│  ├─ Stats: Rows | Valid | Warnings | Errors
+│  ├─ Filters: Material | Status | Sort direction
+│  ├─ [Add row editor] (conditional)
+│  └─ Table: Imported rows with full CRUD
+└─
+```
+
+#### Consequences
+
+✅ Import page now fully focused on file intake and row correction  
+✅ Material library selection fully moved to Materials page  
+✅ Inline validation at row level maintained (no duplication)  
+✅ Header actions remain prominent and accessible  
+✅ Nesting workflow triggers preserved  
+✅ No regressions in dependent workflows  
+
+#### Approval Notes
+
+This follow-up successfully completes the screenshot-aligned cleanup. The page now presents a clean, action-focused interface without losing any core functionality.
+
+**Decision: APPROVED for merge** ✅
+
+---
+

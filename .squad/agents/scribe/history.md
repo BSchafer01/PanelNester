@@ -39,9 +39,24 @@ I maintain code quality, project standards, and team coordination records. I doc
 📌 2026-03-14T19:59:29Z: Deleted Phase 5 inbox decision files (6 files removed)
 📌 2026-03-14T19:59:29Z: Updated agent histories: Parker, Bishop, Dallas (locked out), Hicks (rejection details), Ripley (next cycle owner)
 
+## Recent Updates (Continued)
+
+📌 2026-03-15T16:32:00Z: Import page cleanup batch approved and logged
+  - Hicks gate (eight criteria): material selection, status chips, detail-stack, validation panel removal
+  - Dallas Batch 1: removed material block, status chips, validation panel; partial detail-stack retained
+  - Hicks Batch 1 review: APPROVED with acceptable deviation note
+  - Dallas Batch 2: fully removed remaining detail-stack metadata rows
+  - Hicks Batch 2 review: APPROVED; page matches reference screenshot
+  - Session log created (2026-03-15T16-32-00Z-import-cleanup-batch.md)
+  - Orchestration logs created for Dallas and Hicks
+  - All five decision inbox items merged to decisions.md (gates, implementation, reviews)
+  - All inbox files deleted; no import-related inbox items remain
+  - Agent histories updated: Dallas, Hicks
+
 ## Learnings
 
 - Scribe initializes documentation infrastructure for team coordination.
 - Decision inbox enables asynchronous proposal submission; Scribe merges into consensus.
 - Orchestration logs track why agents were selected and what they accomplished.
 - Session logs provide brief record of completed work phases.
+- Batch follow-ups (acceptable deviations with follow-up corrections) should be documented in separate logs while merging decisions into coherent sections.
