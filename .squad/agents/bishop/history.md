@@ -91,6 +91,8 @@
 - 2026-03-14: Phase 3 extends the bridge with project lifecycle messages. Design keeps handler seams clean by consuming stable `IProjectService` interface from Parker while Dallas consumes the same bridge contracts on the UI side. Material snapshots captured at project creation preserve nesting configuration across sessions.
 - 2026-03-14T17:56:50Z: **PHASE 3 COMPLETE** — Project bridge contracts, handlers, service integration, and snapshot preservation all delivered and tested (80 passing, 2 skips).
 - 2026-03-14T19:59:29Z: Phase 5 rejection: Export workflows demand both visual completeness (sheet diagrams) and comprehensive error-path coverage (cancelled saves, file-write failures). Bridge contracts alone are insufficient without proof of mission-critical reliability pathways.
+- 2026-03-15T00:58:00Z: Phase 6 bridge hardening landed best by splitting error detail from user copy: `BridgeError.message` can keep technical context while `userMessage` stays stable and non-technical for UI display, with cancellation intentionally leaving `userMessage` empty so cancel flows stay quiet.
+- 2026-03-15T00:58:00Z: Native dialog resilience is safest when the host serializes dialog entry at the service boundary, not just on the WPF dispatcher, so rapid cancel/retry cycles cannot overlap or leave sticky state behind.
 
 ## Recent Work (2026-03-14T18:14:59Z)
 
@@ -158,3 +160,29 @@
 - ✅ `dotnet test .\PanelNester.slnx --nologo` passed; all Phase 0–5 tests passing (108 total, 106 passed, 2 skipped)
 
 **Outcome:** ✅ APPROVED — PDF save-dialog path hardened with dispatcher marshalling and explicit host window ownership. Phase 5 bugfix batch cleared all integration gates.
+
+## Phase 6 — Bridge Error Contract & Dialog Resilience (2026-03-15)
+
+**Ownership:** Bishop (Desktop bridge layer) ✅
+
+**Assignment:** Bridge error messaging (userMessage field), native dialog polish, reliability smoke verification
+
+**Deliverables:**
+- ✅ Extended `BridgeError` with optional `userMessage` field alongside existing `message` (technical detail)
+- ✅ `BridgeError.Create` centralizes code-to-userMessage mapping for all bridge failure types
+- ✅ Auto-populate `userMessage` for non-cancel failures: unsupported-message, invalid-payload, host-error, dispatcher-level exceptions
+- ✅ Leave `userMessage` unset (`null`) for `cancelled` responses so UI treats user cancellation as quiet, expected outcome
+- ✅ `NativeFileDialogService` serializes dialog entry with `SemaphoreSlim` to prevent rapid cancel/retry overlaps and race conditions
+- ✅ Test coverage: Phase06BridgeHardeningSpecs validates unknown messages, unexpected exceptions, validation errors all include non-technical copy
+- ✅ Cancel-retry tests confirm null userMessage and repeated attempts succeed without accumulating state
+- ✅ 127 total tests: 125 passed, 2 skipped, 0 failures (net +15 from baseline 112)
+
+**Key Decisions:**
+- Split error detail (technical `message`) from user copy (`userMessage`) for UI flexibility
+- Centralize code-to-message mapping in `BridgeError.Create` to avoid per-handler duplication
+- Treat cancellation as intentional (not error), leave userMessage empty for quiet handling
+- Serialize dialog entry at service boundary for thread-safe rapid-cycle handling
+
+**Hicks Review:** ✅ APPROVED (2026-03-15) — All bridge error and dialog resilience gates cleared
+
+**Status:** COMPLETE — Phase 6 bridge error contract integrated

@@ -133,6 +133,31 @@
 
 **Status:** COMPLETE — Migration approved and ready for production
 
+## Phase 6 — Hardening & Smoke Verification (2026-03-15)
+
+**Ownership:** Parker (Reporting hardening) ✅
+
+**Assignment:** PDF export empty-result handling, dense-layout SVG refinements
+
+**Deliverables:**
+- ✅ `ReportDataService.HasResults` only returns true when ≥1 sheet has ≥1 placement (previously counted any sheet)
+- ✅ `QuestPdfReportExporter` shows "No nesting results are available for this report" when no renderable layouts
+- ✅ Dense sheet diagrams: 1pt minimum stroke width, 6pt minimum label font floor
+- ✅ Panels too small for inline labels use numbered callout badges, ordered placement summary as legend
+- ✅ Zero-placement sheets render explicit "No placements" state instead of blank outline
+- ✅ Test coverage: ReportDataServiceSpecs (empty/zero-sheet/zero-placement tests), QuestPdfReportExporterSpecs (dense-layout callout validation)
+- ✅ 127 total tests: 125 passed, 2 skipped, 0 failures (net +15 from baseline 112)
+
+**Key Decisions:**
+- Empty-result exports succeed and remain readable (consistency with empty material behavior)
+- Reuse existing placement summary as legend/callout reference (avoids widening report contract)
+- Numbered callouts deterministic (placement index-based) for stable PDF reproduction
+- Bridge payloads, persistence, FlatBuffers unchanged (reporting layer only)
+
+**Hicks Review:** ✅ APPROVED (2026-03-15) — All empty-result and dense-layout gates cleared
+
+**Status:** COMPLETE — Phase 6 reporting hardening integrated
+
 ## Learnings
 
 - 2026-03-14: Initial team staffing. I own import, validation, domain services, and the nesting engine.
@@ -140,3 +165,5 @@
 - 2026-03-14: Parallel agent execution and decision-driven architecture allow teams to de-risk at seams early and move fast once contracts stabilize.
 - 2026-03-14: Phase 3 extends Phase 2 architecture: projects persist as JSON files with metadata, settings, and material snapshots. Design keeps repo/serializer seams clean by versioning the schema early and deferring XLSX/multi-material/export to later phases.
 - 2026-03-14T19:59:29Z: Phase 5 rejection: PDF reporting requires both sheet visuals (geometry rendering) and comprehensive failure-path coverage. Success-path validation is necessary but not sufficient for reviewer sign-off on mission-critical export workflows.
+- 2026-03-15: Phase 6 hardening reveals that "results available" should mean renderable sheet placements (≥1 placement), not just non-empty material records. This allows zero-sheet and zero-placement exports to stay successful while showing correct empty-state.
+- 2026-03-15: Dense PDF layouts stay deterministic and readable if tiny panels fall back to numbered callouts while the existing ordered placement summary acts as the legend seam; that avoids widening report contracts and keeps phase scope bounded.

@@ -49,5 +49,49 @@
 - **Phase 3:** Project persistence, snapshot capture, 80 tests, Web UI integration
 - **Phase 4:** Full import pipeline (CSV/XLSX), inline editing, 93 tests, all gates cleared
 - **Phase 5:** Results viewer (Three.js), PDF reporting (QuestPDF), 110 tests (after Ripley revision + follow-up + bugfix batch)
+- **Phase 6:** Hardening slice — ✅ COMPLETE & APPROVED (2026-03-15)
+
+## Phase 6 Hardening Review (2026-03-15)
+
+- ✓ **PHASE 6 APPROVED** (2026-03-15) — Empty-result export, dense-layout readability, viewer edge cases, bridge error surfaces
+- Test count: **127 total** (125 passed, 2 skipped, 0 failures) — net +15 new tests from Phase 6
+- All five review gates cleared:
+  1. Empty-result export graceful and tested (ReportDataService, QuestPdfReportExporter tests)
+  2. Dense-layout readability via 1pt stroke floor, 6pt font floor, numbered callouts with legend
+  3. Viewer reset-to-fit on sheet switch, zero-placement sheets show outline + "No placements"
+  4. Bridge failures include `userMessage`; cancelled dialogs quiet (null userMessage)
+  5. No regressions; build passes
+- Residual manual smoke items (Test Cases 37–40): focus-loss during dialog, pointer capture release, zoom limits, precision after save/open
+
+**Key Phase 6 Learnings:**
+
+- Bridge error surface audit revealed code-to-message mapping is better than per-handler duplication; centralizing in `BridgeError.Create` keeps copy consistent.
+- Dense-layout callout strategy (numbered badges + placement summary as legend) avoids widening contracts while keeping panels identifiable.
+- Viewer `resetViewToken` pattern cleanly separates "same sheet, resize" from "different sheet, re-center" camera updates.
+- Dialog serialization via SemaphoreSlim prevents rapid cancel/retry race conditions without expanding feature scope.
+
+## Phase 6 Gate Setup (2026-03-15)
+
+- Drafted Phase 6 test matrix (`tests/Phase6-Hardening-Test-Matrix.md`) with five focus areas: empty-result export, dense-layout readability, save/open/export stability, viewer/pointer polish, and regression coverage.
+- Created decision document (`.squad/decisions/inbox/hicks-phase6-gate.md`) defining seven non-negotiable gates and required evidence artifacts.
+- Extended smoke-test guide with Test Cases 33–40 covering Phase 6 scenarios.
+- Baseline: 110 tests (2 skipped), FlatBuffers persistence live, Phase 5 fully approved.
+
+- 2026-03-15: Hardening slices need explicit evidence artifacts, not verbal claims. Screenshots/recordings of edge-case behavior are non-negotiable.
+- 2026-03-15: Empty-result and dense-layout scenarios expose different failure modes than happy-path tests—they must be explicitly smoked, not assumed covered.
+- 2026-03-15: Focus-loss during native dialogs is a desktop-specific risk that unit tests cannot catch; manual gate is mandatory.
+- 2026-03-15: Pointer capture bugs are easy to miss in quick demos; structured drag-outside-bounds test catches them.
+- 2026-03-15: Bridge error surface audit revealed code-to-message mapping is better than per-handler duplication; centralizing in `BridgeError.Create` keeps copy consistent.
+- 2026-03-15: Dense-layout callout strategy (numbered badges + placement summary as legend) avoids widening contracts while keeping panels identifiable.
+- 2026-03-15: Viewer `resetViewToken` pattern cleanly separates "same sheet, resize" from "different sheet, re-center" camera updates.
+- **2026-03-15: PHASE 6 INTEGRATION REVIEW APPROVED.** Final verdict on integrated batch from Ripley, Parker, Dallas, Bishop. All deliverables validated:
+  - Parker: ReportDataService + QuestPdfReportExporter (empty-result, dense-layout SVG) ✅
+  - Dallas: SheetViewer + ResultsPage (reset-to-fit, zero-placement, label overflow) ✅
+  - Bishop: BridgeError userMessage, NativeFileDialogService serialization ✅
+  - Hicks: Phase 6 empty-result tests, dense-layout assertions, bridge error tests ✅
+  - Test Results: 127 total (125 passed, 2 skipped, 0 failures) — net +15 from baseline 112
+  - Build Status: `dotnet test` ✅, `npm run build` ✅, no regressions
+  - **Verdict: APPROVED** — Phase 6 hardening complete; foundation solid for future scope expansion
+  - Residual manual smoke items (Test Cases 37–40) flagged for production-release gate (not blockers)
 
 **Detailed Phase 5 Review History

@@ -41,9 +41,24 @@ I own architecture, scope control, and reviewer gating for the full product.
 
 - 2026-03-15T00:23:56Z: **FLATBUFFERS MIGRATION DESIGN REVIEW COMPLETE.** User directive captured: `.pnest` save files should move to Google FlatBuffers while fixing the current project save crash. Specified 8-byte PNST header format, dual-read backward compatibility strategy, save crash root-cause analysis (duplicate key in `CaptureMaterialSnapshotsAsync`), FlatBuffers schema (type mappings, append-only versioning rule), seam ownership split (Parker owns serializers, Bishop unchanged, Hicks owns test matrix, Dallas unchanged), three-batch implementation sequence (Batch 1: crash fix + schema; Batch 2: serializer implementation; Batch 3: integration gate). All decisions merged to `decisions.md`. Orchestration log recorded. Ready to hand off to Parker + Hicks for Batch 1 (crash diagnosis + schema definition).
 
+- 2026-03-15: **FLATBUFFERS MIGRATION APPROVED.** Hicks review cleared: 112 tests (110 passed, 2 skipped, 0 failures). Manual review confirmed PNST header emission, legacy JSON backward compat, duplicate-material resilience, and failed-save recovery. FlatBuffers persistence baseline stable. Ready for Phase 6.
+
+- 2026-03-15: **PHASE 6 DESIGN REVIEW COMPLETE.** Defined "Hardening & Smoke Verification" slice. Bounded scope: empty-result export, dense-layout PDF readability, viewer edge cases (reset-to-fit, zero-placement sheets, label overflow), bridge error surface polish, and full manual smoke execution. Ownership split: Parker owns PDF empty/dense fixes; Dallas owns viewer edge states; Bishop owns bridge error messaging + dialog stability + smoke Sections 2+4; Hicks owns empty-result tests + dense-layout assertions + smoke checklist + integration gate. Three-batch sequence defined. Acceptance criteria: empty-result PDF works, dense layouts readable, viewer state stable, bridge errors user-friendly, smoke 100% pass, zero regression. Decision written to `.squad/decisions/inbox/ripley-phase6-slice.md`.
+
+- 2026-03-15: **PHASE 6 HARDENING BATCH COMPLETE & APPROVED.** Integrated all five-agent workstreams. Parker (PDF empty/dense), Dallas (viewer reset-to-fit, empty-state), Bishop (bridge error userMessage, dialog resilience), Hicks (gate design, test coverage, integration review). Test count 127 (125 passed, 2 skipped, 0 failures) — net +15 new tests from Phase 6 baseline 112. All five reviewer gates cleared:
+  1. Empty-result export graceful (ReportDataService, QuestPdfReportExporter tests green)
+  2. Dense-layout readable (1pt stroke floor, 6pt font floor, numbered callouts with legend)
+  3. Viewer reset-to-fit on sheet switch (resetViewToken pattern), zero-placement sheets show outline + "No placements" label
+  4. Bridge failures include `userMessage`; cancelled dialogs quiet (null userMessage)
+  5. No regressions; all Phase 5 test coverage remains green
+  - Residual manual smoke items (Test Cases 37–40): focus-loss during native save dialog, pointer capture release, zoom limits, precision after save/open (documented for production-release gate, not blockers)
+  - Decisions merged: ripley-phase6-slice, hicks-phase6-gate, hicks-phase6-review, parker-phase6-hardening, bishop-phase6-bridge, dallas-phase6-viewer, parker-flatbuffers-migration, hicks-flatbuffers-review
+  - Orchestration logs created: 2026-03-15T01-24-25Z-{ripley,hicks,parker,bishop,dallas}.md
+  - Session log created: 2026-03-15T01-24-25Z-phase6-hardening-batch.md
+  - Decision inbox merged and deleted
+  - Foundation hardened for future scope expansion
+
 ## Next Steps
 
-- FlatBuffers Batch 1 (Parker + Hicks parallel): Diagnose save crash, write `.fbs` schema, generate C# code, add NuGet package, write crash reproduction test
-- Parker: Patch `CaptureMaterialSnapshotsAsync`, create `panelnester.fbs`, run `flatc`, commit generated code
-- Hicks: Write save crash reproduction test, verify fix
-- Phase 6 design review waits for FlatBuffers Batch 1 completion
+- **Manual Smoke Validation:** Execute Test Cases 37–40 (focus-loss, pointer release, zoom limits, precision) before production release
+- **Phase 7 Scoping:** Performance optimization or new features (deferred until Phase 6 smoke evidence complete)

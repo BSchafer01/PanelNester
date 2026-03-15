@@ -169,6 +169,7 @@
 - 2026-03-14: Phase 3 introduces project-scoped UI: a metadata editor, dirty/clean state tracking, and snapshotted materials. Design keeps page components clean by consuming stable bridge contracts from Bishop while data flows through app-shell state.
 - 2026-03-14: Project lifecycle UI requires two-part state management: session-scoped state (current project metadata, dirty flag) and workflow state (navigating vs saving). Material snapshots are separate from live library to preserve historical configuration clarity.
 - 2026-03-14T19:59:29Z: Phase 5 rejection: Results viewer and report UI are visually complete, but missing critical reviewer evidence for PDF visual fidelity (sheet geometry rendering) and export reliability (failure paths). UI-layer completeness is necessary but not sufficient for integrated gate sign-off.
+- 2026-03-15T00:45:00Z: Phase 6 viewer hardening works best when “no sheets / no placements” is treated as a first-class results state instead of a blank or pending state. The Results page should keep report context visible, the viewer should show an explicit empty outline/notice, and sheet/material switches should drive a fresh fit token so the orthographic camera always re-frames the active sheet.
 
 ## Phase 5 Bugfix Batch (2026-03-15T00:07:11Z)
 
@@ -181,4 +182,32 @@
 - ✅ `npm run build` passed; all Phase 0–5 tests passing (108 total, 106 passed, 2 skipped)
 
 **Outcome:** ✅ APPROVED — Viewer camera now correctly oriented to true top-down plan view while preserving 2D-only interaction model. Phase 5 bugfix batch cleared all observable behavior gates.
+
+## Phase 6 — Viewer Empty-State & Fit Behavior (2026-03-15)
+
+**Ownership:** Dallas (WebUI) ✅
+
+**Assignment:** Viewer edge cases, empty-result UI state, label overflow handling
+
+**Deliverables:**
+- ✅ Treat **no sheets + no placements** as explicit empty-result state (not pending or blank)
+- ✅ Keep report/export surface visible during empty state (Results page shows "No nesting results are available")
+- ✅ Drive viewer reset-to-fit from active material/sheet selection token (`activeMaterialKey:activeSheetId`)
+- ✅ Viewer uses `resetViewToken` prop dependency in useEffect to trigger `updateCameraLayout(true)` on material/sheet change
+- ✅ Render zero-placement sheets with visible outline and in-view "No placements" notice
+- ✅ Dense-layout labels degrade to truncation or compact callouts instead of overflow
+- ✅ `createPlacementLabel` function implements tiered strategy: inline → compact → callout with connectors
+- ✅ ResultsPage detects `hasEmptyResult` and shows clear empty-state with export-ready indicator
+- ✅ Test coverage: SheetViewer reset-to-fit validation, ResultsPage empty-state rendering, label overflow scenarios
+- ✅ 127 total tests: 125 passed, 2 skipped, 0 failures (net +15 from baseline 112)
+
+**Key Decisions:**
+- Treat empty-result as first-class state, not blank/pending—clarity for operators
+- Keep export button visible during empty state (allows "do nothing → export PDF with empty notice")
+- Use `resetViewToken` pattern to separate "same sheet resize" from "different sheet re-center" camera updates
+- Reuse existing label strategies (truncation, callouts) instead of adding new viewer modes
+
+**Hicks Review:** ✅ APPROVED (2026-03-15) — All viewer edge-case gates cleared
+
+**Status:** COMPLETE — Phase 6 viewer hardening integrated
 
