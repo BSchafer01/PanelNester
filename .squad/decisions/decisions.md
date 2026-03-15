@@ -319,4 +319,98 @@ Brandon requested a per-user, non-admin MSI installer for desktop distribution. 
 
 ---
 
-*Last updated: 2026-03-15T16:39:48Z*
+## .NET 8 Retarget
+
+### Decision: Bishop — .NET 8 Retarget For Per-User MSI
+
+**Date:** 2026-03-15 | **Agent:** Bishop
+
+**Context:** PanelNester's desktop app, supporting libraries, and tests were targeting .NET 10 while the repo-owned WiX installer published the desktop project as framework-dependent x64. The requirement was to keep the existing non-admin per-user MSI flow while making the packaged app runnable on .NET 8 machines.
+
+**Decision:**
+1. Retarget `PanelNester.Domain`, `PanelNester.Services`, `PanelNester.Desktop`, and all three test projects from .NET 10 to .NET 8
+2. Keep the WPF host on `net8.0-windows`
+3. Leave WiX packaging structurally unchanged (it publishes the desktop project directly and inherits the TFM)
+4. Preserve per-user MSI install root and explicit WebView2 user-data folder
+5. Validate via solution build, test re-run, WebUI rebuild, MSI rebuild, and staged publish runtimeconfig check
+
+**Consequences:**
+- Generated MSI packages a .NET 8-based desktop payload without changing per-user install behavior
+- Runtime prerequisites remain x64 .NET 8 Desktop Runtime + Microsoft Edge WebView2 Runtime
+- Future framework retargets should treat desktop project TFM as source of truth
+
+**Status:** ✅ APPROVED
+
+---
+
+### Gate: .NET 8 Retarget Acceptance (Hicks)
+
+**Date:** 2026-03-15 | **Agent:** Hicks
+
+**Five Pass Conditions:**
+1. **All relevant TFMs move together** — Domain/Services/tests to `net8.0`; Desktop/desktop tests to `net8.0-windows`; no hardcoded `net10.0` literals remain in review-critical files (csproj, tests, docs)
+2. **Desktop/WPF contract stays valid on .NET 8 Windows** — `UseWPF=true` preserved; `win-x64` publish flow continues; builds/tests succeed
+3. **Per-user MSI remains non-admin** — `Scope="perUser"`, `LocalAppDataFolder` install; no UAC prompts; clean uninstall without runtime residue
+4. **Regression baseline stays green** — 134 total / 132 passed / 2 skipped / 0 failed minimum
+5. **Runtime prerequisites are explicit** — Prerequisite shift from .NET 10 to .NET 8 called out in active validation docs
+
+**Evidence Required:** Diffs of all six project files + test/doc files with hardcoded TFM text; post-retarget test output; installer build output; non-admin install/launch/uninstall cycle proof.
+
+---
+
+### Review: .NET 8 Retarget (First Pass)
+
+**Date:** 2026-03-15 | **Agent:** Hicks | **Verdict:** ❌ REJECTED
+
+**Passed:**
+- All six TFMs correctly moved to .NET 8 / `net8.0-windows` ✅
+- Desktop test assertions updated to expect `net8.0-windows` ✅
+- Regression baseline green: 134 total / 132 passed / 2 skipped / 0 failed ✅
+- Per-user MSI builds and installs non-admin ✅
+- Installer publish runtimeconfig reports `tfm: net8.0` ✅
+
+**Failing:**
+- `tests\Phase0-1-Test-Matrix.md` line 15 still states desktop host should target `net10.0-windows`
+- Gate explicitly required authored test/doc files with hardcoded TFM literals to move with retarget
+- This mismatch tells future reviewers to expect the old framework target
+
+**Revision Owner:** Ripley (lock-out pattern — Bishop locked from self-revision). Correct all active validation docs to .NET 8; append-only histories unchanged.
+
+---
+
+### Decision: Ripley — .NET 8 Doc Fix
+
+**Date:** 2026-03-15 | **Agent:** Ripley
+
+**Scope:** Treat active review and smoke-test documents as part of the framework-retarget contract. When the app moves TFMs or runtime prerequisites, reviewer-facing matrices and smoke guides must be updated in the same correction slice.
+
+**Applied Changes:**
+1. Updated `tests\Phase0-1-Test-Matrix.md` to state desktop host target as `net8.0-windows`
+2. Updated `.squad\smoke-test-guide.md` to distinguish:
+   - Local build/test requirement: `.NET 8.0.x` SDK
+   - Installed-app validation requirement: x64 `.NET 8 Desktop Runtime` + `Microsoft Edge WebView2 Runtime`
+
+**Rationale:** Hicks' rejection was about review drift, not implementation quality. Leaving active docs on `.NET 10` would mislead future reviewers and anyone validating the MSI on a clean machine. Append-only history files stay untouched.
+
+**Validation:** 134 total / 132 passed / 2 skipped / 0 failed. No lingering `.NET 10` text in active docs.
+
+---
+
+### Final Review: .NET 8 Retarget
+
+**Date:** 2026-03-15 | **Agent:** Hicks | **Verdict:** ✅ APPROVED
+
+**Verified:**
+1. All six TFMs aligned on .NET 8 ✅
+2. Desktop/WPF contract valid on .NET 8 Windows ✅
+3. Active validation docs corrected (no stale .NET 10 references) ✅
+4. Baseline validation green after retarget ✅
+5. Runtime prerequisites explicit in active docs ✅
+
+**Non-Blocking:** MSI not digitally signed (deferred to production-release gate).
+
+**Decision:** APPROVED. Doc-fix slice clears gate. Project, tests, installer, and active validation docs now tell the same .NET 8 story.
+
+---
+
+*Last updated: 2026-03-15T17:06:36Z*

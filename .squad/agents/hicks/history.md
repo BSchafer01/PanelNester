@@ -63,3 +63,13 @@ I own acceptance criteria, regression coverage, and reviewer verdicts for the fu
 ---
 
 *Old gate definitions and detailed review checklists archived to `hicks\history-archive.md`.*
+
+## Recent Work (2026-03-15T17:06:36Z)
+
+- ✓ **NET 8 RETARGET GATE & REVIEWS COMPLETE.** Authored five-condition acceptance gate for .NET 8 downgrade: all six TFMs move together, Desktop/WPF contract stays valid, per-user MSI remains non-admin, baseline regression green, runtime prerequisites explicit. First review rejected on stale validation docs (`tests\Phase0-1-Test-Matrix.md` and `.squad\smoke-test-guide.md` still asserted .NET 10 when executable checks had moved to .NET 8). Locked Bishop from self-revision (pattern enforcement). Final re-review approved after Ripley corrected active validation docs to .NET 8. **APPROVED 2026-03-15T17:06:36Z**. Decisions merged; inbox files deleted; agent histories updated.
+
+## Learnings
+
+- .NET retarget review is not just six csproj edits: hardcoded TFM assertions, `bin\Debug\netX...` path literals, and framework-dependent installer runtime prerequisites must move in the same slice or the review will miss user-visible breakage.
+- Acceptance matrices that restate target frameworks are review-critical artifacts, not commentary; if executable checks move to the new TFM but the matrix still tells reviewers to expect the old one, the retarget stays incomplete.
+- Framework retarget re-review should separate three checks: executable targeting (`TargetFramework`/WPF/runtimeconfig), active reviewer docs, and user-facing prerequisite callouts. Approval is earned only when all three agree on the same runtime story.
