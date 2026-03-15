@@ -15,6 +15,7 @@
 📌 2026-03-14: **PHASE 2 ASSIGNMENT: Material Library Domain/Services Lead**
 📌 2026-03-14T17:16:57Z: **PHASE 2 COMPLETE** — Material CRUD contracts, JSON persistence, validation service, and bridge handlers delivered. 60 tests passing.
 📌 2026-03-14T20:17:23Z: **PHASE 5 COMPLETE** — Batch nesting orchestration, report settings, report data shaping, and test coverage delivered. 103 tests passing.
+📌 2026-03-15T23:07:13Z: **STOCK-WIDTH PREFERENCE COMPLETE** — Updated `ShelfNestingService` with stock-width-matching new-shelf orientation preference. 137 tests passing, all gates cleared by Hicks.
 
 ## Phase 2 — Material Library CRUD (COMPLETE)
 
@@ -167,3 +168,4 @@
 - 2026-03-14T19:59:29Z: Phase 5 rejection: PDF reporting requires both sheet visuals (geometry rendering) and comprehensive failure-path coverage. Success-path validation is necessary but not sufficient for reviewer sign-off on mission-critical export workflows.
 - 2026-03-15: Phase 6 hardening reveals that "results available" should mean renderable sheet placements (≥1 placement), not just non-empty material records. This allows zero-sheet and zero-placement exports to stay successful while showing correct empty-state.
 - 2026-03-15: Dense PDF layouts stay deterministic and readable if tiny panels fall back to numbered callouts while the existing ordered placement summary acts as the legend seam; that avoids widening report contracts and keeps phase scope bounded.
+- 2026-03-15: Orientation-preference fixes are safest when they add a narrow priority key ahead of the existing heuristic, so the engine can honor an explainable special case (like a panel already spanning full sheet width) without changing rotation behavior everywhere else.

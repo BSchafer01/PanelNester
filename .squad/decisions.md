@@ -1378,6 +1378,108 @@ This follow-up successfully completes the screenshot-aligned cleanup. The page n
 
 ---
 
+## Stock-Width Nesting Preference (2026-03-15)
+
+### Decision: Parker — Stock-Width Orientation Preference
+
+**Author:** Parker | **Date:** 2026-03-15 | **Status:** Active
+
+#### Context
+
+Brandon reported a reproducibility/explainability issue: a panel that already matched stock width was being rotated purely because the rotated orientation produced a shorter shelf height. That behavior is harder to justify to users because the panel already naturally fits the sheet width they expect.
+
+#### Decision
+
+For `ShelfNestingService` new-shelf placement, keep the existing height-first orientation ordering except when the panel's current, non-rotated width already spans the full usable sheet width. In that special case, prefer the current orientation before considering rotation.
+
+#### Why
+
+- A narrow preference is safer than rewriting the general heuristic because it preserves established packing behavior for the larger set of non-special-case parts.
+- Existing-shelf placement stays unchanged; it already tries non-rotated before rotated.
+- Other parts still follow the prior height-first ordering.
+
+#### Impact
+
+- New-shelf placement now keeps full-width panels unrotated when that orientation fits.
+- Tests lock down the preferred non-rotated case, preserved-rotation counterexample, determinism including `Rotated90`, and unchanged no-fit reason codes.
+
+---
+
+### Decision: Hicks — Stock-Width Preference Orientation Reviewer Gate
+
+**Author:** Hicks | **Date:** 2026-03-15 | **Status:** Approved ✅
+
+#### Gate Definition
+
+This slice is only reviewable if the nesting heuristic stops rotating a panel whose existing width already matches stock width and already fits, **without** weakening fit-first rotation behavior or the deterministic placement contract.
+
+#### Non-Negotiable Pass Gates
+
+1. **Stock-width preference gate** ✅
+   - When a panel's current width already matches stock width and that non-rotated orientation fits, the chosen placement stays non-rotated (`Rotated90 = false`).
+   - Proven on the actual `ShelfNestingService` path, not just a helper/spec abstraction.
+
+2. **Rotation-required gate** ✅
+   - If non-rotated does **not** fit but rotated does, the part must still place rotated.
+   - Impossible parts fail with the same actionable unplaced reason.
+
+3. **Normal rotation behavior gate** ✅
+   - Outside stock-width-match case, existing rotation behavior intact when rotation is the only practical way to fit.
+   - New rule is a tie-break preference, not a blanket ban on rotation.
+
+4. **Determinism gate** ✅
+   - Re-running the same nesting request returns the same placement order, coordinates, dimensions, and rotation flags.
+   - Stock-width match does not introduce run-to-run orientation flips.
+
+5. **Coverage gate** ✅
+   - Tests lock down: stock-width-matching panel stays non-rotated, counterexample still requires rotation, repeat-run determinism with `Rotated90`, unchanged failure-path reason for no-fit case.
+
+#### Review Focus Files
+
+- `src\PanelNester.Services\Nesting\ShelfNestingService.cs`
+- `tests\PanelNester.Services.Tests\Nesting\NestingBoundarySpecs.cs`
+
+#### Validation
+
+- `dotnet test .\PanelNester.slnx --nologo` → **137 total / 135 passed / 2 skipped / 0 failed** ✅
+
+#### Verdict
+
+**APPROVED** ✅ — All five gates cleared. This slice clears the gate because it changes preference rather than fit logic.
+
+---
+
+### Decision: Hicks — Stock-Width Preference Review Verdict
+
+**Author:** Hicks | **Date:** 2026-03-15 | **Status:** APPROVED ✅
+
+#### Context
+
+Review Parker's stock-width preference implementation against the defined reviewer gates.
+
+#### Approval Rationale
+
+**Gate Cleared:** All rejection criteria resolved
+
+1. **Stock-width preference gate** ✅
+   - `ShelfNestingService` keeps existing-shelf placement unchanged and limits the new rule to new-shelf orientation ordering.
+   - The new leading preference only fires when the non-rotated panel already spans the usable sheet width; otherwise the prior height-first heuristic still decides orientation.
+
+2. **Rotation-required gate** ✅
+   - Regression evidence stayed intact: targeted `NestingBoundarySpecs` passed, including the stock-width preference case, the preserved heuristic-rotation case, and deterministic repeat-run assertions with `Rotated90`.
+
+3. **Determinism gate** ✅
+   - Solution validation remained green: 137 tests total, 135 passed, 2 skipped, 0 failed.
+
+#### Consequences
+
+- **Stock-Width Preference APPROVED AND COMPLETE** — Nesting heuristic now respects stock-width-matching panels, keeping them unrotated when they fit
+- User explainability improved: panels already matching sheet width now stay in that orientation
+- No regression to fit-first rotation behavior or deterministic placement contract
+- Phase 6 design review unblocked; stock-width preference ready for production
+
+---
+
 ---
 author: Hicks
 type: reviewer-gate

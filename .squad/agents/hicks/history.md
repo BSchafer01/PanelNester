@@ -18,7 +18,7 @@ I own acceptance criteria, regression coverage, and reviewer verdicts for the fu
 - **Phase 4:** Import pipeline gates (regression safety, format parity, edit persistence, failure clarity); 93 tests
 - **Phase 5:** Results viewer & PDF reporting gates (rendering fidelity, PDF accuracy, multi-material determinism, export reliability); 110 tests (after Ripley revision + follow-up + bugfix batch)
 - **Phase 6:** Hardening & smoke verification (empty-result export, dense-layout readability, viewer edge cases, bridge error surfaces); 127 tests (125 passed, 2 skipped)
-- **Recent Batches:** FlatBuffers migration, UI cleanup, Import page cleanup, Material/Results page cleanup, Maximize clipping fix, Per-user MSI packaging
+- **Recent Batches:** FlatBuffers migration, UI cleanup, Import page cleanup, Material/Results page cleanup, Maximize clipping fix, Per-user MSI packaging, Stock-width nesting preference
 
 **Key Learnings:**
 - Spec-first scaffolding works with one runnable smoke/contract test per seam and explicit blockers for skipped tests
@@ -101,3 +101,5 @@ Final Review (Hicks): APPROVED ✅ — All four gates satisfied. Artifact ready 
 - For current WiX packaging, shortcut branding should be judged by installed behavior first; separate shortcut/ARP icon authoring is only required when the installer explicitly claims those extra branding surfaces.
 - For PNG-backed `.ico` files, the strongest provenance proof is the icon directory itself: if each embedded frame payload byte-matches the supplied `16x16` through `256x256` PNGs, the generation story is trustworthy without guessing from screenshots.
 - WiX shortcut icon checks should inspect the installer-cached icon file named by the `.lnk` `IconLocation`; the shortcut's own extracted icon hash can differ from the target exe even when the cached icon resource is correct.
+- Orientation-preference changes need three paired proofs, not one: the new preferred orientation case, a counterexample where rotation is still required or materially better, and a repeat-run assertion that includes `Rotated90` so heuristic tie-break tweaks do not silently break determinism.
+- The safest orientation-preference fix is a narrow leading sort key on new-shelf selection only; if existing-shelf placement, blank-sheet fit checks, determinism, and no-fit reason codes all stay green, the rule change is genuinely scoped.
