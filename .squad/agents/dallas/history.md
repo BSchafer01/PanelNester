@@ -19,6 +19,8 @@
 - 2026-03-14: Hicks review gate: second-pass chrome cleanup REJECTED. Runtime evidence showed old blue host header/footer and light titlebar (did not meet acceptance criteria). Dallas locked from next revision cycle; Ripley owns next revision.
 - 2026-03-14: **PHASE 2 ASSIGNMENT: WebUI Material CRUD UI Lead**
 
+- 2026-03-15T15:22:42Z: **MATERIAL + RESULTS PAGE CLEANUP APPROVED.** Removed Material page token badges, selected-material stat card, and Use button per Hicks's cleanup gate. Restructured Results page: removed Apply-to-host button and detail-stack (Company/Report/Scope fields). Implemented two-column split layout with tabbed left workspace (Report fields, Summary by material, Sheet detail, Placement inspection, Unplaced) and resizable SheetViewer on right. Resizable boundary with constraints (360px min workspace, 420px min viewer). Responsive fallback for narrow screens. All gate criteria satisfied; build passes. Ready for merge.
+
 ## Phase 2 Scope (Material Library UI)
 
 **Ownership:** Dallas (WebUI layer)
@@ -172,6 +174,7 @@
 - 2026-03-15T00:45:00Z: Phase 6 viewer hardening works best when “no sheets / no placements” is treated as a first-class results state instead of a blank or pending state. The Results page should keep report context visible, the viewer should show an explicit empty outline/notice, and sheet/material switches should drive a fresh fit token so the orthographic camera always re-frames the active sheet.
 - 2026-03-15T15:20:00Z: Post-validation shell cleanup works best when project identity leaves the WebUI chrome entirely: use a VS Code-style File menu for New/Open/Save actions, keep the nav active indicator as an inset accent so resizing never clips it, and let `document.title` be the single web-side source for `{projectName}{dirty ? ' *' : ''} — PanelNester`.
 - 2026-03-15T16:05:00Z: Import page cleanup reads better when material context stays inside the imported rows themselves: remove library-selection chrome, keep top-of-page messaging to file/import/nesting workflow only, and let the row table remain the single place for validation status and correction work.
+- 2026-03-15T15:20:00Z: Materials + Results cleanup works best when operator-facing pages stop echoing validation context in multiple places. On `src\PanelNester.WebUI\src\pages\MaterialsPage.tsx`, remove the materials header chip row, selected-material summary card, table-row badges, and row-level `Use` action while leaving create/edit/delete intact. On `src\PanelNester.WebUI\src\pages\ResultsPage.tsx`, move post-card detail into a tabbed left workspace (`Report fields`, `Summary by material`, `Sheet detail`, `Placement inspection`, `Unplaced`) and keep `src\PanelNester.WebUI\src\components\SheetViewer.tsx` visible in a resizable right column. Supporting layout lives in `src\PanelNester.WebUI\src\styles.css`. User preference is clearly production-ready, scan-first UI over validation-heavy repetition.
 
 ## Phase 5 Bugfix Batch (2026-03-15T00:07:11Z)
 

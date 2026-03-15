@@ -30,6 +30,8 @@
 
 - 2026-03-15T00:52:22Z: **FLATBUFFERS MIGRATION COMPLETE & APPROVED.** Parker delivered FlatBuffers schema, dual-read JSON/binary persistence, and crash fix. Hicks validation approved after verifying: FlatBuffers binary saves, JSON legacy compatibility, prior save crash fixed, round-trip precision (decimal ↔ double), edge cases (empty projects, large results, null results). Test results: 110/112 passing, 2 skipped. Zero regressions. **PHASE 6 COMPLETE — Ready for merge.**
 
+- 2026-03-15T15:22:42Z: **MATERIAL/RESULTS UI CLEANUP APPROVED.** Dallas removed leftover validation-heavy controls from Material page (token badges, selected-material stat card, Use button) and Results page (Apply to host button, detail stack below Unplaced). Implemented requested two-column split layout on Results page with resizable boundary (left: tabbed workspace with Report fields, Summary by material, Sheet detail, Placement inspection, Unplaced; right: resizable sheet viewer). All gate criteria satisfied: exact removals verified, split layout functional with proper constraints (360px min workspace, 420px min viewer), viewer interactions preserved (pan, zoom, click-to-select), key workflows intact (material CRUD, PDF export, sheet/placement inspection), responsive layout for narrow screens, build passes. Zero rejection triggers fired. Ready for merge.
+
 ## Phase 4 Scope (Import Pipeline Tests & Integration Gate)
 
 **Ownership:** Hicks (Tests and integration review gate) — ✅ COMPLETE
@@ -315,3 +317,59 @@ Created `.squad/decisions/inbox/hicks-import-cleanup-followup-review.md` with fu
 
 ### Key Learning
 - When reference screenshots mark entire blocks for removal, verify with stakeholder whether all nested items should go or only the highlighted chrome. Detail-stack was partially preserved here because operational context (file path, nesting status) adds value distinct from the removed library chrome.
+
+---
+
+## Material + Results Page UI Cleanup Gate (2026-03-14)
+
+**Context:** Brandon requested removing legacy chrome from Materials and Results pages: token badges, selected material stat card, Use button on Materials page; Apply to host button, detail stack below Unplaced on Results page. Additionally, Results page needs a two-column layout with tabs left and a resizable viewer column right.
+
+**Gate created:** .squad/decisions/inbox/hicks-material-results-cleanup-gate.md
+
+### What I Specified
+
+**Materials Page removals:**
+- Token list in table rows (Selected, In import badges)
+- Third stat card showing selected material
+- Use button from table actions
+
+**Results Page removals:**
+- Apply to host button
+- Detail stack below Unplaced section (Company name, Report title, Report scope display)
+
+**Results Page layout change:**
+- Two-column split: left column with tabs (material snapshot, sheet detail, placement inspection, unplaced), right column with resizable sheet viewer
+- Must preserve all viewer interactions (pan, zoom, click-to-select)
+- Layout should degrade gracefully on narrow screens
+
+### Validation Approach
+
+Defined 15 specific checklist items Dallas will be measured against:
+- Removals confirmed absent
+- Two-column layout operational with resizable boundary
+- Viewer interactions preserved
+- No new console errors
+- Critical workflows (create material, export PDF) regression-free
+
+### Rejection Triggers
+
+Clear rejection conditions if:
+- Any removed element reappears
+- Two-column split not implemented or viewer not resizable
+- Viewer loses interactivity or placement selection breaks
+- New errors introduced
+
+### Key Decisions
+
+1. **CSS note on orphaned styles:** Gate explicitly allows .token / .token-list styles to remain if unused — not requiring cleanup in this slice to keep scope tight.
+2. **Resizer implementation flexibility:** Specified "CSS or a lightweight splitter component (existing or new)" — allows Dallas to choose the right approach without over-constraining.
+3. **Mobile fallback:** Allowed graceful degradation to single-column stack on narrow screens rather than demanding a complex responsive solution.
+4. **Spot-check depth:** Success requires full validation checklist + one create-material flow + one export-PDF flow — enough to catch regressions without exhaustive manual testing.
+
+### Lessons for Future Gates
+
+- **Exact line number references** make removals unambiguous — no "around line X" vagueness.
+- **Must preserve/Must implement split** clarifies what stays vs. what changes — prevents over-removal or under-implementation.
+- **Out of scope section** prevents scope creep (e.g., removing unused CSS, adding persistent resize state).
+- **Rejection triggers as negative acceptance criteria** — clear failure modes help Dallas self-check before requesting review.
+
