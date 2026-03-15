@@ -392,6 +392,41 @@ Panel-B,12,36,0,Demo Material
 
 ---
 
+## Phase 5 Bugfix Batch — Plan View Camera + PDF Save Dialog
+
+> Use this section for Brandon's current bugfix batch. These are Hicks's acceptance checks for two user-visible regressions: the viewer opening side-on instead of face-on, and the desktop PDF save dialog becoming unusable/crashing before the user can finish the export.
+
+### Test Case 24: Viewer Opens in Plan View Instead of Edge-On
+
+1. Import a valid file, run nesting, and open the Results page.
+2. Observe the viewer before touching any controls, then switch sheets or use any reset-to-fit behavior the page exposes.
+3. **Pass:** the sheet is immediately visible face-on in plan view/top-down orientation; the user can see the full sheet rectangle, placements, and labels without first recovering from a side-on or tilted camera; switching sheets or resetting the view returns to the same plan-view orientation.
+4. **Fail:** the first frame shows the sheet edge-on/as a thin sliver, any sheet change reintroduces the side view, or the user has to orbit/guess to understand the layout.
+
+### Test Case 25: Viewer Navigation Stays Strictly 2D After the Camera Fix
+
+1. With the same result open, use the full interaction set the viewer allows: wheel zoom, drag pan, touch gestures if available, and any right-click/alternate-drag gesture OrbitControls would normally interpret as rotate.
+2. Zoom in, pan away from center, then trigger any reset/fit behavior and repeat on another sheet if the result has more than one sheet.
+3. **Pass:** zoom and pan remain available, but orbit/tilt/roll never move the camera out of plan view; reset/fit returns to the same top-down orientation; interactions stay smooth and informational rather than changing the underlying result data.
+4. **Fail:** the camera can still tilt, rotate, or roll after the fix, reset returns to a side view, or sheet changes produce inconsistent camera orientation.
+
+### Test Case 26: PDF Save Dialog Stays Interactive Through Rename and Save
+
+1. Produce a nesting result and click the PDF export action without pre-supplying a path.
+2. When the native save dialog opens, click into the file-name field, rename the file, and if practical change folders before pressing **Save**.
+3. **Pass:** the dialog stays responsive; the file-name field accepts edits; folder navigation and the Save button work normally; the app does not crash, freeze, or dismiss the dialog prematurely; a PDF is written to the exact folder/name the user chose.
+4. **Fail:** the app crashes as soon as the dialog opens, the user cannot type a new filename, Save is blocked without explanation, or export writes to some other path/name than the one chosen in the dialog.
+
+### Test Case 27: Cancel or Failed Export Does Not Poison the Next Save Attempt
+
+1. Start a PDF export and cancel the save dialog, or intentionally choose a target that should fail cleanly.
+2. Confirm the app remains open and the current result/report state is still intact.
+3. Immediately start export again, choose a valid folder and filename, and save.
+4. **Pass:** the first attempt ends with a clear, user-visible non-crash outcome; the second attempt opens a usable save dialog and can complete successfully; the final PDF is valid and non-empty.
+5. **Fail:** cancelling or failing once leaves the next dialog broken, crashes the app, clears the active result, or traps the user in a stale/bad export state.
+
+---
+
 ## Acceptance Criteria
 
 - [ ] Preflight: `dotnet test` reports zero failures and `npm run build` succeeds, with only documented placeholder skips remaining
@@ -419,6 +454,10 @@ Panel-B,12,36,0,Demo Material
 - [ ] Phase 5 follow-up: mouse wheel/drag input is owned by the viewer only while the pointer is inside it, then returns cleanly to the page
 - [ ] Phase 5 follow-up: exported report graphics label each placed panel unambiguously
 - [ ] Phase 5 follow-up: utilization values treat decimal fractions correctly and never render as `6000%`-style double-multiplied percentages
+- [ ] Phase 5 bugfix batch: the viewer opens face-on in plan view on first render, sheet changes, and reset/fit actions
+- [ ] Phase 5 bugfix batch: viewer interaction remains 2D-only after the camera fix (zoom/pan allowed, tilt/orbit/roll blocked)
+- [ ] Phase 5 bugfix batch: the native PDF save dialog remains interactive long enough to rename the file, change location, and press Save without crashing
+- [ ] Phase 5 bugfix batch: the exported PDF lands at the exact filename/path chosen in the dialog, and cancel/failure does not break the next export attempt
 
 ---
 

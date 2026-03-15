@@ -170,3 +170,15 @@
 - 2026-03-14: Project lifecycle UI requires two-part state management: session-scoped state (current project metadata, dirty flag) and workflow state (navigating vs saving). Material snapshots are separate from live library to preserve historical configuration clarity.
 - 2026-03-14T19:59:29Z: Phase 5 rejection: Results viewer and report UI are visually complete, but missing critical reviewer evidence for PDF visual fidelity (sheet geometry rendering) and export reliability (failure paths). UI-layer completeness is necessary but not sufficient for integrated gate sign-off.
 
+## Phase 5 Bugfix Batch (2026-03-15T00:07:11Z)
+
+**Assignment:** Camera orientation fix in Three.js viewer
+
+**Delivered:**
+- ✅ Fixed `OrbitControls` polar angle lock from `0` to `Math.PI / 2` for true plan-view orientation
+- ✅ Verified viewer stays top-down on first render, reset, and sheet switches
+- ✅ Pan/zoom interactions preserved; rotation remains disabled
+- ✅ `npm run build` passed; all Phase 0–5 tests passing (108 total, 106 passed, 2 skipped)
+
+**Outcome:** ✅ APPROVED — Viewer camera now correctly oriented to true top-down plan view while preserving 2D-only interaction model. Phase 5 bugfix batch cleared all observable behavior gates.
+

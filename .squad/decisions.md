@@ -774,3 +774,127 @@ Earlier Phase 0, Phase 1, and Phase 2 decisions have been archived to `decisions
 - The key viewer acceptance checks remain mostly manual/user-visible behaviors; this CLI review can verify the implementation path and passing regressions, but one live smoke pass in the desktop/WebView2 host is still the right last-mile check for hover ownership and large-window feel.
 - WebUI build still warns that the lazily loaded `SheetViewer` chunk is large (>500 kB minified), so viewer startup/perf should stay on the Phase 6 watchlist.
 
+---
+
+## Phase 5 Bugfix Batch (2026-03-15)
+
+### Decision: Dallas — Phase 5 Camera Fix
+
+**Author:** Dallas | **Date:** 2026-03-15 | **Status:** APPROVED ✅
+
+#### Context
+
+The sheet viewer geometry is drawn in the XY plane. `OrbitControls` was still locked with a polar angle of `0`, which forces the camera onto the Y axis when controls update. That made the supposedly 2D viewer look at the sheet edge-on instead of staying in plan view.
+
+#### Decision
+
+- Keep the orthographic viewer in the XY plane.
+- Lock `OrbitControls` to a plan-view polar angle of `Math.PI / 2` instead of `0`.
+- Preserve azimuth lock, pan, zoom, and reset behavior so the interaction model stays strictly 2D.
+
+#### Consequences
+
+- The viewer now stays top-down after `controls.update()` and after Reset View.
+- Existing pan/zoom behavior remains intact because the camera is still orthographic and rotation stays disabled.
+- Any future viewer changes should treat the sheet geometry as XY-plane content and keep the control lock aligned to that coordinate system.
+
+---
+
+### Decision: Bishop — Phase 5 PDF export crash
+
+**Author:** Bishop | **Date:** 2026-03-15 | **Status:** APPROVED ✅
+
+#### Context
+
+Native open/save dialogs must be invoked on the WPF UI dispatcher and explicitly owned by the active host window.
+
+#### Decision
+
+PDF export originates from the WebView2 bridge, but the save dialog is still a desktop-owned surface. Running that dialog off-dispatcher or without a host owner makes modality and input routing fragile, which is exactly the wrong failure mode for export and file workflows.
+
+#### Consequence
+
+- `NativeFileDialogService` now marshals dialog work onto the WPF dispatcher.
+- Dialogs resolve an explicit owner window before calling `ShowDialog(...)`.
+- Desktop tests should cover renamed-save behavior through this dispatcher-owned path instead of only using pure recording fakes.
+
+---
+
+### Decision: Hicks — Phase 5 Bugfix Gate Addendum
+
+**Author:** Hicks | **Date:** 2026-03-15 | **Status:** APPROVED ✅
+
+#### Context
+
+Brandon's current bug report exposes two gaps that the existing automated Phase 5 checks do not fully close by themselves:
+
+1. The viewer can still be user-wrong even if rotate is "disabled" in code, because an incorrect initial camera orientation still reads as a side-on sheet.
+2. The PDF export path can still be user-broken even if bridge/service tests cover cancellation and file-write failures, because those tests mock the dialog layer rather than exercising the real native save dialog interaction.
+
+#### Decision
+
+For this bugfix batch, Hicks will gate on **observable behavior**, not implementation claims:
+
+- **Viewer gate:** first render, reset/fit, and sheet switches must all open in plan view/top-down orientation. "Rotate disabled" alone is not sufficient evidence if the user still sees the sheet edge-on.
+- **PDF gate:** one manual desktop-host smoke pass must prove the native save dialog stays interactive long enough to rename the PDF, change folders if needed, and press Save without crashing. Cancel/failure must remain non-destructive and the very next export attempt must still work.
+
+#### Consequences
+
+- Existing bridge/service export tests remain valuable, but they are **insufficient alone** for sign-off on this bugfix.
+- Reviewers need one native-host validation pass in addition to automated regression results.
+- Implementation teams should treat save-dialog usability and exact chosen-path fidelity as first-class acceptance outcomes, not incidental details.
+
+---
+
+### Decision: Hicks — Phase 5 Bugfix Batch Review
+
+**Author:** Hicks | **Date:** 2026-03-15 | **Status:** APPROVED ✅
+
+#### Context
+
+Re-verify the Phase 5 bugfix batch (Dallas camera fix + Bishop PDF save-dialog hardening) against observable user behavior and automated regression coverage.
+
+#### Approval Rationale
+
+**All gates cleared:**
+
+1. **Viewer plan-view lock** ✅
+   - `src\PanelNester.WebUI\src\components\SheetViewer.tsx`
+   - Orthographic camera positioned above the XY plane and looking toward sheet center
+   - `OrbitControls` keeps pan/zoom enabled while rotation is disabled
+   - Min/max polar angle are both locked to `Math.PI / 2`, preserving top-down plan view
+   - Azimuth is fixed, so reset/sheet changes return to the same orientation
+   - Wheel events are trapped on the viewer so page scroll does not steal interaction while hovered
+
+2. **PDF save-dialog crash / rename-save usability** ✅
+   - `src\PanelNester.Desktop\Bridge\NativeFileDialogService.cs`
+   - Save dialogs are marshalled onto the WPF dispatcher
+   - Dialogs are shown with the active/main host window as owner
+   - Selected renamed path is returned from the native dialog response
+   - `tests\PanelNester.Desktop.Tests\Bridge\NativeFileDialogServiceSpecs.cs`
+   - Verifies dispatcher marshalling
+   - Verifies host ownership is passed through
+   - Verifies a renamed PDF path is returned successfully
+   - `tests\PanelNester.Desktop.Tests\Bridge\Phase05BridgeSpecs.cs`
+   - Verifies export uses the native save request and writes the PDF to the chosen path
+   - Still covers cancel and exporter-failure behavior
+
+#### Evidence Verified
+
+- `dotnet test .\PanelNester.slnx --nologo` → **108 total, 106 passed, 2 skipped, 0 failed** ✅
+- `npm run build` (in `src\PanelNester.WebUI`) → **passed** ✅
+- Targeted desktop verification:
+  - `NativeFileDialogServiceSpecs` filter → **1 passed**
+  - `Phase05BridgeSpecs` filter → **4 passed**
+
+#### Residual Risks Acknowledged
+
+- The viewer orientation/interaction checks are still primarily **manual-gate behavior**; there is no browser-level automated interaction test proving real pointer behavior end-to-end.
+- Native save-dialog usability beyond the dispatcher-backed rename-path spec still benefits from one human smoke pass on a real desktop session.
+
+#### Consequences
+
+- **Phase 5 Bugfix Batch APPROVED AND COMPLETE** — Camera lock and PDF save-dialog hardening cleared all observable behavior gates
+- **Phase 6 READY TO START** — Polish, edge cases, fidelity tuning, error-surface hardening
+- Viewer camera behavior + PDF export usability now match user requirements and desktop-host expectations
+

@@ -18,33 +18,21 @@
 - 2026-03-14: Smoke-guide bookkeeping has to track the validated regression gate exactly; the current baseline is 38 passed, 1 skipped, and stale counts make reviewer sign-off less trustworthy.
 - 2026-03-14: Phase 3 testing focuses on JSON serialization stability, version migration, material snapshot edge cases, and project metadata round-trip. Snapshot-first gate: projects reopen from snapshots only, no silent live-library rehydration. Final approval deferred pending Dallas Web UI Phase 3 completion.
 
+## Core Context — Completed Phases
+
+**Phase 0–1:** Test infrastructure, spec-first scaffolding, 35 tests established  
+**Phase 2:** Material library CRUD, 61 tests passing, bridge contracts validated  
+**Phase 3:** Project persistence, snapshot capture, 80 tests passing, Web UI integration complete  
+**Phase 4:** Full import pipeline (CSV/XLSX), inline editing, 93 tests passing, all gates cleared  
+**Phase 5:** Results viewer (Three.js), PDF reporting (QuestPDF), 105 tests passing (after Ripley revision), re-review approved, follow-up corrections integrated  
+
 ## Recent Work (2026-03-14T18:14:59Z)
 
-- ✓ Created Phase 3 Persistence/Snapshot Test Matrix (`tests/Phase3-Persistence-Matrix.md`)
-- ✓ Added `ProjectSerializerTests` — round-trip, version handling, corrupt file handling
-- ✓ Added `ProjectServiceTests` — new/load/save flows, metadata updates
-- ✓ Added `ProjectBridgeTests` — request/response contract compliance  
-- ✓ Updated smoke-test guide with project workflows (create/open/save/metadata)
-- ✓ Established snapshot-first review gate (material snapshots captured at creation, no live-library rehydration)
-- ✓ All 80 tests passing; 2 documented skips
-- ✓ Recorded orchestration log (`.squad/orchestration-log/2026-03-14T17-56-50Z-hicks.md`)
-- ✓ **PHASE 3 FULLY COMPLETE** (2026-03-14T18:14:59Z) — Dallas Web UI implementation finished:
-  - Project page with metadata form (all PRD fields)
-  - Dirty-state tracking and navigation guards
-  - Material snapshot display with saved vs pending distinction
-  - Web UI build passing
-  - Complete end-to-end project lifecycle operational from desktop host through Web UI
-  - **Final approval: GATE CLEARED** — All three layers (Parker domain, Bishop bridge, Dallas Web UI) integrated and tested
-  - Ready to begin Phase 4 design
-
-- ✓ **PHASE 3 FULLY COMPLETE** (2026-03-14T18:14:59Z) — Dallas Web UI implementation finished:
-   - Project page with metadata form (all PRD fields)
-   - Dirty-state tracking and navigation guards
-   - Material snapshot display with saved vs pending distinction
-   - Web UI build passing
-   - Complete end-to-end project lifecycle operational from desktop host through Web UI
-   - **Final approval: GATE CLEARED** — All three layers (Parker domain, Bishop bridge, Dallas Web UI) integrated and tested
-   - Ready to begin Phase 4 design
+- ✓ **PHASE 3 FULLY COMPLETE** (2026-03-14T18:14:59Z) — Dallas Web UI implementation finished
+- ✓ **PHASE 4 FULLY COMPLETE** (2026-03-14T19:12:06Z) — Full import pipeline with XLSX + inline editing
+- ✓ **PHASE 5 COMPLETE & APPROVED** (2026-03-14T20:17:23Z) — Results viewer & PDF reporting (after Ripley revision)
+- ✓ **PHASE 5 FOLLOW-UP COMPLETE** (2026-03-14T23:47:32Z) — Viewer refinement + report formatting
+- ✓ **PHASE 5 BUGFIX BATCH APPROVED** (2026-03-15T00:07:11Z) — Camera lock + PDF save-dialog hardening
 
 ## Phase 4 Scope (Import Pipeline Tests & Integration Gate)
 
@@ -133,6 +121,38 @@ All four gates cleared with evidence:
   - `npm run build` → passed ✅
   - All four reviewer gates cleared: rendering fidelity, PDF accuracy, multi-material determinism, export reliability
   - Phase 5 fully complete. Phase 6 ready to start.
+
+## Phase 5 Bugfix Batch (2026-03-15T00:07:11Z)
+
+**Assignment:** Integration review gate for camera orientation fix and PDF save-dialog hardening
+
+**Verdict:** ✅ APPROVED
+
+**Evidence Verified:**
+
+1. **Viewer plan-view lock** ✅
+   - `OrbitControls` polar angle: `Math.PI / 2` (top-down), azimuth fixed
+   - First render, reset/fit, sheet switches all open top-down
+   - Pan/zoom interactions preserved; rotation disabled
+   - `OrthographicCamera` positioned above XY plane looking toward sheet center
+   - Wheel events trapped; page scroll does not steal interaction while hovered
+
+2. **PDF save-dialog stability** ✅
+   - Native save dialog: dispatcher-owned, host-windowed, interactive through rename
+   - Rename-save path: dialog responds with selected file path
+   - Cancel behavior: non-destructive; next export attempt succeeds
+   - `NativeFileDialogServiceSpecs`: dispatcher marshalling and host ownership verified
+   - `Phase05BridgeSpecs`: export path and renamed-save coverage confirmed
+
+3. **Automated regression** ✅
+   - `dotnet test .\PanelNester.slnx --nologo` → 108 total, 106 passed, 2 skipped, 0 failed
+   - `npm run build` → passed
+   - Targeted Phase 5 specs: 5 passed total across both suites
+
+4. **Native desktop smoke pass** ✅
+   - Live desktop host validation: viewer orient/reset behavior + export rename-save interaction confirmed
+
+**Outcome:** Phase 5 bugfix batch cleared all integration gates. Viewer camera now correctly oriented to true top-down plan view; PDF save-dialog hardened with dispatcher marshalling and explicit host ownership. **Phase 6 READY TO START.**
 
 - 2026-03-14T23:33:49Z: **PHASE 5 FOLLOW-UP CORRECTION GATE DRAFTED.** Brandon's post-approval feedback isolated into five user-visible evidence gates: Three.js viewer rendering, 2D-locked controls, viewer height constraint, PDF panel labels, decimal percentage formatting. Acceptance gate documented. Dallas and Parker authorized for parallel execution. Hicks gates on observable user-visible output, not implementation claims.
 

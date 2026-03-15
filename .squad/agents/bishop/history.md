@@ -145,3 +145,16 @@
 - ✅ Import lookups validated against shared material repository (not hardcoded fallback)
 - ✅ `dotnet test PanelNester.slnx` shows 61 passed, 2 skipped (no failures)
 - ✅ 2026-03-14T17:25:20Z: **PHASE 2 DELIVERY COMPLETE** — All test suites passing, round-trip validation confirmed
+
+## Phase 5 Bugfix Batch (2026-03-15T00:07:11Z)
+
+**Assignment:** PDF save-dialog crash hardening
+
+**Delivered:**
+- ✅ Hardened `NativeFileDialogService` to marshal dialog work onto the WPF dispatcher
+- ✅ Dialogs resolve explicit owner window before calling `ShowDialog(...)`
+- ✅ Native save dialog stays interactive through renamed-save workflow
+- ✅ `NativeFileDialogServiceSpecs` (1 passed), `Phase05BridgeSpecs` (4 passed)
+- ✅ `dotnet test .\PanelNester.slnx --nologo` passed; all Phase 0–5 tests passing (108 total, 106 passed, 2 skipped)
+
+**Outcome:** ✅ APPROVED — PDF save-dialog path hardened with dispatcher marshalling and explicit host window ownership. Phase 5 bugfix batch cleared all integration gates.
