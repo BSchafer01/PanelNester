@@ -72,6 +72,13 @@ I own architecture, scope control, and reviewer gating for the full product.
    - Appendix updates: Ripley/Hicks/Dallas/Bishop agent histories
    - Bridge vocabulary unchanged (no new messages; leveraged WebView2 native event)
    - Residual smoke items: 320px resize, keyboard nav, rapid edits, long names (production-release gate, not blockers)
+- 2026-03-15: **PER-USER MSI REVISION COMPLETE.** Hicks' rejection was correct: default WebView2 bootstrap behavior writes mutable profile data beside the installed EXE, which breaks uninstall cleanliness for a per-user MSI. The fix was to make the profile location an explicit desktop-host contract at `%LOCALAPPDATA%\PanelNester\WebView2\UserData` via `CoreWebView2Environment.CreateAsync(userDataFolder: ...)`, rather than relying on WebView2 defaults. Revalidated the full trust cycle: solution build, tests (134 total, 132 passed, 2 skipped, 0 failed), Web UI build, installer rebuild, then silent install → first launch smoke → uninstall. Outcome: real `WebApp` bundle still ships, no `PanelNester.Desktop.exe.WebView2` folder appears under the install root, and `%LOCALAPPDATA%\Programs\PanelNester` is removed cleanly on uninstall while relocated WebView2 data remains under `%LOCALAPPDATA%\PanelNester\WebView2\UserData`. Orchestration logs created (Bishop, Hicks, Ripley); session log created; decisions merged to decisions.md; inbox files deleted; agent histories appended. **Final Hicks re-review: APPROVED ✅**
+
+## Key Insights (Per-User MSI Cycle)
+
+1. **Lock-out pattern strength:** When a reviewer rejects an artifact, preventing the original author from revising forces fresh perspective. Ripley's revision narrowly focused on WebView2 bootstrap behavior, not installer/packaging changes, reducing regression risk.
+2. **Immutable install root requirement:** Per-user MSI lifecycle is only trustworthy if the install directory stays unchanged after first launch and is fully removable on uninstall. Any runtime-created folders (profiles, caches, temp files) must be relocated outside `INSTALLFOLDER`.
+3. **Explicit profile configuration:** Don't rely on framework defaults for runtime profiles when packaging for uninstall. Make the profile path an explicit parameter passed through the layered initialization (host → bridge → CoreWebView2Environment).
 
 ## Next Steps
 

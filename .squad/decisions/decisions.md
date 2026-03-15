@@ -221,4 +221,102 @@ Initially proposed new `update-window-title` bridge message. Bishop's follow-up 
 
 ---
 
-*Last updated: 2026-03-15T02:40:13Z*
+## Per-User MSI Packaging
+
+### Context
+
+Brandon requested a per-user, non-admin MSI installer for desktop distribution. Initial delivery from Bishop created WiX seam with per-user scope, but first review rejected due to WebView2 runtime profile mutation under install directory. Ripley revised installer behavior; Hicks re-review approved.
+
+### Decision: MSI Packaging Architecture (Bishop)
+
+**Date:** 2026-03-15 | **Agent:** Bishop
+
+1. **WiX SDK Project:** `installer\PanelNester.Installer\PanelNester.Installer.wixproj` integrated into `PanelNester.slnx` under `/installer/`
+2. **Payload Staging:** Installer build owns Web UI build, desktop publish, WebApp replacement, and file harvesting
+3. **Per-User Scope:** `Product.wxs` declares `Package Scope="perUser"`, installs to `%LocalAppData%\Programs\PanelNester`, per-user Start Menu shortcut
+4. **ICE Suppression:** `ICE38;ICE60;ICE64;ICE91` suppressed (user-profile install root validation noise)
+5. **WebView2 Runtime:** Bootstrapping deferred; app assumes Evergreen runtime handled separately
+
+**Rationale:** User-writable install location avoids admin elevation. Repo-owned WiX project enables reproducible builds. Harvested payload validates staging order is executable. Suppressions intentional for per-user shape.
+
+**Consequences:** Normal install/uninstall requires zero UAC. App files land in user-scoped location. MSI generation clean without hand-copied desktop output.
+
+### Gate: Per-User MSI Acceptance (Hicks)
+
+**Date:** 2026-03-15 | **Agent:** Hicks
+
+**Five Non-Negotiable Pass Gates:**
+1. **Repo-buildable** — Installer project lives in repo; clean build produces deterministic `.msi`; no hand-copy, no UI publish clicks
+2. **Per-user & non-admin** — Installer metadata targets per-user scope; install from standard user context completes without elevation; app files in `%LocalAppData%`, no HKLM-only writes
+3. **Complete desktop payload** — Installed package contains desktop entry point, runtime files, dependencies, bundled WebApp content, supporting assemblies
+4. **Baseline green** — `dotnet test .\PanelNester.slnx --nologo` passes (baseline: 132 total, 130 passed, 2 skipped, 0 failed); `npm run build` passes
+5. **Trusted installed-bits lifecycle** — Build MSI, install as non-admin, launch from installed path, verify user storage writable, verify uninstall removes binaries without leaving admin artifacts or orphaned WebView2 residue
+
+**Rejection Triggers:** MSI non-reproducible, admin elevation required, missing assemblies, mutable app state in machine-wide locations, installed app fails to launch, orphaned WebView2 runtime profile after uninstall.
+
+**Evidence Required:** Build command, MSI path, per-user scope proof, install log showing no admin prompt, installed file listing, launch smoke, test regression results, clean uninstall verification.
+
+### First Review: Rejection — WebView2 Residue (Hicks)
+
+**Date:** 2026-03-15 | **Agent:** Hicks | **Verdict:** REJECT
+
+**What Passed:**
+- Repo build reproducible: `dotnet build .\PanelNester.slnx -c Release --nologo` ✅
+- Per-user scope real: `Product.wxs` sets `Scope="perUser"`, HKCU registration, installs to `LocalAppDataFolder` ✅
+- Desktop payload complete: `PanelNester.Desktop.exe`, `.deps.json`, `.runtimeconfig.json`, domain/service DLLs, WebView2 binaries, real WebApp assets ✅
+- Baseline green: 132 tests (130 passed, 2 skipped, 0 failed) ✅
+- WebView2 runtime handling explicit: MainWindow.xaml.cs catches `WebView2RuntimeNotFoundException` with clear install message ✅
+
+**Blocking Failure:**
+- After install → launch → uninstall, leftover `C:\Users\brand\AppData\Local\Programs\PanelNester\PanelNester.Desktop.exe.WebView2\...` remains
+- Root cause: WebView2 default profile behavior creates `*.exe.WebView2` beside executable; not under install-managed control
+- Impact: Install root not immutable after launch; uninstall cannot guarantee clean state
+
+**Revision Required:** Assign Ripley (different author than Bishop—lock-out pattern). Relocate WebView2 user-data folder to `%LOCALAPPDATA%\PanelNester\WebView2\UserData` (outside install directory). Re-run clean install→launch→uninstall proof.
+
+### Decision: WebView2 User-Data Relocation (Ripley)
+
+**Date:** 2026-03-15 | **Agent:** Ripley
+
+**Location:** WebView2 profile data must resolve to `%LOCALAPPDATA%\PanelNester\WebView2\UserData`, never under `INSTALLFOLDER`.
+
+**Rationale:** Per-user MSI lifecycle requires immutable install root. Default WebView2 behavior mutates install location and leaves residue; uninstall cannot guarantee clean state with current host behavior.
+
+**Implementation:**
+- `DesktopStoragePaths` is single owner for app-data root and WebView2 profile path
+- `WebViewBridge.InitializeAsync` creates explicit `CoreWebView2Environment` with user-data folder before `EnsureCoreWebView2Async`
+- `MainWindow` passes path into bridge during startup
+- Installer scope unchanged (per-user/non-admin); this is host behavior revision only
+
+**Validation:**
+- `dotnet build .\PanelNester.slnx -c Release --nologo` ✅
+- `dotnet test .\PanelNester.slnx -c Release --nologo` → 134 total, 132 passed, 2 skipped, 0 failed ✅
+- `npm run build --prefix .\src\PanelNester.WebUI` ✅
+- Silent install → launch (10 sec smoke) → silent uninstall ✅
+- **No** `*.exe.WebView2` under `%LOCALAPPDATA%\Programs\PanelNester` after launch ✅
+- **Yes** `%LOCALAPPDATA%\PanelNester\WebView2\UserData` created and survives uninstall ✅
+
+### Final Review: Approval (Hicks)
+
+**Date:** 2026-03-15 | **Agent:** Hicks | **Verdict:** APPROVED ✅
+
+**Verified (Re-Review):**
+- Repo-buildable: `dotnet build .\PanelNester.slnx -c Release --nologo` ✅; `dotnet build .\installer\PanelNester.Installer\...` ✅; `npm run build` ✅
+- Baseline green: 134 tests (132 passed, 2 skipped, 0 failed) ✅
+- Per-user scope: `Product.wxs` declares `Scope="perUser"`, HKCU registration, `LocalAppDataFolder` install ✅
+- Complete payload: `PanelNester.Desktop.exe`, `.deps.json`, `.runtimeconfig.json`, DLLs, WebView2 assemblies, real WebApp hashed assets ✅
+- Clean lifecycle: Install exit code `0`, launch success, uninstall exit code `0`, **no residue under install root**, WebView2 user data at explicit path ✅
+
+**Lifecycle Proof:**
+- Install path: `C:\Users\brand\AppData\Local\Programs\PanelNester\`
+- After launch: **no** `*.exe.WebView2` under install folder (gate requirement met)
+- After launch: **yes** `%LOCALAPPDATA%\PanelNester\WebView2\UserData` created
+- After uninstall: install root removed; WebView2 user data retained
+
+**Non-Blocking Observation:** MSI not digitally signed (deferred to production release gate).
+
+**Consequence:** Original rejection reason resolved. Install root stays immutable. MSI lifecycle clean. Per-user/non-admin scope preserved. Desktop payload complete with delegated user-data isolation.
+
+---
+
+*Last updated: 2026-03-15T16:39:48Z*
