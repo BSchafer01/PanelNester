@@ -170,6 +170,7 @@
 - 2026-03-14: Project lifecycle UI requires two-part state management: session-scoped state (current project metadata, dirty flag) and workflow state (navigating vs saving). Material snapshots are separate from live library to preserve historical configuration clarity.
 - 2026-03-14T19:59:29Z: Phase 5 rejection: Results viewer and report UI are visually complete, but missing critical reviewer evidence for PDF visual fidelity (sheet geometry rendering) and export reliability (failure paths). UI-layer completeness is necessary but not sufficient for integrated gate sign-off.
 - 2026-03-15T00:45:00Z: Phase 6 viewer hardening works best when “no sheets / no placements” is treated as a first-class results state instead of a blank or pending state. The Results page should keep report context visible, the viewer should show an explicit empty outline/notice, and sheet/material switches should drive a fresh fit token so the orthographic camera always re-frames the active sheet.
+- 2026-03-15T15:20:00Z: Post-validation shell cleanup works best when project identity leaves the WebUI chrome entirely: use a VS Code-style File menu for New/Open/Save actions, keep the nav active indicator as an inset accent so resizing never clips it, and let `document.title` be the single web-side source for `{projectName}{dirty ? ' *' : ''} — PanelNester`.
 
 ## Phase 5 Bugfix Batch (2026-03-15T00:07:11Z)
 
@@ -210,4 +211,6 @@
 **Hicks Review:** ✅ APPROVED (2026-03-15) — All viewer edge-case gates cleared
 
 **Status:** COMPLETE — Phase 6 viewer hardening integrated
+
+- 2026-03-15T02:40:13Z: **UI CLEANUP BATCH COMPLETE.** Cleaned WebUI shell chrome post-validation: removed AppShell `h1` header title block, deleted OverviewPage "Project File" and "Workflow" informational sections, added VS Code-style File menu dropdown (New/Open/Save/Save As), fixed navigation indicator with `box-shadow: inset 2px 0 0` (no margin offset) for 320–1440px visibility, set `document.title` as titlebar source in App.tsx. Coordinated with Bishop on titlebar sync via existing WebView2 `DocumentTitleChanged` event—no new bridge message required. Follow-up: removed dedicated "Saved snapshot" and "Next save" panels below metadata form while keeping snapshot count in summary card. All gates passed: sidebar removal ✅, nav indicator visible ✅, File menu quiet ✅, titlebar dirty-indicator sync ✅, 132 tests passing ✅. Decisions merged to decisions.md; orchestration logs created; agent histories updated. **APPROVED 2026-03-15**
 

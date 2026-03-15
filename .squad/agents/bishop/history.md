@@ -93,6 +93,7 @@
 - 2026-03-14T19:59:29Z: Phase 5 rejection: Export workflows demand both visual completeness (sheet diagrams) and comprehensive error-path coverage (cancelled saves, file-write failures). Bridge contracts alone are insufficient without proof of mission-critical reliability pathways.
 - 2026-03-15T00:58:00Z: Phase 6 bridge hardening landed best by splitting error detail from user copy: `BridgeError.message` can keep technical context while `userMessage` stays stable and non-technical for UI display, with cancellation intentionally leaving `userMessage` empty so cancel flows stay quiet.
 - 2026-03-15T00:58:00Z: Native dialog resilience is safest when the host serializes dialog entry at the service boundary, not just on the WPF dispatcher, so rapid cancel/retry cycles cannot overlap or leave sticky state behind.
+- 2026-03-15T02:02:00Z: WebView2 `DocumentTitleChanged` is a clean titlebar seam for project identity. Let the React shell own `document.title` (`ProjectName`, optional `*`, app suffix) and mirror that into both the custom WPF title text and `Window.Title` instead of growing bridge vocabulary for host-only chrome.
 
 ## Recent Work (2026-03-14T18:14:59Z)
 
@@ -186,3 +187,5 @@
 **Hicks Review:** ✅ APPROVED (2026-03-15) — All bridge error and dialog resilience gates cleared
 
 **Status:** COMPLETE — Phase 6 bridge error contract integrated
+
+- 2026-03-15T02:40:13Z: **UI CLEANUP BATCH COMPLETE.** Cleaned native WPF shell chrome post-validation: removed header DockPanel block (title + "Desktop host foundation..." subtitle + Source badge) from MainWindow.xaml Row 1; removed footer StatusTextBlock from Row 3. Implemented titlebar synchronization via WebView2's `DocumentTitleChanged` event—mirrors `document.title` from React layer to both custom titlebar TextBlock and `Window.Title` property. Fallback: `Untitled Project — PanelNester` if page title blank. **Architectural reversal:** Initially proposed new `update-window-title` bridge message; follow-up decision reversed to use existing WebView2 event (smaller vocabulary, single source of truth in Web UI, reduced regression risk). All gates passed: native header/footer removed ✅, titlebar mirrors document.title ✅, fallback behavior ✅, 132 tests passing ✅. Decisions merged to decisions.md; orchestration logs created; agent histories updated. **APPROVED 2026-03-15**

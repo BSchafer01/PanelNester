@@ -58,7 +58,21 @@ I own architecture, scope control, and reviewer gating for the full product.
   - Decision inbox merged and deleted
   - Foundation hardened for future scope expansion
 
+- 2026-03-15: **UI CLEANUP DESIGN REVIEW COMPLETE.** Analyzed Brandon's five post-validation UI adjustments from screenshots. Defined clean seam: Dallas owns WebUI changes (remove `h1` header, delete "Project file" and "Workflow" sections from OverviewPage); Bishop owns Desktop changes (remove XAML header/footer rows, implement `update-window-title` bridge handler for titlebar sync). Specified new bridge contract: `update-window-title { projectName, isDirty }` for VS Code-style titlebar pattern (`ProjectName * — PanelNester`). Nine-point validation matrix for Hicks. Two-batch parallel execution plan (Batch 1: removals in parallel; Batch 2: titlebar contract wiring). Decision written to `.squad/decisions/inbox/ripley-ui-cleanup.md`.
+
+- 2026-03-15T02:40:13Z: **UI CLEANUP BATCH COMPLETE & APPROVED.** Integrated Dallas + Bishop implementation with Hicks gate review. All six decisions merged to `decisions.md` (ripley-ui-cleanup, hicks-ui-cleanup-gate, dallas-ui-cleanup, bishop-ui-cleanup, dallas-ui-cleanup-followup, hicks-ui-cleanup-review). Key architectural reversal: Bishop's follow-up replaced proposed `update-window-title` message with WebView2's existing `DocumentTitleChanged` event—reads `document.title`, mirrors to titlebar and Window.Title. Dallas set `document.title` to `{projectName}{isDirty ? ' *' : ''} — PanelNester` in App.tsx. All gates cleared:
+   1. Right-sidebar completely removed (no orphaned CSS) ✅
+   2. Navigation indicator visible at all viewports 320–1440px (inset shadow approach) ✅
+   3. File menu operations quiet; no unexpected state changes ✅
+   4. Titlebar dirty-indicator consistent (document.title seam) ✅
+   5. Full test suite passes (132 total, 130 passed, 2 skipped, 0 failures) ✅
+   - Orchest ration logs created: 2026-03-15T02-40-13Z-{ripley,hicks,dallas,bishop}.md
+   - Session log created: 2026-03-15T02-40-13Z-ui-cleanup-batch.md
+   - Decision inbox (6 files) merged to decisions.md and deleted
+   - Appendix updates: Ripley/Hicks/Dallas/Bishop agent histories
+   - Bridge vocabulary unchanged (no new messages; leveraged WebView2 native event)
+   - Residual smoke items: 320px resize, keyboard nav, rapid edits, long names (production-release gate, not blockers)
+
 ## Next Steps
 
-- **Manual Smoke Validation:** Execute Test Cases 37–40 (focus-loss, pointer release, zoom limits, precision) before production release
-- **Phase 7 Scoping:** Performance optimization or new features (deferred until Phase 6 smoke evidence complete)
+- Phase 7 scoping or additional hardening work

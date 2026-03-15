@@ -156,4 +156,69 @@ Records of project decisions and design choices.
 
 ---
 
-*Last updated: 2026-03-15T01:24:25Z*
+## UI Cleanup (Post-Validation Polish)
+
+### Context
+
+Brandon requested five UI adjustments now that validation is stable. The current UI has redundant chrome layers (WPF header/footer duplicating WebUI header) and stale Phase 3 context on the Overview page.
+
+### Decision
+
+Approved seam split (Dallas WebUI 4 changes, Bishop native 3 changes) with contract definition for titlebar synchronization via WebView2's `DocumentTitleChanged` event.
+
+**Ripley (Design):** Identified removals—WPF header/footer, Overview sections (Project File, Workflow), VS Code-style titlebar sync.
+
+**Hicks (Gate):** Five non-negotiable gates: sidebar removal, nav indicator visibility (320px–1440px), File menu quiet behavior, titlebar dirty-indicator consistency, zero regression.
+
+**Dallas (WebUI Implementation):**
+- Remove `h1` from AppShell header
+- Delete "Project file" and "Workflow" sections from OverviewPage
+- Add VS Code-style File menu dropdown (New/Open/Save/Save As)
+- Fix active nav indicator with `box-shadow: inset 2px 0 0` (no offset margin)
+- Set `document.title` to `{projectName}{isDirty ? ' *' : ''} — PanelNester`
+
+**Dallas (Follow-up):**
+- Removed dedicated Saved snapshot + Next save panels below metadata form
+- Kept saved snapshot count in summary card (outside metadata section)
+
+**Bishop (Native Implementation):**
+- Remove WPF header/footer rows from MainWindow.xaml
+- Add `UpdateWindowTitle()` method in MainWindow.xaml.cs
+- Listen to `CoreWebView2.DocumentTitleChanged` event
+- Mirror document.title to custom titlebar TextBlock and Window.Title
+- Fallback: `Untitled Project — PanelNester` if page title blank
+
+### Contract Rationale
+
+Initially proposed new `update-window-title` bridge message. Bishop's follow-up decision reversed this in favor of reading `document.title` from WebView2's `DocumentTitleChanged` event—smaller vocabulary, existing event infrastructure, single source of truth in Web UI.
+
+### Validation Evidence (Hicks Review)
+
+| Gate | Result | Evidence |
+|------|--------|----------|
+| 1 | Sidebar removed | AppShell has no .app-shell__sidebar CSS; grid is 48px minmax(0, 1fr) |
+| 2 | Nav indicator visible 320–1440px | box-shadow inset approach, no margin offset, mobile breakpoint switches to bottom |
+| 3 | File menu quiet | VS Code-style dropdown; no unexpected UI state changes |
+| 4 | Titlebar dirty-indicator consistent | DocumentTitleChanged mirrors to titlebar; StatusPill reflects projectDirty |
+| 5 | No regression | 132 tests (130 passed, 2 skipped, 0 failures); npm run build ✅ |
+
+### Residual Smoke Items (Production Gate, Not Blockers)
+
+- Resize to 320px and confirm nav abbreviations complete
+- File menu keyboard nav (Tab/Arrow/Escape)
+- Titlebar sync on rapid metadata edits
+- Long project names in titlebar TextTrimming
+
+### Consequences
+
+- Chrome redundancy eliminated; single source of truth for app identity
+- Overview page focused on actionable content (metadata, snapshots)
+- Native titlebar provides VS Code-like project context pattern
+- Bridge vocabulary unchanged (no new messages)
+- Web shell owns project identity; host mirrors cleanly
+
+**Status:** ✅ APPROVED | Date: 2026-03-15
+
+---
+
+*Last updated: 2026-03-15T02:40:13Z*

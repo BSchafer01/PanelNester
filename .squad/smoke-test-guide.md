@@ -510,6 +510,88 @@ Panel-B,12,36,0,Demo Material
 
 ---
 
+## Phase 6 Hardening Smoke Tests
+
+> Focus areas: empty-result export, dense-layout readability, save/open/export stability, viewer/pointer polish.
+
+### Test Case 33: Empty-Result Export Behavior
+
+1. Launch the app and create a new project without importing or running nesting.
+2. Attempt to export a PDF report.
+3. **Pass:** Export is disabled with a clear indication, shows a "no results" message, or produces a valid empty-state report—never a crash or blank/corrupt file.
+4. **Fail:** The app crashes, freezes, or produces a corrupt/empty PDF without explanation.
+
+### Test Case 34: Unplaced-Only Export
+
+1. Import a file where every part exceeds sheet dimensions (e.g., 100×100 on a 96×48 sheet).
+2. Run nesting (all parts will be unplaced).
+3. Export PDF.
+4. **Pass:** PDF includes the unplaced-items section with reason codes; no sheet visuals since no sheets were used; report is coherent.
+5. **Fail:** Crash, blank report, or missing unplaced-items section.
+
+### Test Case 35: Dense Layout Viewer Stress
+
+1. Import or generate 50+ small panels (e.g., 4×4 inch qty 50) on a single material.
+2. Run nesting to produce a dense single-sheet or few-sheet result.
+3. Inspect the viewer: zoom in, hover over individual panels, click to inspect.
+4. **Pass:** Viewer responds within 2 seconds, hover/click identifies the correct panel, labels remain readable at reasonable zoom.
+5. **Fail:** Viewer freezes, hover selects wrong panel, labels overlap illegibly.
+
+### Test Case 36: Dense Layout PDF Export
+
+1. With the 50+ panel result from Test Case 35, export the PDF.
+2. Open the PDF and inspect sheet graphics.
+3. **Pass:** Each panel is labeled or has a legend/callout; reviewer can identify every shape without guessing.
+4. **Fail:** Anonymous rectangles, missing labels, or labels that overlap so badly they're unreadable.
+
+### Test Case 37: Focus-Loss During Save Dialog
+
+1. Open a project, make edits to put it in dirty state.
+2. Invoke Save or Save As so the native dialog opens.
+3. Alt-Tab away from the app (or click another window) for 5 seconds, then Alt-Tab back.
+4. Complete the save (rename file if desired), close and reopen the project.
+5. **Pass:** Dialog survives focus loss, save completes, reopened file is correct.
+6. **Fail:** Crash during focus switch, dialog dismissed, or partial/corrupt file written.
+
+### Test Case 38: Pointer Capture Release
+
+1. Open a nesting result with at least one sheet in the viewer.
+2. Click inside the viewer and start a drag (pan gesture).
+3. While still holding the mouse button, move the pointer rapidly outside the viewer bounds, then release.
+4. Move pointer back outside viewer and attempt normal page scrolling with mouse wheel.
+5. **Pass:** Page scroll works normally; viewer does not continue panning; no stuck input state.
+6. **Fail:** Scroll is hijacked by viewer, pan continues after release, or pointer capture remains stuck.
+
+### Test Case 39: Zoom Limits
+
+1. With a result open, zoom in as far as the viewer allows.
+2. Then zoom out as far as the viewer allows.
+3. **Pass:** Both extremes remain usable—zoomed-in shows detail without breaking the canvas, zoomed-out keeps the sheet visible rather than shrinking to a dot.
+4. **Fail:** Canvas artifacts, sheet disappears, or viewer becomes unresponsive at extremes.
+
+### Test Case 40: Precision After Save/Open
+
+1. Create a project with a kerf value like 0.0625 and parts with dimensions like 24.125 × 48.375.
+2. Run nesting, note utilization percentages.
+3. Save, close, and reopen the project.
+4. **Pass:** Kerf, dimensions, and utilization display identically before and after save/open—no visible floating-point drift.
+5. **Fail:** Values show rounding noise (e.g., 48.1250001), utilization changes by more than display precision.
+
+---
+
+## Phase 6 Acceptance Criteria
+
+- [ ] Phase 6 hardening: empty-result export is graceful (disabled, message, or valid empty report)
+- [ ] Phase 6 hardening: unplaced-only results export with coherent unplaced section and no crash
+- [ ] Phase 6 hardening: 50+ panel viewer remains responsive and readable
+- [ ] Phase 6 hardening: 50+ panel PDF has identifiable labels for every placement
+- [ ] Phase 6 hardening: focus loss during save dialog does not crash or corrupt state
+- [ ] Phase 6 hardening: pointer capture releases cleanly when leaving viewer bounds
+- [ ] Phase 6 hardening: zoom limits prevent canvas breakage at extremes
+- [ ] Phase 6 hardening: save/open round-trip shows no visible precision drift
+
+---
+
 ## Notes for Reviewers
 
 - This smoke test covers SC1–SC5 from the Phase 0/1 test matrix (bridge handshake, CSV validation, nesting boundaries, results display).
