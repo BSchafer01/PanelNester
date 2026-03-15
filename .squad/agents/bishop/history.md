@@ -30,6 +30,31 @@
 - Dallas (WebUI): Project page and metadata form 🚧 In Progress (blocked on App.tsx refactor)
 - Hicks (Tests & review): Snapshot-first review gate active 🚧 Awaiting Web UI
 
+## Single-File MSI Packaging (COMPLETE ✅)
+
+**Ownership:** Bishop (WiX media authoring)
+
+**Assignment:** Convert external CAB distribution model to embedded-cabinet MSI
+
+**Delivered (2026-03-15T17:24:18Z):**
+1. ✅ WiX media authoring change: `<MediaTemplate EmbedCab="yes" />`
+2. ✅ Preserved per-user scope (`Scope="perUser"`) and .NET 8 publish pipeline
+3. ✅ Preserved WebView2 user-data location handling (explicit `%LOCALAPPDATA%\PanelNester\WebView2\UserData`)
+4. ✅ Release output: `PanelNester-PerUser.msi` only, no external `cab1.cab`
+5. ✅ MSI `Media.Cabinet` embedded as `#cab1.cab`
+6. ✅ Payload complete: desktop exe, runtime deps, WebView2 files, web assets
+7. ✅ Silent install/uninstall succeeds from non-elevated session
+8. ✅ Lifecycle clean: no `*.exe.WebView2` residue, uninstall removes user profile entry
+
+**Test Results:**
+- `dotnet build .\installer\PanelNester.Installer\PanelNester.Installer.wixproj -c Release --nologo` → ✅ PASSED
+- `dotnet test .\PanelNester.slnx -c Release --nologo` → 134 total / 132 passed / 2 skipped / 0 failed
+- `npm run build --prefix .\src\PanelNester.WebUI` → ✅ PASSED
+
+**Artifact:**
+- Path: `F:\Users\brand\source\AgentRepos\PanelNester\installer\PanelNester.Installer\bin\Release\PanelNester-PerUser.msi`
+- Status: Single-file, non-admin installable, Hicks approved ✅
+
 ## Learnings
 
 - 2026-03-14: Initial team staffing. I own desktop host integration, local persistence wiring, and export plumbing.
@@ -97,6 +122,7 @@
 - 2026-03-15T15:30:00Z: For `WindowStyle=None` + `WindowChrome` shells, maximize-state clipping is safest to fix by insetting the hosted WebView/content area by the system resize border thickness only while maximized. That keeps restored mode unchanged and avoids fragile CSS-only compensation for native non-client overlap.
 - 2026-03-15T16:55:00Z: A maintainable per-user MSI seam for this WPF/WebView2 app is a repo-owned WiX SDK project that runs the WebUI build, publishes the desktop app to a staging folder, replaces the published `WebApp` placeholder with the real `dist` output, and harvests that staged payload into a `%LocalAppData%`-scoped install location. WiX ICE38/60/64/91 must be suppressed for this shape because harvested file components under a user-profile install root trigger legacy MSI validation noise even though the package scope is intentionally per-user.
 - 2026-03-15T17:18:00Z: Retargeting this per-user installer seam from .NET 10 to .NET 8 only required updating the application/test TFMs and TFM-sensitive tests; the WiX project itself stayed stable because it publishes `PanelNester.Desktop.csproj` directly. The most trustworthy post-retarget packaging check is the staged publish runtimeconfig at `installer\PanelNester.Installer\obj\desktop-publish\PanelNester.Desktop.runtimeconfig.json`—its `runtimeOptions.tfm` must match the intended framework before blessing the MSI.
+- 2026-03-15T17:31:00Z: WiX's `Compressed="yes"` alone still allows a sidecar cabinet; for a genuinely single-file distributable MSI, the package authoring must set `<MediaTemplate EmbedCab="yes" />`. A reliable verification pair is: release output contains only the `.msi` and `.wixpdb`, and the MSI `Media.Cabinet` value resolves to `#cab1.cab`, proving the cabinet is embedded instead of external.
 
 ## Recent Work (2026-03-14T18:14:59Z)
 

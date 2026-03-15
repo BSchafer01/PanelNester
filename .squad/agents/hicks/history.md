@@ -46,17 +46,37 @@ I own acceptance criteria, regression coverage, and reviewer verdicts for the fu
 
 - ✓ **PER-USER MSI PACKAGING & RE-REVIEW APPROVED** (2026-03-15T16:39:48Z) — Gate authored: five non-negotiable pass conditions. Bishop delivered first MSI with WiX, per-user scope, complete payload. **First review: REJECTED** (WebView2 residue under install). Ripley revised: relocated WebView2 user-data to `%LOCALAPPDATA%\PanelNester\WebView2\UserData`. **Final re-review: APPROVED ✅** — Clean install→launch→uninstall; no residue; install root immutable. 134 tests (132 passed, 2 skipped, 0 failed).
 
-### Per-User MSI Cycle Summary
+- ✓ **SINGLE-FILE MSI EMBEDDING APPROVED** (2026-03-15T17:24:18Z) — Bishop changed WiX media authoring to `<MediaTemplate EmbedCab="yes" />` to embed cabinet inside MSI, eliminating external `cab1.cab` dependency. Per-user scope, .NET 8 pipeline, WebView2 lifecycle unchanged. Release output: `PanelNester-PerUser.msi` only (no external CAB). All validation green: installer build, solution tests (134/132), WebUI build. Hicks review gate passed all four must-pass checks. Artifact ready for distribution.
 
-**Date:** 2026-03-15 | **Agents:** Bishop (delivery), Hicks (gate + reviews), Ripley (revision)
+### Per-User MSI Cycle Summary (Full Lifecycle)
 
-**Gate Definition (Hicks):** Five non-negotiable pass conditions — repo-buildable, per-user/non-admin scope, complete desktop payload, baseline regression safe, clean install→launch→uninstall lifecycle with no orphaned runtime profiles.
+**Agents:** Bishop (delivery), Hicks (gate + reviews), Ripley (revision)
 
-**First Review (Hicks): REJECTED** — WebView2 default profile behavior created `*.exe.WebView2` under install folder on first launch, left as orphaned residue after uninstall. Root cause: no explicit user-data folder configuration. Revision assigned to Ripley.
+**Phase 1 — Initial MSI Delivery (2026-03-15T16:39:48Z)**
 
-**Revision (Ripley): COMPLETE** — Made WebView2 profile location explicit contract at `%LOCALAPPDATA%\PanelNester\WebView2\UserData` via `CoreWebView2Environment.CreateAsync(userDataFolder: ...)`. Installer scope unchanged (per-user/non-admin); revision is host behavior only. Validation: 134 tests (132 passed, 2 skipped, 0 failed); clean lifecycle proven (no `*.exe.WebView2` under install root, explicit path created and survives uninstall).
+Gate Definition (Hicks): Five non-negotiable pass conditions — repo-buildable, per-user/non-admin scope, complete desktop payload, baseline regression safe, clean install→launch→uninstall lifecycle with no orphaned runtime profiles.
 
-**Final Re-Review (Hicks): APPROVED ✅** — All five gates re-verified: repo-buildable, per-user scope, complete payload, baseline green, clean lifecycle. Non-blocking observation: MSI not digitally signed (deferred to production-release gate).
+First Review (Hicks): REJECTED — WebView2 default profile behavior created `*.exe.WebView2` under install folder on first launch, left as orphaned residue after uninstall. Root cause: no explicit user-data folder configuration. Revision assigned to Ripley.
+
+Revision (Ripley): COMPLETE — Made WebView2 profile location explicit contract at `%LOCALAPPDATA%\PanelNester\WebView2\UserData` via `CoreWebView2Environment.CreateAsync(userDataFolder: ...)`. Installer scope unchanged (per-user/non-admin); revision is host behavior only. Validation: 134 tests (132 passed, 2 skipped, 0 failed); clean lifecycle proven (no `*.exe.WebView2` under install root, explicit path created and survives uninstall).
+
+Re-Review (Hicks): APPROVED ✅ — All five gates re-verified: repo-buildable, per-user scope, complete payload, baseline green, clean lifecycle. Non-blocking observation: MSI not digitally signed (deferred to production-release gate).
+
+**Phase 2 — Single-File MSI Embedding (2026-03-15T17:24:18Z)**
+
+Gate Definition (Hicks): Four must-pass checks — per-user/non-admin contract, single-file Release output (no external CAB), payload completeness, existing validation green.
+
+Decision (Bishop): Change WiX media template from external CAB to embedded: `<MediaTemplate EmbedCab="yes" />`. Preserves all existing contracts (per-user scope, .NET 8 publish pipeline, WebView2 user-data location). Enables single-file distribution.
+
+Verification:
+- **Per-user / non-admin:** `Scope="perUser"` unchanged, installs under `%LOCALAPPDATA%\Programs\PanelNester`
+- **Single-file output:** Release build produces `PanelNester-PerUser.msi` only; no sibling external `.cab`
+- **Embedded cabinet:** MSI `Media.Cabinet` resolves to `#cab1.cab` (embedded)
+- **Payload complete:** Desktop exe, runtime files, WebView2 dependencies, web assets present
+- **Validation:** `dotnet build .\installer\...wixproj`, `dotnet test .\PanelNester.slnx`, `npm run build` all green
+- **Lifecycle clean:** Install/launch/uninstall cycle clean; WebView2 user data in correct location
+
+Final Review (Hicks): APPROVED ✅ — All four gates satisfied. Artifact ready for distribution.
 
 **Key Learning:** Lock-out pattern (rejecting agent cannot revise own work) forces fresh perspective. Ripley's revision narrowly focused on WebView2 bootstrap, not installer plumbing, reducing regression risk.
 
@@ -73,3 +93,5 @@ I own acceptance criteria, regression coverage, and reviewer verdicts for the fu
 - .NET retarget review is not just six csproj edits: hardcoded TFM assertions, `bin\Debug\netX...` path literals, and framework-dependent installer runtime prerequisites must move in the same slice or the review will miss user-visible breakage.
 - Acceptance matrices that restate target frameworks are review-critical artifacts, not commentary; if executable checks move to the new TFM but the matrix still tells reviewers to expect the old one, the retarget stays incomplete.
 - Framework retarget re-review should separate three checks: executable targeting (`TargetFramework`/WPF/runtimeconfig), active reviewer docs, and user-facing prerequisite callouts. Approval is earned only when all three agree on the same runtime story.
+- Single-file MSI review needs two separate proofs: the Release output shape must collapse to one `.msi` with no external `.cab`, and the installed payload must still be complete enough to launch. Either half missing means the packaging story is still untrusted.
+- Single-file MSI approval is stronger when the embedded-cab story is proven three ways at once: WiX metadata requests embedding, the built Release folder has no sibling `.cab`, and a real install/launch/uninstall cycle still preserves a complete payload and clean install root.

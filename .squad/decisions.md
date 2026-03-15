@@ -1201,6 +1201,85 @@ Batch 1 review flagged remaining detail-stack informational rows. Batch 2 remove
 
 - ✅ Detail-stack div and all metadata rows completely removed
 - ✅ CSS cleanup: no `.detail-stack` rules remain
+
+---
+
+### Decision: Bishop — Single-File MSI
+
+**Author:** Bishop | **Date:** 2026-03-15 | **Status:** COMPLETED ✅
+
+#### Context
+The per-user WiX installer was producing `PanelNester-PerUser.msi` plus a required external `cab1.cab`, which made distribution fragile. Single-file MSI enables clean distribution without external dependencies.
+
+#### Decision
+- Keep the existing per-user publish-and-harvest flow unchanged
+- Change WiX media authoring to `<MediaTemplate EmbedCab="yes" />` to embed the cabinet payload inside the MSI
+- This preserves non-admin install scope, the .NET 8 publish pipeline, and current WebView2 user-data relocation behavior
+
+#### Why
+Turns the installer into a single distributable file while maintaining all existing contracts and workflows.
+
+#### Verification
+- Rebuilt the installer from a clean `bin\Release` and confirmed the output folder contains only `PanelNester-PerUser.msi` and `PanelNester-PerUser.wixpdb`
+- MSI `Media.Cabinet` resolves to `#cab1.cab`, indicating an embedded cabinet
+
+#### Consequences
+- Distribution is now a single file with no external CAB dependency
+- Per-user scope preserved; non-admin install/launch/uninstall cycles remain unchanged
+- Lifecycle cleanliness maintained (WebView2 user data in correct location, no residual `*.exe.WebView2` folder)
+
+---
+
+### Decision: Hicks — Single-File MSI Reviewer Gate
+
+**Author:** Hicks | **Date:** 2026-03-15 | **Status:** COMPLETED ✅
+
+#### Context
+Define acceptance criteria for single-file MSI change to ensure per-user contract, single-file output, payload integrity, and regression coverage remain solid.
+
+#### Decision
+Four must-pass checks:
+
+1. **Per-user / non-admin contract still holds**  
+   `Product.wxs` must still describe a per-user install under `%LocalAppData%` with no machine-only writes or elevation requirement. Silent install/uninstall from a standard user context must complete without UAC.
+
+2. **Release output is truly single-file**  
+   The Release installer build must emit `PanelNester-PerUser.msi` without a sibling external `.cab` file. Proof comes from the actual output directory listing, not from WiX metadata assumptions.
+
+3. **Payload completeness survives the CAB change**  
+   The installed app must still contain the desktop entry point, `.deps.json`, `.runtimeconfig.json`, required DLL/native dependencies, and real `WebApp` built assets. Launching from the installed path must still work.
+
+4. **Existing validation stays green**  
+   `dotnet build .\installer\PanelNester.Installer\PanelNester.Installer.wixproj -c Release --nologo`, `dotnet test .\PanelNester.slnx -c Release --nologo`, and `npm run build --prefix .\src\PanelNester.WebUI` must remain green with no new installer/package regressions.
+
+#### Rejection Triggers
+- Installer starts requiring elevation or writes machine-scoped state
+- Release output still depends on an external `.cab`
+- Installed copy is missing runtime files, WebView2/native dependencies, or real web assets
+- Installer build, solution tests, or Web UI build regresses
+
+#### Evidence Expected at Review Time
+- Diff of WiX project and `Product.wxs`
+- Release output listing showing `.msi` present and no external `.cab`
+- Installed file listing plus a launch smoke from the installed path
+- Command results for installer build, solution tests, and Web UI build
+
+---
+
+### Decision: Hicks — Single-File MSI Review Verdict
+
+**Author:** Hicks | **Date:** 2026-03-15 | **Status:** APPROVED ✅
+
+#### Verdict
+Bishop's single-file MSI change clears the review gate.
+
+#### Evidence
+
+- **Per-user / non-admin:** `Product.wxs` still declares `Scope="perUser"` and installs under `%LOCALAPPDATA%\Programs\PanelNester`. Silent install and uninstall both completed successfully from the current non-elevated session, with the payload landing in the user profile path rather than `Program Files`.
+- **Single-file Release output:** `installer\PanelNester.Installer\bin\Release` contains `PanelNester-PerUser.msi` and `PanelNester-PerUser.wixpdb`, with no sibling external `.cab`. The built MSI's `Media` table reports `#cab1.cab`, matching an embedded cabinet.
+- **Payload intact:** Installed payload included `PanelNester.Desktop.exe`, `.deps.json`, `.runtimeconfig.json`, WebView2 loader/runtime files, native/runtime DLLs, fonts, and real `WebApp` built assets. Launch smoke from the installed exe stayed running long enough to confirm the installed copy is viable.
+- **Existing validation green:** `dotnet build .\installer\PanelNester.Installer\PanelNester.Installer.wixproj -c Release --nologo`, `dotnet test .\PanelNester.slnx -c Release --nologo`, and `npm run build --prefix .\src\PanelNester.WebUI` all passed. Solution baseline remained **134 total / 132 passed / 2 skipped / 0 failed**.
+- **Lifecycle cleanliness preserved:** First launch did not recreate `*.exe.WebView2` residue under the install root, uninstall removed `%LOCALAPPDATA%\Programs\PanelNester`, and WebView2 user data remained in `%LOCALAPPDATA%\PanelNester\WebView2\UserData`.
 - ✅ Header actions and Payload section fully preserved
 - ✅ Build: `npm run build` ✅ (1.84s)
 - ✅ Tests: 132 passing (130 passed, 2 skipped, 0 failures)
