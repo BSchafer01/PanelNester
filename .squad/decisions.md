@@ -1649,3 +1649,107 @@ Dallas's implementation satisfies all gate requirements. The requested UI elemen
 **Build validated:** ✅ WebUI build passes  
 **Gate compliance:** 100% (all checklist items satisfied)
 
+---
+
+## Maximize Clipping Fix — Host Content Inset
+
+**Author:** Bishop | **Date:** 2026-03-15 | **Status:** Approved ✅
+
+### Context
+
+Custom-chrome window maximization causes the hosted WebView content and active nav accent to clip at the edges, making navigation difficult and obscuring the active route indicator.
+
+### Decision
+
+Fix maximize-only clipping at the WPF host boundary, not in React nav styling.
+
+When the custom-chrome window is maximized, inset the hosted WebView/content region by the system resize border thickness on the left, right, and bottom edges. Leave restored mode unchanged.
+
+### Why
+
+- The clipping appears only when the native shell is maximized, which points to custom-window-chrome non-client overlap rather than a route-specific web layout bug.
+- The missing active nav accent is a symptom of hosted content sitting under the maximized resize frame.
+- A host-side maximize inset preserves the current VS Code-style web layout and avoids inventing CSS compensations that only mask the native boundary problem.
+
+### Implementation
+
+- `src\PanelNester.Desktop\MainWindow.xaml.cs` recalculates the content margin on maximize/restore using `SystemParameters.WindowResizeBorderThickness`.
+- Top inset is intentionally left at `0` so the native titlebar row keeps its current presentation.
+- Restored state returns to `new Thickness(0)` cleanly.
+
+### Consequences
+
+- The desktop host owns the maximize boundary adjustment, simplifying Web UI layout.
+- Active nav accent credible across all routes in maximized state.
+- No changes to titlebar, WindowChrome, resize behavior, or window-state handlers.
+- Platform-agnostic: margin logic uses system-wide resize-border thickness.
+
+### Validation
+
+- `dotnet build .\src\PanelNester.Desktop\PanelNester.Desktop.csproj -nologo` ✅
+- `dotnet test .\PanelNester.slnx --nologo` → 130 passed, 2 skipped ✅
+- Screenshots confirm: active nav accent visible in maximized state, no shell/content edge clipping ✅
+- Restored state returns to baseline appearance without residual padding ✅
+
+---
+
+## Maximize Clipping Fix — Reviewer Gate
+
+**Author:** Hicks | **Date:** 2026-03-15 | **Status:** Passed ✅
+
+### Gate Definition
+
+The fix is only trustworthy if maximizing the custom desktop shell stops edge clipping **without** hiding the active nav accent or changing the restored-window experience.
+
+### Non-Negotiable Pass Gates
+
+1. **Active nav highlight survives maximize**
+   - With the window maximized, the active left-nav accent remains visibly present on every route (PRJ, IMP, MAT, RES).
+   - No part of the accent is shaved off by the window edge or shell container.
+
+2. **No shell/content edge clipping in maximized state**
+   - Titlebar, menu row, nav rail, and main content all render inside the visible work area.
+   - No top/left/right/bottom clipping of shell chrome, text, inputs, cards, or content borders that appears only when maximized.
+
+3. **Restored appearance stays intact**
+   - Returning from maximized to restored preserves the normal spacing and appearance.
+   - The fix must not introduce new padding gaps, misalignment, or accidental inset/outset changes in restored mode.
+
+4. **No regression to titlebar, resize behavior, or shell layout**
+   - Minimize/maximize/restore buttons stay aligned, clickable, and visually correct.
+   - Restored-window edge and corner resize behavior still works.
+   - Shell layout still fills the window cleanly, with no new stray scrollbars or route-specific layout jumps.
+
+### Validation Approach
+
+1. Reviewed touched shell files:
+   - `src\PanelNester.Desktop\MainWindow.xaml`
+   - `src\PanelNester.Desktop\MainWindow.xaml.cs`
+   - `src\PanelNester.WebUI\src\components\AppShell.tsx`
+   - `src\PanelNester.WebUI\src\styles.css`
+
+2. Compared provided screenshots as failure/baseline references:
+   - `Clipping when enlarged.png` = failed maximized state
+   - `No Clipping when not enlarged.png` = acceptable restored-state baseline
+
+3. Ran full regression slice: `dotnet test PanelNester.slnx --no-restore --nologo`
+   - **Result:** 132 total, 130 passed, 2 skipped, 0 failed ✅
+
+### Verdict
+
+**APPROVED** ✅
+
+The fix stays in the WPF host, where the bug belonged. `ShellContentHost` now gets a maximize-only margin derived from `SystemParameters.WindowResizeBorderThickness`, and restored mode returns to `new Thickness(0)`.
+
+- The titlebar and window chrome were not disturbed
+- The active nav indicator remains credible in maximized mode
+- Restored/non-maximized appearance stays aligned with the accepted baseline
+- Residual risk is low and limited to the absence of automated maximize/restore UI smoke, but the implemented change is narrowly scoped and restores cleanly
+
+---
+
+**Reviewed by:** Hicks  
+**Date:** 2026-03-15  
+**Gate validation:** ✅ All four pass gates confirmed  
+**Risk assessment:** Low (narrowly scoped, no shell path changes, restores cleanly)
+

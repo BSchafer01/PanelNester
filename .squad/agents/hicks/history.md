@@ -17,6 +17,8 @@
 - 2026-03-14: Theme-refresh reviews pass faster when I separate appearance from behavior: check palette/layout tokens against the reference, then confirm import and results pages still expose the same handlers, status pills, tables, and error surfaces before trusting build/test output.
 - 2026-03-14: Smoke-guide bookkeeping has to track the validated regression gate exactly; the current baseline is 38 passed, 1 skipped, and stale counts make reviewer sign-off less trustworthy.
 - 2026-03-14: Phase 3 testing focuses on JSON serialization stability, version migration, material snapshot edge cases, and project metadata round-trip. Snapshot-first gate: projects reopen from snapshots only, no silent live-library rehydration. Final approval deferred pending Dallas Web UI Phase 3 completion.
+- 2026-03-15: Maximize-state fixes in custom desktop shells need paired-state validation: compare the same shell in restored and maximized modes, then verify the return trip back to restored mode so nav accents, edge spacing, and resize hit targets do not silently regress.
+- 2026-03-15: The safest maximize-only shell fix is a host-side inset on the hosted content container, with restored mode explicitly reset to zero; if the titlebar row is left alone, nav accents and shell chrome survive without drifting the normal layout.
 
 ## Recent Work (2026-03-14T18:14:59Z)
 
@@ -372,4 +374,30 @@ Clear rejection conditions if:
 - **Must preserve/Must implement split** clarifies what stays vs. what changes — prevents over-removal or under-implementation.
 - **Out of scope section** prevents scope creep (e.g., removing unused CSS, adding persistent resize state).
 - **Rejection triggers as negative acceptance criteria** — clear failure modes help Dallas self-check before requesting review.
+
+## Maximize Clipping Fix Review
+
+**2026-03-15T15:49:17Z** — Gate definition and final verdict for Bishop's maximize-clipping fix.
+
+### Gate Definition
+
+Non-negotiable pass conditions:
+
+1. **Active nav highlight survives maximize** — active left-nav accent visibly present on all routes (PRJ, IMP, MAT, RES), no shaving at window edges
+2. **No shell/content edge clipping in maximized state** — titlebar, menu row, nav rail, main content render inside visible work area
+3. **Restored appearance stays intact** — returning from maximized preserves normal spacing; no new padding gaps or insets
+4. **No regression to titlebar/resize behavior** — minimize/maximize/restore buttons aligned/clickable; restored-window edge/corner resize works
+
+### Validation Performed
+
+- Reviewed `src\PanelNester.Desktop\MainWindow.xaml` and `.xaml.cs` (margin logic on window-state change)
+- Reviewed `src\PanelNester.WebUI\src\components\AppShell.tsx` and `styles.css` (no changes, nav styling preserved)
+- Compared baseline screenshots: `No Clipping when not enlarged.png` (baseline), `Clipping when enlarged.png` (pre-fix failure)
+- Regression suite: `dotnet test PanelNester.slnx --no-restore --nologo` → 132 total, 130 passed, 2 skipped, 0 failed ✅
+
+### Verdict: APPROVED ✅
+
+The fix properly insets the `ShellContentHost` by `SystemParameters.WindowResizeBorderThickness` on maximize only, zeroing on restore. Titlebar and WindowChrome untouched. Active nav indicator credible in maximized mode. All gate conditions confirmed. Risk is low; implementation is narrowly scoped and restores cleanly.
+
+**Orchestration logs created. Decisions merged to decisions.md. Ready for merge.**
 
