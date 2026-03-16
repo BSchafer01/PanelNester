@@ -17,6 +17,8 @@
 📌 2026-03-14T20:17:23Z: **PHASE 5 COMPLETE** — Batch nesting orchestration, report settings, report data shaping, and test coverage delivered. 103 tests passing.
 📌 2026-03-15T23:07:13Z: **STOCK-WIDTH PREFERENCE COMPLETE** — Updated `ShelfNestingService` with stock-width-matching new-shelf orientation preference. 137 tests passing, all gates cleared by Hicks.
 
+📌 2026-03-16T00:09:58Z: **IMPORT MAPPING FEATURE APPROVED** — Extended CsvImportService with explicit column-mapping options and material-to-library resolution. Import requests accept column overrides and material mappings. Responses surface source column detection, proposed field mappings, and per-material resolution status. New materials created via IMaterialService during bridge finalize step, not inside pure import path. Service layer remains UI-independent; side effects (library mutation) isolated to bridge layer. All existing tests passing; new coverage added for mapping scenarios. 143 tests / 141 passed / 2 skipped. Hicks review gate APPROVED ✅
+
 ## Phase 2 — Material Library CRUD (COMPLETE)
 
 **Ownership:** Parker (Domain/Services foundation) ✅
@@ -169,3 +171,4 @@
 - 2026-03-15: Phase 6 hardening reveals that "results available" should mean renderable sheet placements (≥1 placement), not just non-empty material records. This allows zero-sheet and zero-placement exports to stay successful while showing correct empty-state.
 - 2026-03-15: Dense PDF layouts stay deterministic and readable if tiny panels fall back to numbered callouts while the existing ordered placement summary acts as the legend seam; that avoids widening report contracts and keeps phase scope bounded.
 - 2026-03-15: Orientation-preference fixes are safest when they add a narrow priority key ahead of the existing heuristic, so the engine can honor an explainable special case (like a panel already spanning full sheet width) without changing rotation behavior everywhere else.
+- 2026-03-15: Import-time mapping stays explainable if the backend keeps exact-match defaults, returns detected headers/material resolutions on every import response, and treats user overrides plus bridge-led material creation as explicit inputs instead of fuzzy silent fallbacks.

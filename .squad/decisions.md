@@ -1997,3 +1997,138 @@ The Start Menu shortcut resolves through the Windows Installer cached icon path 
 **Gate validation:** ✅ All four pass gates confirmed  
 **Verdict:** APPROVED
 
+---
+
+## Import Mapping — Column + Material Resolution (2026-03-16)
+
+### Decision: Parker — Import Mapping
+
+**Author:** Parker | **Date:** 2026-03-16 | **Status:** APPROVED ✅
+
+#### Context
+
+Dallas needs import-time column mapping and material resolution without weakening the existing deterministic CSV/XLSX path. Unknown materials may need to map to an existing library entry or be created during the import flow.
+
+#### Decision
+
+- Preserve the current exact-match import behavior as the default path.
+- Extend import request/response contracts with explicit mapping metadata:
+  - request options accept column mappings and material-to-library mappings
+  - responses include detected source columns, resolved/needed field mappings, and per-source material resolution status
+- Do **not** silently apply fuzzy header guesses; only surface deterministic suggestions back to the UI (`missing-column-mapping`) so the user confirms them.
+- Keep library creation out of the pure import services:
+  - desktop bridge accepts `newMaterials`
+  - bridge creates those materials through `IMaterialService`
+  - bridge then replays import with the created material ids folded into import options
+
+#### Consequences
+
+- Dallas can drive a two-step or three-step import flow with one bridge message type (`import-file`) and richer payloads.
+- Import validation remains explicit and row-level failures still use the same validation surface.
+- Service layer stays UI-independent and reproducible; bridge owns the side effect of mutating the material library.
+
+---
+
+### Decision: Dallas — Import Mapping Workflow
+
+**Author:** Dallas | **Date:** 2026-03-16 | **Status:** APPROVED ✅
+
+#### Context
+
+Keep import-time mapping on the existing `import-file` bridge contract instead of inventing a second frontend parser or a parallel preview route.
+
+#### Decision
+
+- The backend already returns the operator-facing metadata we need (`availableColumns`, per-field mapping status, per-material resolution state).
+- This preserves the exact-match happy path as a fast direct import while giving mismatched files an explicit review workspace.
+- New library materials are only created on finalize, so preview stays reversible and side effects remain intentional.
+
+#### UI Shape
+
+- Happy path: exact headers + exact material names still import immediately.
+- Rescue path: the Import page opens a review workspace for column mapping, material resolution, preview refresh, and final commit.
+- Current imported rows stay active until finalize; preview rows are shown separately to avoid ambiguity.
+
+---
+
+### Decision: Hicks — Import Mapping Review Verdict
+
+**Author:** Hicks | **Date:** 2026-03-16 | **Status:** APPROVED ✅
+
+#### Verdict
+
+APPROVED
+
+#### Why
+
+- The obvious/default path still stays fast: `App.tsx` finalizes import immediately when no field mappings or material resolutions remain unresolved.
+- Explicit rescue mapping exists before commit: `ImportPage.tsx` keeps column mapping in review state, requires preview refresh after edits, and disables finalize until all required fields are mapped.
+- Existing-material remap is proven by service coverage: `CsvImportServiceSpecs.cs` verifies source material values can resolve to an existing library material and final imported rows carry the library's canonical material name.
+- Create-new-material during import is proven by bridge coverage: `ImportBridgeSpecs.cs` verifies finalize-time creation persists the new material and re-imported rows use that created material name.
+- Failure surfaces stay explicit: missing/duplicate column mappings, bad material ids, material create failures, unresolved materials, and row validation all return actionable codes/messages instead of silent drops.
+
+#### Validation Reviewed
+
+- Solution test suite green: 143 total / 141 passed / 2 skipped / 0 failed.
+- WebUI production build succeeds.
+- UI artifacts on disk confirm review/finalize flow, pending-change gating, cancel behavior that preserves the current import payload, and explicit material-resolution/create-new controls.
+
+#### Residual Risk Kept Non-Blocking
+
+- There is no automated React interaction test for the review screen itself, so confidence comes from typed UI state, build success, and bridge/service coverage rather than browser automation.
+- Keep an eye on future regressions around preview refresh after column edits; current code resets stale material plans when the material column changes, which is the right safety contract.
+
+---
+
+### Decision: Hicks — Import Mapping Reviewer Gate
+
+**Author:** Hicks | **Date:** 2026-03-16 | **Status:** APPROVED ✅
+
+#### Context
+
+Current import trusts exact headers and exact material-name matches. This slice adds a pre-commit mapping step and optional library creation, so review has to prove flexibility without losing the current one-click path or hiding failures.
+
+#### Five Must-Pass Gates
+
+1. **Obvious-default path stays fast**
+   - If source headers already line up with the expected import fields and material names already exist in the library, the user can still finish import without manual remapping.
+   - Current CSV/XLSX happy paths, inline revalidation, and the `import-file` flow stay intact.
+
+2. **Column-to-field mapping is explicit before commit**
+   - Before final import, every required field (`Id`, `Length`, `Width`, `Quantity`, `Material`) is either auto-resolved or explicitly mapped from a source column.
+   - The reviewer can see and change the proposed mapping before commit.
+   - Duplicate target assignments, missing required targets, or ambiguous auto-matches block final import with explicit messages.
+
+3. **Material resolution is explicit and canonical**
+   - Imported material values can be mapped to existing library materials before final import.
+   - Final imported rows use the chosen library material names consistently across preview, validation, save/open, and nesting.
+   - The feature must never silently case-fold, fuzzy-match, or auto-remap materials behind the user's back.
+
+4. **Create-new-material path is controlled**
+   - For unmapped source material values, the user can create a new library material during import without leaving the workflow.
+   - Creation enforces the same required fields and duplicate-name rules as the material library itself.
+   - After creation, the new material is immediately available for remaining mapping choices and survives reload like any other library material.
+
+5. **Failure surfaces stay reviewer-visible**
+   - File-level issues, column-mapping issues, unresolved materials, material-create failures, and row validation issues are distinct and actionable.
+   - Final import cannot succeed while required field mappings or material resolutions are still unresolved.
+   - Cancelled mapping/create flows leave the library and import table unchanged; no silent drops, silent partial commits, or generic "import failed" buckets.
+
+#### Required Evidence
+
+- Service tests for obvious/default mapping, manual column remap, existing-material remap, create-new-material, duplicate or ambiguous mapping, and unresolved-material rejection.
+- Bridge/UI coverage proving preview-before-commit, mapping edits, create-new flow, and preserved obvious-default happy path.
+- Manual smoke proving:
+  - obvious CSV/XLSX import still takes the short path
+  - a nonstandard header file can be mapped and imported
+  - an unknown material can be mapped to an existing library entry
+  - an unknown material can be created during import and then used
+  - unresolved mappings or materials block commit with explicit messages
+
+#### Automatic Rejection Conditions
+
+- Unknown materials are silently auto-created or silently remapped.
+- The feature forces the user through mapping when defaults are already unambiguous.
+- Required field or material gaps degrade into missing rows, generic errors, or post-import surprises.
+- Mapping only exists in UI state and is lost before validation, save/open, or nesting.
+
