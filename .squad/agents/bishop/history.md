@@ -1,3 +1,14 @@
+## Core Context
+
+PanelNester is a local desktop nesting tool with WPF host, WebView2 UI, and per-user MSI distribution. Bishop owns desktop bridge integration.
+
+**Key deliverables:** Phase 0–5 bridge contracts (import, materials, projects, nesting, PDF export); Phase 6 error messaging; single-file MSI packaging with WebUI integration; app icon branding; rebuild validation procedures.
+
+**Current status:** All phases delivered and approved. Most recent work: MSI rebuild validation (2026-03-16T01:36:09Z) — WebUI inclusion verified through dist file comparison and MSI File table query. Final artifact: installer\PanelNester.Installer\bin\Release\PanelNester-PerUser.msi.
+
+**Key learnings:** Per-user WiX flow (repo-owned, .NET 8, embedded CAB); WebView2 title sync via DocumentTitleChanged; error messages split (technical vs user-facing); dialog marshalling for reliability; icon reuse across desktop/installer.
+
+---
 # Bishop History
 
 ## Project Context

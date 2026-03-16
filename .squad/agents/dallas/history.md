@@ -1,3 +1,14 @@
+## Core Context
+
+PanelNester WebUI built with React + TypeScript. Dallas owns UI flows, components, and operator-facing clarity.
+
+**Key deliverables:** Phase 0 scaffold (contract-first shell); Phase 1 import page; Phase 2 material CRUD UI; Phase 3 project lifecycle; Phase 4 full import with mapping; Phase 5 results viewer with PDF export; Phase 6 UI cleanup; import mapping with create-new-material support.
+
+**Current status:** All phases delivered and approved. Most recent: Import mapping feature (2026-03-16T00:09:58Z) — happy path for exact headers/materials, rescue path for manual mapping, create-new-material flow, blocking conditions on unresolved materials. 143 tests passing.
+
+**Key learnings:** Contract-first shell unblocks other agents; VS Code dark theme matches native host; tabbed workspaces + resizable viewers for complex layouts; import mapping requires preview refresh gating before finalize.
+
+---
 # Dallas History
 
 ## Project Context
@@ -224,3 +235,4 @@
 
 
 - 2026-03-16T00:00:00Z: Import mapping UI works best as a two-speed workflow on `src\PanelNester.WebUI\src\pages\ImportPage.tsx`: keep exact-header/exact-material files on the current one-click path, but when `import-file` returns mapping metadata (`availableColumns`, `columnMappings`, `materialResolutions`), hold a review session in app state, require an explicit preview refresh after operator edits, and only create new library materials on final finalize so rescue-side effects stay deliberate.
+
