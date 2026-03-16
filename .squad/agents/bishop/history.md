@@ -149,6 +149,7 @@
 - 2026-03-15T17:18:00Z: Retargeting this per-user installer seam from .NET 10 to .NET 8 only required updating the application/test TFMs and TFM-sensitive tests; the WiX project itself stayed stable because it publishes `PanelNester.Desktop.csproj` directly. The most trustworthy post-retarget packaging check is the staged publish runtimeconfig at `installer\PanelNester.Installer\obj\desktop-publish\PanelNester.Desktop.runtimeconfig.json`—its `runtimeOptions.tfm` must match the intended framework before blessing the MSI.
 - 2026-03-15T17:31:00Z: WiX's `Compressed="yes"` alone still allows a sidecar cabinet; for a genuinely single-file distributable MSI, the package authoring must set `<MediaTemplate EmbedCab="yes" />`. A reliable verification pair is: release output contains only the `.msi` and `.wixpdb`, and the MSI `Media.Cabinet` value resolves to `#cab1.cab`, proving the cabinet is embedded instead of external.
 - 2026-03-15T18:00:00Z: For branded WPF shells with custom chrome, the safest seam is one shared multi-resolution `.ico`: use it as the desktop project's `<ApplicationIcon>`, set `Window.Icon` so taskbar/Alt+Tab/native shell surfaces inherit it, bind any custom titlebar glyph to that same `Window.Icon`, and reuse the same asset in WiX for `ARPPRODUCTICON` plus shortcut `Icon` so uninstall/start-menu branding stays aligned with the built exe.
+- 2026-03-16T18:35:00Z: For rebuild-only MSI deliveries, the calmest proof that the latest Web UI made it into the installer is a two-step check: first confirm `src\PanelNester.WebUI\dist` and `installer\PanelNester.Installer\obj\desktop-publish\WebApp` are hash-identical, then query the built MSI `File` table via the Windows Installer COM API to confirm every current dist asset filename is present in the package. That validates both the staging seam and the packaged payload without depending on a full administrative extraction.
 
 ## Recent Work (2026-03-14T18:14:59Z)
 
@@ -251,3 +252,11 @@
 
 - ✓ **NET 8 RETARGET COMPLETE.** Retargeted `PanelNester.Domain`, `PanelNester.Services`, `PanelNester.Desktop`, and all three test projects from `net10.0` → `net8.0` (or `net8.0-windows` for WPF). Solution builds cleanly: `dotnet build .\PanelNester.slnx -c Release --nologo` ✅. Test baseline validated: `dotnet test .\PanelNester.slnx -c Release --nologo` → 134 total / 132 passed / 2 skipped / 0 failed ✅. Per-user MSI rebuilds: `dotnet build .\installer\PanelNester.Installer\PanelNester.Installer.wixproj -c Release --nologo` → `PanelNester-PerUser.msi` produced ✅. Installer publish runtimeconfig confirmed: `tfm: net8.0` with `Microsoft.WindowsDesktop.App 8.0.0` ✅. **First review (Hicks): REJECTED** on stale validation docs (executable checks moved but `tests\Phase0-1-Test-Matrix.md` still asserted `net10.0-windows`). Escalated to Ripley for active-doc revision (lock-out pattern). **Final review (Hicks): APPROVED** ✅ after Ripley corrected `tests\Phase0-1-Test-Matrix.md` and `.squad\smoke-test-guide.md` to reflect .NET 8. Orchestration logs created; decisions merged; inbox deleted. **NET 8 RETARGET APPROVED 2026-03-15T17:06:36Z**
 
+
+
+## 2026-03-16T01:36:09Z — MSI Rebuild Delivery
+
+- MSI rebuild requested by Brandon Schafer for current app version
+- Rebuild validation completed: WebUI inclusion verified
+- Artifact review approved by Hicks: No packaging regressions
+- Final artifact: installer\PanelNester.Installer\bin\Release\PanelNester-PerUser.msi

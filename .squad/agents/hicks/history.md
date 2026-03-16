@@ -108,3 +108,12 @@ Final Review (Hicks): APPROVED ✅ — All four gates satisfied. Artifact ready 
 - Import-mapping review has to separate three paths: obvious defaults that should stay one-click, explicit rescue mapping for messy files, and deliberate material creation. A slice can satisfy the complex path while still regressing trust if the obvious path slows down.
 - Material mapping during import is library mutation, not just validation sugar; approval should require proof that unresolved values stay blocked until the user either maps them or creates a real material under normal duplicate-name rules.
 - Import-mapping approval is strongest when three evidence layers agree: service tests prove canonical material-name substitution, bridge tests prove create-on-finalize persistence, and UI gating clearly keeps stale previews or unresolved materials from being finalized accidentally.
+- A lightweight MSI handoff review is trustworthy when four signals agree: the rebuilt `.msi` is present in the standard Release folder, the existing `.wixproj` still rebuilds it from repo-root sources, the staged publish payload contains the desktop exe plus `WebApp` assets, and the Release output does not sprout surprise sidecar payloads beyond the expected `.wixpdb`.
+
+
+## 2026-03-16T01:36:09Z — MSI Rebuild Delivery
+
+- MSI rebuild requested by Brandon Schafer for current app version
+- Rebuild validation completed: WebUI inclusion verified
+- Artifact review approved by Hicks: No packaging regressions
+- Final artifact: installer\PanelNester.Installer\bin\Release\PanelNester-PerUser.msi

@@ -21,6 +21,7 @@ Use this when a Windows desktop app needs a real `.msi` artifact, must install w
 7. If the installer publishes the desktop project directly, framework retargets usually belong in the application/test projects, not the WiX project; verify the staged publish output by checking `obj\desktop-publish\*.runtimeconfig.json` for the expected `runtimeOptions.tfm`.
 8. If distribution must be a single `.msi`, do not rely on `Compressed="yes"` alone—set `<MediaTemplate EmbedCab="yes" />` so WiX embeds `cab1.cab` into the MSI instead of writing a sidecar cabinet. Validate by checking the release folder has no external `.cab` and, if needed, confirm the MSI `Media.Cabinet` value is `#cab1.cab`.
 9. When the desktop app needs branding, generate one canonical multi-resolution `.ico` and reuse that exact file everywhere: WPF `<ApplicationIcon>` for the built `.exe`, `Window.Icon` for taskbar/Alt+Tab/native shell pickup, any custom titlebar image bound to `Window.Icon`, and WiX `<Icon>` + `ARPPRODUCTICON`/shortcut `Icon` so installer and uninstall surfaces stay consistent with the shipped executable.
+10. For rebuild-only validation, prove the latest WebUI actually ships in the MSI with a two-step check: compare hashes between `src\PanelNester.WebUI\dist` and `installer\PanelNester.Installer\obj\desktop-publish\WebApp`, then query the built MSI `File` table through the Windows Installer COM API to confirm every current dist asset filename is present in the package.
 
 ## Examples
 

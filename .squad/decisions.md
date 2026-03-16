@@ -2132,3 +2132,47 @@ Current import trusts exact headers and exact material-name matches. This slice 
 - Required field or material gaps degrade into missing rows, generic errors, or post-import surprises.
 - Mapping only exists in UI state and is lost before validation, save/open, or nesting.
 
+
+---
+
+# Bishop — Rebuild MSI Verification
+
+## Context
+
+Brandon requested a fresh per-user MSI for the current app state, explicitly including the recent import mapping WebUI work. The existing WiX flow already stages `src\PanelNester.WebUI\dist` into `installer\PanelNester.Installer\obj\desktop-publish\WebApp`, but rebuild requests need a repeatable proof that the current web bundle made it all the way into the packaged installer artifact.
+
+## Decision
+
+For rebuild-only MSI deliveries, validate WebUI inclusion in two explicit steps:
+
+1. Compare the built `src\PanelNester.WebUI\dist` files against `installer\PanelNester.Installer\obj\desktop-publish\WebApp` by relative path and hash.
+2. Query the built MSI's `File` table through the Windows Installer COM API and confirm the current dist asset filenames are present in the package.
+
+Keep using the repo-owned WiX build target as the source of truth for packaging; do not introduce a separate manual publish or copy step just to rebuild the installer.
+
+## Consequences
+
+- Rebuild verification stays explicit and scriptable.
+- We validate both the staging seam and the packaged MSI payload.
+- We avoid relying on a full administrative extraction when the environment is noisy or shared.
+
+
+---
+
+# Hicks rebuild MSI review
+
+- **Requested by:** Brandon Schafer
+- **Verdict:** APPROVED
+- **Scope:** Quick acceptance review of `installer\PanelNester.Installer\bin\Release\PanelNester-PerUser.msi`
+
+## Evidence
+
+- Standard release handoff is present: `installer\PanelNester.Installer\bin\Release\PanelNester-PerUser.msi` exists alongside the expected `.wixpdb`, with no external `.cab` in the Release folder.
+- Current packaging flow still points at repo sources: `PanelNester.Installer.wixproj` rebuilds from `src\PanelNester.Desktop\PanelNester.Desktop.csproj` and `src\PanelNester.WebUI\`, stages to `obj\desktop-publish\`, and `Product.wxs` packages that payload with `Scope="perUser"` and `MediaTemplate EmbedCab="yes"`.
+- Rebuilding through the existing WiX flow succeeded from the repo root: `dotnet build .\installer\PanelNester.Installer\PanelNester.Installer.wixproj -c Release`.
+- Staged payload sample still looks complete for handoff: `PanelNester.Desktop.exe`, WebView2 assemblies, and `WebApp\index.html` plus asset bundles are present under `installer\PanelNester.Installer\obj\desktop-publish\`.
+
+## Decision
+
+APPROVED for artifact readiness. I saw no obvious packaging regression in the rebuilt MSI handoff story.
+
