@@ -52,6 +52,8 @@ I own acceptance criteria, regression coverage, and reviewer verdicts for the fu
 
 - ✓ **IMPORT MAPPING FEATURE GATE & APPROVAL** (2026-03-16T00:09:58Z) — Gate authored: five must-pass conditions (obvious-default path fast, column mapping explicit before commit, material resolution canonical/no-fuzzy, create-new controlled, failure surfaces visible). Parker + Dallas + Hicks delivered extended CsvImportService, ImportPage.tsx review workspace, bridge finalize integration for create-new-material. **Verdict: APPROVED ✅** — Happy path (exact headers/materials) = single-click, rescue path = explicit review with preview refresh gating before finalize. All required fields validated. No silent fuzzy-matching, no partial commits. 143 tests / 141 passed / 2 skipped / 0 failed. WebUI build green.
 
+- ✓ **SECOND MACHINE FIXES — PHASE 6 ACCEPTANCE GATE** (2026-03-17T04:04:02Z) — Gate authored: five must-pass conditions (first-try file dialogs, sticky shell layout, results workspace scroll containment, combobox stability, editable kerf width) + regression safety + test scaffolding. Assigned to Bishop (file dialog threading), Dallas (sticky layout + combobox + kerf UI), Parker (editable kerf backend). **New tests added:** DialogSerializationUnderRapidRetry (semaphore serialization), KerfWidthPersistsAcrossProjectSaveOpen (persistence round-trip). Both passing. Implementation assigned; orchestration logs created.
+
 ### Per-User MSI Cycle Summary (Full Lifecycle)
 
 **Agents:** Bishop (delivery), Hicks (gate + reviews), Ripley (revision)
@@ -109,6 +111,12 @@ Final Review (Hicks): APPROVED ✅ — All four gates satisfied. Artifact ready 
 - Material mapping during import is library mutation, not just validation sugar; approval should require proof that unresolved values stay blocked until the user either maps them or creates a real material under normal duplicate-name rules.
 - Import-mapping approval is strongest when three evidence layers agree: service tests prove canonical material-name substitution, bridge tests prove create-on-finalize persistence, and UI gating clearly keeps stale previews or unresolved materials from being finalized accidentally.
 - A lightweight MSI handoff review is trustworthy when four signals agree: the rebuilt `.msi` is present in the standard Release folder, the existing `.wixproj` still rebuilds it from repo-root sources, the staged publish payload contains the desktop exe plus `WebApp` assets, and the Release output does not sprout surprise sidecar payloads beyond the expected `.wixpdb`.
+- Public GitHub publish review needs two separate truth checks: contributor setup (SDKs/build tools) and installed-app runtime prerequisites. For a framework-dependent desktop MSI, collapsing those into one README setup story is how public docs quietly start lying.
+- Second-machine file-dialog failures (working only on second try) point to race conditions in dialog serialization or stale dispatcher access; SemaphoreSlim-based gating with explicit Dispatcher.InvokeAsync is the safest fix pattern.
+- Sticky layout issues (File menu state leaking, scroll coupling between columns) need explicit reset patterns: close-on-action for dropdowns, independent overflow containers for scroll regions, explicit focus management for combobox lifecycles.
+- Hardcoded nesting parameters (kerf width as constant) break user trust; the fix is three-part: editable UI control on Overview page, binding to ProjectSettings persistence, and passing the persisted value (not the demo constant) to nesting service calls.
+- Dialog retry tests should prove both cancellation (semaphore release) and serialization (second invocation waits for first, does not deadlock); this is stronger than single-path happy-path tests.
+- Kerf persistence tests belong in ProjectPersistenceSpecs, not nesting specs; the contract under test is serialization fidelity, not nesting behavior.
 
 
 ## 2026-03-16T01:36:09Z — MSI Rebuild Delivery
@@ -117,3 +125,30 @@ Final Review (Hicks): APPROVED ✅ — All four gates satisfied. Artifact ready 
 - Rebuild validation completed: WebUI inclusion verified
 - Artifact review approved by Hicks: No packaging regressions
 - Final artifact: installer\PanelNester.Installer\bin\Release\PanelNester-PerUser.msi
+
+## 2026-03-16 — Second Machine Fixes Acceptance Gate
+
+**Context:** Second-computer issues: file open/import only working on second try, sticky layout expectations in shell and results workspace, hardcoded kerf instead of editable value.
+
+**Gate Authored:** Six must-pass criteria:
+1. **First-try file dialog reliability** — Open/import dialogs succeed on first invocation from clean launch and after cancel/retry
+2. **Sticky shell layout expectations** — File menu open/close resets correctly, nav indicator stays stable
+3. **Results workspace scroll containment** — Workspace tabs and viewer column scroll independently, table scroll prevents body bleed, SheetViewer wheel events contained
+4. **Results combobox stability** — Material/sheet selectors open/close without layout shift
+5. **Editable kerf width** — Overview page exposes editable kerf field, persists to ProjectSettings, used in nesting (not hardcoded demoKerfWidth)
+6. **Regression safety** — All existing tests pass, WebUI builds clean, core workflows intact
+
+**Test Scaffolding Added:**
+- `Open_async_serializes_rapid_cancel_and_retry_without_deadlock` in `NativeFileDialogServiceSpecs.cs` — Tests semaphore serialization for rapid dialog cancel/retry sequence
+- `Kerf_width_persists_across_project_save_open_cycle` in `ProjectPersistenceSpecs.cs` — Tests kerf value survival through FlatBuffers serialization round-trip
+
+**Both Tests PASSING** — 2/2 new tests green, no build errors, baseline unaffected.
+
+**Deferred to Implementation:**
+- Workspace scroll containment (requires real DOM + ResizeObserver)
+- Combobox stability (requires React component interaction)
+- Nav indicator CSS stability (not unit-testable)
+
+**Decision File:** `.squad/decisions/inbox/hicks-second-machine-fixes-gate.md` — Full acceptance criteria, review checklist, and suggested regression tests documented.
+
+**Verdict:** Gate ready. Implementation team has clear pass conditions.

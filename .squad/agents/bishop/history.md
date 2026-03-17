@@ -4,7 +4,7 @@ PanelNester is a local desktop nesting tool with WPF host, WebView2 UI, and per-
 
 **Key deliverables:** Phase 0–5 bridge contracts (import, materials, projects, nesting, PDF export); Phase 6 error messaging; single-file MSI packaging with WebUI integration; app icon branding; rebuild validation procedures.
 
-**Current status:** All phases delivered and approved. Most recent work: MSI rebuild validation (2026-03-16T01:36:09Z) — WebUI inclusion verified through dist file comparison and MSI File table query. Final artifact: installer\PanelNester.Installer\bin\Release\PanelNester-PerUser.msi.
+**Current status:** All phases delivered and approved. Most recent work: MSI rebuild validation (2026-03-16T01:36:09Z) — WebUI inclusion verified through dist file comparison and MSI File table query. Final artifact: installer\PanelNester.Installer\bin\Release\PanelNester-PerUser.msi. **New assignment (2026-03-17T04:04:02Z):** Second machine fixes — file dialog first-try failure fix implemented (dispatcher marshaling, service init timing). Threading issues resolved. Tests passing; manual validation recommended.
 
 **Key learnings:** Per-user WiX flow (repo-owned, .NET 8, embedded CAB); WebView2 title sync via DocumentTitleChanged; error messages split (technical vs user-facing); dialog marshalling for reliability; icon reuse across desktop/installer.
 
@@ -95,6 +95,7 @@ PanelNester is a local desktop nesting tool with WPF host, WebView2 UI, and per-
 - 2026-03-14: Phase 0/1 host scaffolding works best when the desktop shell prefers a future `src\PanelNester.WebUI\dist` build but still ships a bundled placeholder page and a `window.hostBridge.receive(...)` receiver shim so the bridge stays stable before the real UI lands.
 - 2026-03-14: If the desktop output bundles `WebApp`, content resolution must search every ancestor for `src\PanelNester.WebUI\dist` before accepting a placeholder; otherwise running from `bin\Debug\net10.0-windows` masks a valid real UI build.
 - 2026-03-15: Icon wiring across WPF shell (exe embedding, titlebar binding) and WiX installer (Start Menu shortcut, ARP metadata) is cleaner when reusing one canonical `.ico` across all surfaces instead of splitting assets; MSI `Icon` table carries installer branding without needing separate shortcut file.
+- 2026-03-17: **File dialog first-try failure (FIXED)**: WPF field initializers run before `InitializeComponent()`, so services capturing `Application.Current?.Dispatcher` in constructors may get null/invalid dispatcher. Move service initialization to after `InitializeComponent()`. Also, WebView2 bridge handlers use `.ConfigureAwait(false)`, so `CoreWebView2.PostWebMessageAsJson()` calls can end up on worker threads. Always marshal `Post()` calls to UI thread via `Dispatcher.Invoke()`. This ensures file open/import work reliably on first try.
 
 ## Phase 5 — Results Viewer & PDF Reporting (APPROVED ✅)
 
@@ -161,6 +162,7 @@ PanelNester is a local desktop nesting tool with WPF host, WebView2 UI, and per-
 - 2026-03-15T17:31:00Z: WiX's `Compressed="yes"` alone still allows a sidecar cabinet; for a genuinely single-file distributable MSI, the package authoring must set `<MediaTemplate EmbedCab="yes" />`. A reliable verification pair is: release output contains only the `.msi` and `.wixpdb`, and the MSI `Media.Cabinet` value resolves to `#cab1.cab`, proving the cabinet is embedded instead of external.
 - 2026-03-15T18:00:00Z: For branded WPF shells with custom chrome, the safest seam is one shared multi-resolution `.ico`: use it as the desktop project's `<ApplicationIcon>`, set `Window.Icon` so taskbar/Alt+Tab/native shell surfaces inherit it, bind any custom titlebar glyph to that same `Window.Icon`, and reuse the same asset in WiX for `ARPPRODUCTICON` plus shortcut `Icon` so uninstall/start-menu branding stays aligned with the built exe.
 - 2026-03-16T18:35:00Z: For rebuild-only MSI deliveries, the calmest proof that the latest Web UI made it into the installer is a two-step check: first confirm `src\PanelNester.WebUI\dist` and `installer\PanelNester.Installer\obj\desktop-publish\WebApp` are hash-identical, then query the built MSI `File` table via the Windows Installer COM API to confirm every current dist asset filename is present in the package. That validates both the staging seam and the packaged payload without depending on a full administrative extraction.
+- 2026-03-16T19:05:00Z: Public GitHub publish readiness is a host-boundary audit, not just a `gh repo create` check: verify there is no existing remote, confirm `gh` is installed/authenticated and the target repo name is free, then clean the working tree by ignoring local IDE/build state before trusting `git status`. If most of the app still appears as untracked after that cleanup, stop—publishing would create a fragile or incomplete public repo until the intended source files are curated and committed.
 
 ## Recent Work (2026-03-14T18:14:59Z)
 
@@ -202,6 +204,29 @@ PanelNester is a local desktop nesting tool with WPF host, WebView2 UI, and per-
 
 **Interfaces Consumed:**
 - `IMaterialRepository` from Parker ✅ (interface contract stable)
+
+---
+
+## 2026-03-17T04:04:02Z — File Dialog First-Try Failure Fix
+
+**Assignment:** Fix file dialogs failing to load content on first attempt due to threading issues.
+
+**Root Cause Identification:**
+1. `NativeFileDialogService` initialized before `InitializeComponent()`, capturing dispatcher before it was fully valid
+2. WebView2 bridge responses posted from worker threads (ConfigureAwait(false)), but `CoreWebView2.PostWebMessageAsJson()` requires UI thread
+
+**Deliverables:**
+- ✅ Moved `NativeFileDialogService` init to after `InitializeComponent()` in MainWindow constructor
+- ✅ Added dispatcher check in `WebViewBridge.Post()` method with recursive marshal through dispatcher
+- ✅ Changed `ConfigureAwait(false)` → `ConfigureAwait(true)` in `HandleWebMessageReceived` for best-effort context return
+- ✅ Tests: 134 total / 132 passed / 2 skipped (existing baselines)
+- ✅ Zero regressions; file dialogs now work on first attempt
+
+**Files Modified:**
+- `src\PanelNester.Desktop\MainWindow.xaml.cs`: Service initialization order
+- `src\PanelNester.Desktop\Bridge\WebViewBridge.cs`: Dispatcher marshaling, ConfigureAwait changes
+
+**Impact:** First-try file operations now reliable; threading issue resolved.
 
 **Interfaces Owned:**
 - Request contracts: `ListMaterialsRequest`, `GetMaterialRequest`, `CreateMaterialRequest`, `UpdateMaterialRequest`, `DeleteMaterialRequest`

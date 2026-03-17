@@ -2176,3 +2176,353 @@ Keep using the repo-owned WiX build target as the source of truth for packaging;
 
 APPROVED for artifact readiness. I saw no obvious packaging regression in the rebuilt MSI handoff story.
 
+---
+
+# Phase 6: Second Machine Fixes
+
+## Bishop — File Dialog First-Try Failure Fix
+
+**Author:** Bishop  
+**Date:** 2026-03-17  
+**Status:** Implemented
+
+### Context
+
+File dialogs (project open, panel import) failed to load content on the first attempt. Users had to repeat the action a second time before it would work. The file explorer opened successfully and file selection worked, but the selected file wasn't loaded in the application.
+
+### Root Cause
+
+Two related threading issues in the desktop bridge layer:
+
+1. **NativeFileDialogService initialization timing**: Service was initialized as field initializer before InitializeComponent(), causing dispatcher capture race. If Application.Current?.Dispatcher wasn't properly set, file dialogs would run on wrong threads.
+
+2. **WebView2 response posted from wrong thread**: Bridge handlers use ConfigureAwait(false), so after await, execution continues on a worker thread. CoreWebView2.PostWebMessageAsJson() requires UI thread access. Posting from a worker thread would fail silently, preventing web UI response. Retry timing might put operation back on UI thread.
+
+### Decision
+
+#### Fix 1: Service Initialization
+Move NativeFileDialogService initialization to **after** InitializeComponent() in MainWindow constructor to ensure Application.Current.Dispatcher is valid.
+
+#### Fix 2: Dispatcher Marshaling
+Add dispatcher check in WebViewBridge.Post() method:
+- Check if current thread has dispatcher access via _webView.Dispatcher.CheckAccess()
+- If not, invoke Post() recursively through dispatcher
+- Ensures response always posts from UI thread
+
+Also changed ConfigureAwait(false) → ConfigureAwait(true) in HandleWebMessageReceived for best-effort context return.
+
+### Implementation
+- `src\PanelNester.Desktop\MainWindow.xaml.cs`: Moved service init to post-InitializeComponent
+- `src\PanelNester.Desktop\Bridge\WebViewBridge.cs`: Added dispatcher check in Post(), updated ConfigureAwait
+
+### Consequences
+- File dialogs always have proper UI thread dispatcher access
+- WebView2 bridge responses always post from the UI thread
+- First-try file operations work reliably
+- No breaking changes to existing behavior
+
+---
+
+## Dallas — Sticky Results Workspace Layout
+
+**Author:** Dallas  
+**Date:** 2026-03-17  
+**Status:** Implemented
+
+### Context
+
+Operators working with large result sets needed:
+- File menu and navigation always visible during scroll
+- Workspace tabs visible while inspecting deep content
+- Independent scroll between workspace and viewer panel
+- Space-efficient selectors for materials and sheets
+- Contained table scrolling to prevent workspace overflow
+
+### Decision
+
+#### Sticky Chrome Elements
+- File menu bar: `position: sticky; top: 0; z-index: 100`
+- Left nav: `position: sticky; top: 35px; z-index: 90; align-self: start`
+
+#### Results Workspace Structure
+Changed from single-column grid to 3-row grid:
+- Row 1: Header (padding: 16px)
+- Row 2: Tabs (position: sticky; top: 0; z-index: 10)
+- Row 3: Panel (overflow-y: auto; padding: 16px)
+
+Workspace stays in column 1, viewer in column 3 (full height span).
+
+#### Combobox Replacements
+Replace card grids with semantic HTML `<select>`:
+- **Summary by material**: Shows "MaterialName — N sheet(s) · M placed"
+- **Sheet detail**: Shows "Sheet #N — X.X% utilized"
+- Removed CSS: `.results-material-tabs`, `.results-sheet-tabs`, etc.
+
+#### Table Scroll Limits
+Added `max-height: 400px` to `.table-shell` for contained scrolling. Large tables now scroll inside workspace instead of pushing content down.
+
+### Implementation
+- `src/PanelNester.WebUI/src/styles.css`: Sticky positioning, grid updates
+- `src/PanelNester.WebUI/src/pages/ResultsPage.tsx`: Combobox replacements, layout refactor
+
+### Consequences
+- Tabs and chrome stay visible during content scroll
+- Comboboxes save vertical space
+- Tables scroll cleanly
+- Workspace/viewer remain independent
+- No breaking changes—all functionality preserved
+
+---
+
+## Parker — Kerf Width as Editable Project Setting
+
+**Author:** Parker  
+**Date:** 2026-03-17  
+**Status:** Backend Complete
+
+### Context
+
+Kerf width was hardcoded at `0.0625"` in the domain model. Users need the ability to configure different kerf sizes based on cutting equipment and material requirements.
+
+### Decision
+
+Remove hardcoded default from `ProjectSettings.KerfWidth` and make it an explicit editable setting:
+1. Persists with the project (both FlatBuffers and legacy JSON formats)
+2. Flows through existing `UpdateProjectMetadataRequest` bridge contract
+3. Defaults to `0.0625m` when creating new projects or loading legacy files
+4. Already read from `projectSettings.kerfWidth` when UI calls nesting operations
+
+### Implementation
+- **ProjectSettings.cs**: Removed hardcoded `= 0.0625m` default
+- **ProjectService.cs**: Added `DefaultKerfWidth = 0.0625m` constant, applied in NewAsync and NormalizeSettings
+- **ProjectFlatBufferSerializer.cs**: Added default kerf fallback for legacy projects and backward compatibility
+
+### UI Handoff (Dallas)
+Add "Kerf Width" numeric input field to Project Settings or Overview page:
+- **Type**: Number input (decimal, ≥0)
+- **Step**: 0.0625 (common inch increment)
+- **Default**: 0.0625
+- **Call**: Via existing `updateProjectMetadata` bridge message with new kerfWidth value
+
+### Consequences
+- Kerf is now configurable per project
+- Backward compatible with legacy projects (default to 0.0625)
+- Bridge already passes kerf to nesting requests
+- No breaking changes to existing behavior
+- Full persistence through save/open cycles
+
+---
+
+## Hicks — Acceptance Gate: Second Machine Fixes
+
+**Author:** Hicks  
+**Date:** 2026-03-17  
+**Status:** Active
+
+### Context
+
+Three critical issues blocking second-machine testing:
+1. File dialogs fail on first attempt
+2. Results page layout doesn't keep chrome/tabs visible during scroll
+3. Kerf width hardcoded instead of editable
+
+### Five Must-Pass Acceptance Criteria
+
+#### 1. First-Try File Dialog Reliability
+**PASS IF:**
+- Open Project dialog succeeds on first invocation from clean app launch
+- Import File dialog succeeds on first invocation from clean app launch
+- Both succeed on first invocation after cancel → retry sequence
+
+**REJECT IF:**
+- Any dialog requires two attempts to return valid file path
+- Semaphore deadlocks or holds beyond dialog lifetime
+- Invocation throws or returns empty path on first valid selection
+
+**Evidence:** Manual verification on second machine showing single-attempt success.
+
+#### 2. Sticky Shell Layout
+**PASS IF:**
+- File menu opens/closes without side effects on nav indicator
+- File menu state resets on item selection or Escape key
+- Nav indicator remains at fixed position during menu lifecycle
+- Active route highlighting persists through menu interactions
+
+**REJECT IF:**
+- File menu state leaks between actions
+- Nav indicator shifts when menu appears
+- Route indicator clears unintentionally
+
+**Evidence:** Manual click-through at 320px–1440px viewport widths.
+
+#### 3. Results Workspace Scroll Containment
+**PASS IF:**
+- Workspace tabs scroll independently of viewer column
+- Viewer column scrolls independently of workspace
+- Table containers prevent body scroll bleed
+- Workspace column maintains 360px minimum width
+- Viewer column maintains 420px minimum width
+
+**REJECT IF:**
+- Scrolling workspace causes viewer to scroll
+- Mouse wheel on tables scrolls page body
+- Split-panel boundary violates minimum width
+
+**Evidence:** Manual scroll testing with dense content.
+
+#### 4. Results Combobox/Select Stability
+**PASS IF:**
+- Material selector dropdown opens/closes cleanly without layout shift
+- Sheet selector dropdown opens/closes cleanly
+- Selected state persists through dropdown lifecycle
+- Dropdown dismissal returns focus correctly
+
+**REJECT IF:**
+- Dropdown open causes reflow or clipping
+- Selected value resets without user selection
+- Focus trap lost
+
+**Evidence:** Manual interaction with selectors; observe layout stability.
+
+#### 5. Editable Kerf Width
+**PASS IF:**
+- Overview page exposes kerf as user-editable numeric input (≥0)
+- Kerf value persists to ProjectSettings.KerfWidth
+- Nesting requests use projectSettings.kerfWidth (not hardcoded demo value)
+- Project save/open round-trips kerf value
+- Default kerf for new projects is 0.0625
+
+**REJECT IF:**
+- Kerf remains hardcoded
+- No UI control to edit kerf before nesting
+- Kerf lost on save/open cycle
+- Validation allows negative values
+
+**Evidence:** OverviewPage exposes kerf input; manual save/open round-trip verification.
+
+### Regression Safety
+- `dotnet test .\PanelNester.slnx` → all existing tests pass (143 tests, 2 skipped expected)
+- `npm run build` in WebUI → no TypeScript errors
+- Manual smoke: Import CSV → Run nesting → View results → Export PDF → Save project → Reopen project
+
+### Suggested Regression Tests
+1. **DialogSerializationUnderRapidRetry**: Verify file dialog succeeds on cancel → immediate retry
+2. **FileMenuDoesNotLeakOpenState**: Verify menu state resets after action
+3. **KerfWidthPersistsAcrossProjectSaveOpen**: Verify kerf round-trip through save/open
+
+### Review Checklist
+- [ ] File dialogs succeed on first try (manual test on second machine)
+- [ ] File menu state resets correctly after use
+- [ ] Results workspace and viewer scroll independently
+- [ ] Combobox selectors open/close without layout shift
+- [ ] Kerf width is editable on Overview page
+- [ ] Kerf value persists through save/open cycle
+- [ ] `dotnet test` passes all existing tests
+- [ ] `npm run build` completes without TypeScript errors
+- [ ] At least one new test added for dialog or kerf persistence
+
+**Approval Condition:** All five pass criteria satisfied + regression safety green + at least one new test.
+
+---
+
+## Bishop — GitHub Publish Readiness
+
+**Author:** Bishop  
+**Date:** 2026-03-16  
+**Status:** Active
+
+### Context
+
+Brandon requested a readiness check before creating a new public GitHub repository from the current PanelNester working tree.
+
+### Decision
+
+Treat public publishing as blocked until local repo content is curated, not merely authenticated. Verify GitHub path in this order:
+
+1. `git remote -v` / branch / status
+2. `gh` availability + auth
+3. Target repo-name availability on GitHub
+4. Local ignore hygiene so IDE/build/runtime state drops out of `git status`
+
+Do **not** create public repo while working tree still contains untracked product source.
+
+### Why
+
+`gh` auth was healthy, but repository had no remote and docs-heavy tracked baseline with most source, installer, tests, assets still untracked. Publishing before curation would create misleading public repo with weak provenance.
+
+### Immediate Follow-Up
+- Keep expanded `.gitignore` entries for `.copilot/`, `.vs/`, `bin/`, `obj/`, `TestResults/`, user-specific solution files
+- Curate which currently untracked source/test/assets belong in public repo, then commit before creating/pushing remote
+
+---
+
+## Hicks — GitHub Publish Readiness Gate
+
+**Author:** Hicks  
+**Date:** 2026-03-16  
+**Status:** Proposed
+
+### Context
+
+Public publishing must be truthful and complete. README, prerequisites, and public handoff need to describe PanelNester exactly as shipped, separate contributor from end-user needs.
+
+### Four Non-Negotiable Pass Conditions
+
+#### 1. README is Accurate and GitHub-Ready
+- Root `README.md` exists
+- Truthfully describes PanelNester as Windows desktop sheet-nesting tool (CSV/XLSX import, material-driven nesting, results visualization, PDF reporting)
+- Includes repo-root build/test commands that already exist
+- Does **not** imply unsupported scope (cross-platform, cloud sync, SaaS, self-contained installer)
+
+#### 2. Runtime/Build Prerequisites Not Misrepresented
+- Clearly separates **contributor** from **end-user** prerequisites
+- Contributor: `.NET 8 SDK`, Node.js for WebUI build, WiX for MSI authoring
+- End-user: Windows x64, `.NET 8 Desktop Runtime`, Microsoft Edge WebView2 Runtime
+- Publish/install path does not blur these together
+
+#### 3. Public Handoff is Complete and Discoverable
+- Repo root gives first-time visitor enough to understand what the app is, how to build, entry points
+- Public-facing metadata present or accounted for (README, license/proprietary notice, installer artifact path/release story)
+- If repo pushed to public GitHub, handoff records public destination (not tribal knowledge)
+
+#### 4. No Obvious Publish Blocker is Waved Through
+- Staged/public tree checked for private or machine-local material (`.vs`, Copilot debris, build output, stray test junk)
+- Prerequisite gaps, missing license, missing README, missing public destination treated as blockers until resolved
+- Installer story, if mentioned publicly, must match actual repo-owned packaging flow
+
+### Known Blockers
+- No root `README.md` present yet
+- No root `LICENSE` file or explicit proprietary notice
+- Public GitHub destination/handoff details not recorded in-repo
+
+### Review Posture
+Do **not** clear this gate on vibes or memory alone. Clear it only when public repo itself tells a first-time reader the same prerequisite and packaging story that code and installer enforce.
+
+---
+
+## Ripley — GitHub README Contract
+
+**Author:** Ripley  
+**Date:** 2026-03-16  
+**Status:** Active
+
+### Context
+
+Public repository README must clearly separate three distinct contracts in the codebase.
+
+### Decision
+
+README should describe PanelNester as **Windows-only desktop app in active hardening** and explicitly separate:
+
+1. **Local build prerequisites**: `.NET 8 SDK`, Node.js/npm
+2. **Installed-app runtime prerequisites**: x64 `.NET 8 Desktop Runtime`, `Microsoft Edge WebView2 Runtime`
+3. **Development-time UI behavior**: Desktop host loads `src\PanelNester.WebUI\dist` when present, falls back to `src\PanelNester.Desktop\WebApp` otherwise
+
+### Why
+
+Flattening these into one vague "requirements" section produces bad setup advice for GitHub readers and hides the real local-run seam.
+
+### Consequence
+
+Future public-facing docs should keep installer guidance, developer guidance, and runtime support guidance explicitly separate, especially while app remains framework-dependent and WebView2-hosted.
+

@@ -19,6 +19,8 @@
 
 📌 2026-03-16T00:09:58Z: **IMPORT MAPPING FEATURE APPROVED** — Extended CsvImportService with explicit column-mapping options and material-to-library resolution. Import requests accept column overrides and material mappings. Responses surface source column detection, proposed field mappings, and per-material resolution status. New materials created via IMaterialService during bridge finalize step, not inside pure import path. Service layer remains UI-independent; side effects (library mutation) isolated to bridge layer. All existing tests passing; new coverage added for mapping scenarios. 143 tests / 141 passed / 2 skipped. Hicks review gate APPROVED ✅
 
+📌 2026-03-17T04:04:02Z: **EDITABLE KERF WIDTH COMPLETE** — Removed hardcoded `KerfWidth = 0.0625m` from ProjectSettings. Made kerf explicit editable setting via new `DefaultKerfWidth` constant in ProjectService (NewAsync, NormalizeSettings). Added default kerf fallback in ProjectFlatBufferSerializer for legacy projects. Backend ready for Dallas UI binding. Kerf persists with project (FlatBuffers + legacy JSON); UI will pass value via existing `updateProjectMetadata` bridge contract. All existing tests passing; backward compatibility maintained.
+
 ## Phase 2 — Material Library CRUD (COMPLETE)
 
 **Ownership:** Parker (Domain/Services foundation) ✅
@@ -172,3 +174,5 @@
 - 2026-03-15: Dense PDF layouts stay deterministic and readable if tiny panels fall back to numbered callouts while the existing ordered placement summary acts as the legend seam; that avoids widening report contracts and keeps phase scope bounded.
 - 2026-03-15: Orientation-preference fixes are safest when they add a narrow priority key ahead of the existing heuristic, so the engine can honor an explainable special case (like a panel already spanning full sheet width) without changing rotation behavior everywhere else.
 - 2026-03-15: Import-time mapping stays explainable if the backend keeps exact-match defaults, returns detected headers/material resolutions on every import response, and treats user overrides plus bridge-led material creation as explicit inputs instead of fuzzy silent fallbacks.
+- 2026-03-16: Making hardcoded values editable is cleanest when you move the default constant into the service layer (where normalization lives) rather than the domain record. This lets persistence round-trip zero/missing values gracefully while keeping the domain contract explicit about what's required vs. optional. Existing tests often already validate the full path if the setting flows through established patterns.
+

@@ -53,6 +53,13 @@ I maintain code quality, project standards, and team coordination records. I doc
   - All inbox files deleted; no import-related inbox items remain
   - Agent histories updated: Dallas, Hicks
 
+📌 2026-03-17T04:04:02Z: **SECOND MACHINE FIXES PHASE 6 ORCHESTRATION**
+  - Bishop: File dialog first-try failure (threading/dispatcher issues) — COMPLETE
+  - Dallas: Sticky Results workspace layout (sticky chrome, independent scroll, combobox selectors) — COMPLETE
+  - Parker: Editable kerf backend (ProjectSettings, services, persistence) — COMPLETE
+  - Hicks: Acceptance gate definition (5 must-pass criteria + regression safety) — ACTIVE
+  - Scribe tasks: 4 orchestration logs created; 1 session log created; 7 inbox decisions merged into decisions.md; all inbox files deleted; agent histories updated with team progress
+
 ## Learnings
 
 - Scribe initializes documentation infrastructure for team coordination.
