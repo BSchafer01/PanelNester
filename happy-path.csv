@@ -1,0 +1,4 @@
+Id,Length,Width,Quantity,Material
+Panel-A,24,48,2,Demo Material
+Panel-B,12,36,1,Demo Material
+Corner-Block,6,6,4,Demo Material

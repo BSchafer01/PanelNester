@@ -1,0 +1,131 @@
+namespace PanelNester.Services.Persistence.FlatBuffers;
+
+table ProjectDocument {
+  version:int;
+  project_id:string;
+  metadata:ProjectMetadata;
+  settings:ProjectSettings;
+  material_snapshots:[Material];
+  state:ProjectState;
+}
+
+table ProjectMetadata {
+  project_name:string;
+  project_number:string;
+  customer_name:string;
+  estimator:string;
+  drafter:string;
+  pm:string;
+  date_ticks:long;
+  has_date:bool;
+  revision:string;
+  notes:string;
+}
+
+table ProjectSettings {
+  kerf_width:double;
+  report_settings:ReportSettings;
+}
+
+table ReportSettings {
+  company_name:string;
+  report_title:string;
+  project_job_name:string;
+  project_job_number:string;
+  report_date_ticks:long;
+  has_report_date:bool;
+  notes:string;
+}
+
+table Material {
+  material_id:string;
+  name:string;
+  sheet_length:double;
+  sheet_width:double;
+  allow_rotation:bool;
+  default_spacing:double;
+  default_edge_margin:double;
+  color_finish:string;
+  notes:string;
+  cost_per_sheet:double;
+  has_cost_per_sheet:bool;
+}
+
+table ProjectState {
+  source_file_path:string;
+  parts:[PartRow];
+  selected_material_id:string;
+  last_nesting_result:NestResponse;
+  last_batch_nesting_result:BatchNestResponse;
+}
+
+table PartRow {
+  row_id:string;
+  imported_id:string;
+  length_text:string;
+  length:double;
+  width_text:string;
+  width:double;
+  quantity_text:string;
+  quantity:int;
+  material_name:string;
+  validation_status:string;
+  validation_messages:[string];
+  group:string;
+}
+
+table NestResponse {
+  success:bool;
+  sheets:[NestSheet];
+  placements:[NestPlacement];
+  unplaced_items:[UnplacedItem];
+  summary:MaterialSummary;
+}
+
+table NestSheet {
+  sheet_id:string;
+  sheet_number:int;
+  material_name:string;
+  sheet_length:double;
+  sheet_width:double;
+  utilization_percent:double;
+}
+
+table NestPlacement {
+  placement_id:string;
+  sheet_id:string;
+  part_id:string;
+  x:double;
+  y:double;
+  width:double;
+  height:double;
+  rotated_90:bool;
+  group:string;
+}
+
+table UnplacedItem {
+  part_id:string;
+  reason_code:string;
+  reason_description:string;
+}
+
+table MaterialSummary {
+  total_sheets:int;
+  total_placed:int;
+  total_unplaced:int;
+  overall_utilization:double;
+}
+
+table BatchNestResponse {
+  success:bool;
+  legacy_result:NestResponse;
+  material_results:[MaterialNestResult];
+}
+
+table MaterialNestResult {
+  material_name:string;
+  material_id:string;
+  result:NestResponse;
+}
+
+root_type ProjectDocument;

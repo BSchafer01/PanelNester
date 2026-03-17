@@ -181,3 +181,5 @@
 
 
 📌 2026-03-17T15:46:43Z: **GROUPED NESTING IMPLEMENTATION COMPLETE** — Domain models, import pipeline, nesting engine, and persistence layer. Added Group property to PartRow/PartRowUpdate/ExpandedPart. Implemented group-partitioned nesting with eligible-sheet tracking and spillover. Optional field mapping with aliases (group, groupname, groupid, category, section, batch, set, zone). FlatBuffers schema appended (backward-compatible). Integration: end-to-end grouped nesting with material isolation. Backend ready for validation.
+
+📌 2026-03-17T16-41-49Z : **GROUPED RESULTS FOLLOW-UP — NestPlacement.Group COMPLETE** — Added optional \Group\ field to NestPlacement domain model. Updated ShelfNestingService to set Group = part.Group at placement creation. Group flows through report shaping and project persistence. No-group runs emit null, preserving backward compatibility. Enables WebUI grouped results tabs and mixed-group dimming. All tests passing (167/169, 2 skipped).

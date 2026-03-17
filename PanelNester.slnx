@@ -1,0 +1,15 @@
+<Solution>
+  <Folder Name="/installer/">
+    <Project Path="installer/PanelNester.Installer/PanelNester.Installer.wixproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/PanelNester.Desktop/PanelNester.Desktop.csproj" />
+    <Project Path="src/PanelNester.Domain/PanelNester.Domain.csproj" />
+    <Project Path="src/PanelNester.Services/PanelNester.Services.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PanelNester.Desktop.Tests/PanelNester.Desktop.Tests.csproj" />
+    <Project Path="tests/PanelNester.Domain.Tests/PanelNester.Domain.Tests.csproj" />
+    <Project Path="tests/PanelNester.Services.Tests/PanelNester.Services.Tests.csproj" />
+  </Folder>
+</Solution>

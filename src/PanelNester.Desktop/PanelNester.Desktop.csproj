@@ -1,0 +1,95 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>PanelNester.Desktop</AssemblyName>
+    <RootNamespace>PanelNester.Desktop</RootNamespace>
+    <ApplicationIcon>Assets\PanelNester.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <WebUiProjectDir>$(MSBuildThisFileDirectory)..\PanelNester.WebUI\</WebUiProjectDir>
+    <WebUiDistDir>$(WebUiProjectDir)dist\</WebUiDistDir>
+    <BuildWebUi Condition="'$(BuildWebUi)' == '' and '$(DesignTimeBuild)' != 'true'">true</BuildWebUi>
+    <BuildWebUi Condition="'$(BuildWebUi)' == '' and '$(DesignTimeBuild)' == 'true'">false</BuildWebUi>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3800.47" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PanelNester.Domain\PanelNester.Domain.csproj" />
+    <ProjectReference Include="..\PanelNester.Services\PanelNester.Services.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <WebUiBuildInput Include="$(WebUiProjectDir)package.json" />
+    <WebUiBuildInput Include="$(WebUiProjectDir)package-lock.json" />
+    <WebUiBuildInput Include="$(WebUiProjectDir)tsconfig*.json" />
+    <WebUiBuildInput Include="$(WebUiProjectDir)vite.config.*" />
+    <WebUiBuildInput Include="$(WebUiProjectDir)src\**\*" />
+    <WebUiBuildInput Include="$(WebUiProjectDir)public\**\*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\PanelNester.ico" />
+  </ItemGroup>
+
+  <Target
+    Name="RestoreWebUiDependencies"
+    Condition="'$(BuildWebUi)' == 'true' and Exists('$(WebUiProjectDir)package.json') and !Exists('$(WebUiProjectDir)node_modules')">
+    <Exec Command="npm ci" WorkingDirectory="$(WebUiProjectDir)" />
+  </Target>
+
+  <Target
+    Name="BuildWebUiBundle"
+    DependsOnTargets="RestoreWebUiDependencies"
+    BeforeTargets="Build"
+    Condition="'$(BuildWebUi)' == 'true' and Exists('$(WebUiProjectDir)package.json')"
+    Inputs="@(WebUiBuildInput)"
+    Outputs="$(WebUiDistDir)index.html">
+    <Exec Command="npm run build" WorkingDirectory="$(WebUiProjectDir)" />
+  </Target>
+
+  <Target
+    Name="CopyWebUiBundleToOutput"
+    DependsOnTargets="BuildWebUiBundle"
+    AfterTargets="Build"
+    Condition="'$(BuildWebUi)' == 'true' and Exists('$(WebUiDistDir)index.html')">
+    <RemoveDir Directories="$(TargetDir)WebApp" Condition="Exists('$(TargetDir)WebApp')" />
+    <MakeDir Directories="$(TargetDir)WebApp" />
+
+    <ItemGroup>
+      <WebUiDistFiles Include="$(WebUiDistDir)**\*" />
+    </ItemGroup>
+
+    <Copy
+      SourceFiles="@(WebUiDistFiles)"
+      DestinationFiles="@(WebUiDistFiles->'$(TargetDir)WebApp\%(RecursiveDir)%(Filename)%(Extension)')"
+      SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target
+    Name="CopyWebUiBundleToPublish"
+    DependsOnTargets="BuildWebUiBundle"
+    AfterTargets="Publish"
+    Condition="'$(BuildWebUi)' == 'true' and '$(PublishDir)' != '' and Exists('$(WebUiDistDir)index.html')">
+    <RemoveDir Directories="$(PublishDir)WebApp" Condition="Exists('$(PublishDir)WebApp')" />
+    <MakeDir Directories="$(PublishDir)WebApp" />
+
+    <ItemGroup>
+      <WebUiDistFiles Include="$(WebUiDistDir)**\*" />
+    </ItemGroup>
+
+    <Copy
+      SourceFiles="@(WebUiDistFiles)"
+      DestinationFiles="@(WebUiDistFiles->'$(PublishDir)WebApp\%(RecursiveDir)%(Filename)%(Extension)')"
+      SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

@@ -1,0 +1,22 @@
+<Project Sdk="WixToolset.Sdk/6.0.2">
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <EnableDefaultItems>false</EnableDefaultItems>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <OutputName>PanelNester-PerUser</OutputName>
+    <SuppressIces>ICE38;ICE60;ICE64;ICE91</SuppressIces>
+    <DesktopProjectPath>..\..\src\PanelNester.Desktop\PanelNester.Desktop.csproj</DesktopProjectPath>
+    <DesktopPublishDir>$(BaseIntermediateOutputPath)desktop-publish\</DesktopPublishDir>
+    <DefineConstants>DesktopPublishDir=$(DesktopPublishDir);ProductVersion=0.1.0</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Product.wxs" />
+  </ItemGroup>
+
+  <Target Name="PrepareDesktopPayload" BeforeTargets="ReadPreviousBindInputsAndBuiltOutputs">
+    <Message Text="Preparing PanelNester desktop payload for MSI packaging..." Importance="high" />
+    <RemoveDir Directories="$(DesktopPublishDir)" Condition="Exists('$(DesktopPublishDir)')" />
+    <Exec Command="dotnet publish &quot;$(DesktopProjectPath)&quot; -c $(Configuration) -r win-x64 --self-contained false -p:PublishSingleFile=false -o &quot;$(DesktopPublishDir)&quot;" />
+  </Target>
+</Project>
