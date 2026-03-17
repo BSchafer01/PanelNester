@@ -2526,3 +2526,99 @@ Flattening these into one vague "requirements" section produces bad setup advice
 
 Future public-facing docs should keep installer guidance, developer guidance, and runtime support guidance explicitly separate, especially while app remains framework-dependent and WebView2-hosted.
 
+---
+
+## Import + Results Regression Revision (2026-03-17)
+
+### Decision: Parker — Panel Import Revision
+
+**Author:** Parker  
+**Date:** 2026-03-17  
+**Status:** RECORDED ✅
+
+#### Context
+
+Second machine fixes batch revealed import regression: combined dialog+import request pattern kept the WebView bridge request open while user browsed in Explorer. Default 5-second bridge timeout expired before file dialog closed or import processing completed, making first file selection appear to fail when the response finally arrived.
+
+#### Decision
+
+Revert initial panel import to two-step client flow:
+1. Request native file path from desktop host (open-file-dialog contract)
+2. Invoke import-file with chosen path using import-specific timeout
+
+#### Why
+
+Keeps UI owning first file selection explicitly. Preserves newer import-file contract for mapped imports. Gives file-picking and import sufficient time to complete on first attempt.
+
+#### Outcome
+
+- First-try import now completes reliably
+- Two-step flow is explicit and observable
+- Mapped import contract preserved for mapped workflows
+- Bridge timeout expirations eliminated on file selection
+
+---
+
+### Decision: Ripley — Results Layout Revision
+
+**Author:** Ripley  
+**Date:** 2026-03-17  
+**Status:** RECORDED ✅
+
+#### Context
+
+Second machine fixes batch revealed layout regression: Results page workspace-left / viewer-right split was hidden behind unnecessarily aggressive narrow-width fallback (1180px breakpoint). Resize handle was invisible, and two-column layout was forced into stacked mode across common desktop sizes (1024px–1400px).
+
+#### Decision
+
+Restore Results workspace/viewer split as default desktop layout by keeping two-column grid active until viewport genuinely too narrow for workspace minimum (360px), splitter (12px), and viewer minimum (420px) to coexist. Narrow-screen fallback waits until 900px instead of collapsing at 1180px. Align drag clamp with actual splitter width.
+
+#### Why
+
+Previous breakpoint forced stacked layout across common desktop sizes, hid intended left/right composition, and made resize affordance disappear. 900px threshold still preserves mobile/tablet usability while restoring desktop two-column experience.
+
+#### Outcome
+
+- Results layout keeps independent workspace scrolling and sticky tabs/header behavior
+- Viewer preserved on the right
+- Resize handle visible and functional across common desktop sizes (900px–1440px+)
+- Narrow-width fallback still available for genuine low-width scenarios
+
+---
+
+### Decision: Hicks — Revision Gate for Import + Results Split
+
+**Author:** Hicks  
+**Date:** 2026-03-17  
+**Status:** RECORDED ✅
+
+#### Context
+
+Lock this revision with a narrow mixed gate focusing on the exact failure modes Brandon reported:
+1. First-try panel import (two-step flow, bridge timeout reliability)
+2. Results workspace-left / viewer-right split visibility at 1024px viewport
+
+#### Decision
+
+Combine:
+- Existing executable bridge tests for first-try import path reliability
+- Explicit source-contract checks against App.tsx, ResultsPage.tsx, styles.css, WebViewBridge.cs, NativeFileDialogService.cs
+
+#### Why
+
+Regressions sit at Web UI + desktop-host seam. Repo has strong desktop/service tests but lacks dedicated Web UI interaction harness. Adding whole new JS test framework would broaden scope more than the fixes themselves.
+
+#### No-Go Criteria
+
+1. ❌ First-try import fails to complete on selected file
+2. ❌ Results workspace-left / viewer-right split not visible at 1024px viewport
+3. ❌ Resize handle not visible or functional
+4. ❌ Independent workspace scrolling not preserved
+5. ❌ Any regression to Phase 5–6 baseline (143 tests must remain passing)
+
+#### Result
+
+- Added `tests\PanelNester.Desktop.Tests\Bridge\ImportResultsRevisionGateSpecs.cs`
+- Tightened Phase5-Followup-Correction-Test-Matrix.md with dedicated re-review section and no-go criteria
+- Preserved the revision-batch scope without introducing new frontend test framework mid-slice
+

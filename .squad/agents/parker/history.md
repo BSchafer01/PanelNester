@@ -21,6 +21,9 @@
 
 📌 2026-03-17T04:04:02Z: **EDITABLE KERF WIDTH COMPLETE** — Removed hardcoded `KerfWidth = 0.0625m` from ProjectSettings. Made kerf explicit editable setting via new `DefaultKerfWidth` constant in ProjectService (NewAsync, NormalizeSettings). Added default kerf fallback in ProjectFlatBufferSerializer for legacy projects. Backend ready for Dallas UI binding. Kerf persists with project (FlatBuffers + legacy JSON); UI will pass value via existing `updateProjectMetadata` bridge contract. All existing tests passing; backward compatibility maintained.
 
+📌 2026-03-17T04:38:49Z: **IMPORT REVISION COMPLETE** — Restored two-step client flow for file selection so import triggers reliably on first try. Combined dialog+import pattern caused bridge timeout expirations before file dialog completed. Now: UI owns file selection, preserves import-file contract for mapped workflows, provides sufficient time for first-attempt completion. Revision gate designed by Hicks with mixed executable+source-contract validation. All tests passing; no regressions.
+
+
 ## Phase 2 — Material Library CRUD (COMPLETE)
 
 **Ownership:** Parker (Domain/Services foundation) ✅
