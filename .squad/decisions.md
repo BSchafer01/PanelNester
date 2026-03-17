@@ -296,5 +296,19 @@ Results review needs enough placement metadata for the UI to derive per-group ta
   - mixed-group sheets should keep non-active groups subdued and show group details on hover.
 - Remaining manual check even after automation: verify the live Three.js viewer actually dims non-active groups correctly and updates hover text in the running desktop/WebUI build, because the current suite gates source structure but does not render/assert canvas pixels.
 
+---
+
+## Execution Record: Consolidated Local Commit (2026-03-17T10:26:24Z)
+
+**Performer:** Ripley | **Status:** ✅ COMPLETED
+
+All grouped import, nesting, and results workflow changes consolidated into single atomic local commit.
+
+- **Commit Hash:** c95df7c
+- **Subject:** Consolidate grouped import, nesting, and results workflow
+- **Files Changed:** 369 total
+- **Verification:** Git status clean; trailer included; no push executed (no remote)
+
+Team ready for parallel implementation: Parker (domain/services), Dallas (WebUI), Hicks (tests).
 
 
