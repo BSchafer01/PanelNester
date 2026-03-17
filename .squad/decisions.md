@@ -2974,3 +2974,37 @@ The implementation is complete and functionally correct. No rebuild required. Th
 - ✅ 143 total tests maintained
 - ✅ No regressions to Phase 5–6 features
 
+---
+
+### Decision: Hicks — Runtime Bundle Mismatch Fix Review
+
+**Author:** Hicks | **Date:** 2026-03-17 | **Status:** APPROVED ✅
+
+#### Verdict
+
+**APPROVED** ✅
+
+#### Why Approved
+
+- `WebUiContentResolver` now treats `WebApp` as a real bundled build only when both `index.html` and `assets\` exist
+- If `WebApp` only contains placeholder, desktop host correctly falls back to `src\PanelNester.WebUI\dist` when running from repo checkout
+- Desktop build and publish now replace `WebApp` with built WebUI bundle
+- Installer packaging publishes desktop app first, then harvests that publish directory, carrying real `WebApp` bundle instead of placeholder
+
+#### Validation Performed
+
+- ✅ Desktop tests passed, including `WebUiContentResolverSpecs` (50 passed, 1 skipped overall)
+- ✅ `dotnet publish` for `src\PanelNester.Desktop` produced `WebApp` folder matching `src\PanelNester.WebUI\dist`
+- ✅ `dotnet build` for installer succeeded with harvested payload containing bundled `WebApp` files
+
+#### Install Impact
+
+- **Existing installs require upgrade/reinstall** to pick up fix
+- Already-installed app folders still contain old placeholder-only `WebApp`
+- Installed app is not expected to have `src\PanelNester.WebUI\dist` beside it
+- Fresh builds from source and newly built/published/installable artifacts covered by this fix
+
+#### Residual Risk
+
+Low. Fix is architectural (content detection) and implementation (build order). Installer workflow unchanged except for trust seam relying on desktop publish output.
+
