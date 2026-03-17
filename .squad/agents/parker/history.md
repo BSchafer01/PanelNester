@@ -23,6 +23,8 @@
 
 📌 2026-03-17T04:38:49Z: **IMPORT REVISION COMPLETE** — Restored two-step client flow for file selection so import triggers reliably on first try. Combined dialog+import pattern caused bridge timeout expirations before file dialog completed. Now: UI owns file selection, preserves import-file contract for mapped workflows, provides sufficient time for first-attempt completion. Revision gate designed by Hicks with mixed executable+source-contract validation. All tests passing; no regressions.
 
+📌 2026-03-17T18:58:10Z: **GROUP-EXPORT-SLICE COMPLETE** — Updated PDF/export output so grouped placements render with group-prefixed label `[Group] PartId` while ungrouped placements preserve existing output. Export now honors `NestPlacement.group` directly from nesting payload. Backward compatibility maintained; 99 Services tests passing. Orchestration log recorded. Ready for next phase: PDF group visibility expansion (group column/label to placement tables).
+
 
 ## Phase 2 — Material Library CRUD (COMPLETE)
 

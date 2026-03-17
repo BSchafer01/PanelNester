@@ -49,6 +49,21 @@ Completed Phase 2 (materials), Phase 3 (project save/open), Phase 4 (import + ed
 
 ## Recent Work (2026-03-15T17:06:36Z)
 
+---
+
+### Group-Export-Slice Coordination (2026-03-17T18:58:10Z)
+
+**Status:** ✅ COMPLETED
+
+Coordinated group export slice across Dallas (WebUI contract), Parker (PDF export), and Hicks (test gates). Validated that grouped import/nesting/results workflow is architecturally sound and well-integrated. Identified low-risk housekeeping priorities:
+
+1. **WebUI test infrastructure** (half-day) — Vitest for pure-logic functions
+2. **PDF group visibility** (1–2 days) — expand export to include group column/label
+3. **E2E smoke test automation** (2–3 days) — contract-level bridge validation
+4. **Nesting quality improvements** (variable) — benchmark utilization before optimizing
+
+All delivery confirmed; orchestration logs recorded; team updates appended to agent histories.
+
 - ✓ **.NET 8 DOC FIX REVISION COMPLETE.** Assigned as lock-out author for rejected .NET 8 retarget slice (pattern: original author locked from self-revision). Hicks' rejection was on review-critical artifact drift, not implementation quality. Updated `tests\Phase0-1-Test-Matrix.md` to state desktop host target as `net8.0-windows` and updated `.squad\smoke-test-guide.md` to distinguish local build requirement (`.NET 8.0.x` SDK) from installed-app requirement (x64 `.NET 8 Desktop Runtime` + `Microsoft Edge WebView2 Runtime`). Append-only history files left untouched. Validation stayed green (134 total / 132 passed / 2 skipped / 0 failed). Hicks final re-review approved. **NET 8 RETARGET APPROVED 2026-03-15T17:06:36Z**. Decisions merged; inbox deleted; agent histories updated.
 
 ## Key Insights (Per-User MSI Cycle & .NET Retarget)

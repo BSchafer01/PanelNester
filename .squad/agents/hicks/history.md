@@ -20,6 +20,7 @@ I own acceptance criteria, regression coverage, and reviewer verdicts for the fu
 - **Phase 6:** Hardening & smoke verification (empty-result export, dense-layout readability, viewer edge cases, bridge error surfaces); 127 tests (125 passed, 2 skipped)
 - **Recent Batches:** FlatBuffers migration, UI cleanup, Import page cleanup, Material/Results page cleanup, Maximize clipping fix, Per-user MSI packaging, Stock-width nesting preference
 - **Current (2026-03-17T05:03:53Z):** Results viewer repair approval — Bishop fixed CSS grid row template (`auto 1fr` → `auto auto 1fr`). Approved against four gate conditions: workspace left ✅, viewer right ✅, resize handle visible/grabbable ✅, independent workspace scrolling ✅. Test baseline: 143 passing, 0 regressions.
+- **2026-03-17T18:58:10Z:** GROUP-EXPORT-SLICE COMPLETE — Added regression coverage for TypeScript contract seam (ImportResultsRevisionGateSpecs.cs) and grouped/ungrouped export behavior (ReportDataServiceSpecs.cs, QuestPdfReportExporterSpecs.cs). Proves mixed grouped + ungrouped placements survive report shaping and render distinct summary text in output. Test baseline: 167 passing, 2 skipped (expected). Manual gates outstanding: grouped results UI rendering, import mapping review, dense-layout PDF, pointer capture release (2–3 hours total).
 
 **Key Learnings:**
 - Spec-first scaffolding works with one runnable smoke/contract test per seam and explicit blockers for skipped tests

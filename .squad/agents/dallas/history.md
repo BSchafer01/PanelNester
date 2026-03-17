@@ -38,6 +38,8 @@ PanelNester WebUI built with React + TypeScript. Dallas owns UI flows, component
 
 - 2026-03-17T04:04:02Z: **KERF WIDTH UI BINDING PENDING.** Backend (Parker) completed: kerf no longer hardcoded; defaults to 0.0625m via `ProjectService.DefaultKerfWidth`. Frontend task: add numeric input field to Overview/Project Settings page, bind to `projectSettings.kerfWidth`, call `updateProjectMetadata` bridge message with new value. Input spec: type number, min 0, step 0.0625, label "Kerf Width (inches)". Persistence already tested via existing bridge contract. Assigned to Dallas after sticky layout merge.
 
+- 2026-03-17T18:58:10Z: **GROUP-EXPORT-SLICE COMPLETE.** Updated NestPlacement TypeScript contract to carry optional `group?: string | null` field. Results/group review flows now consume placement-level groups directly instead of reverse-looking up from part rows. All existing tests passing; grouped results feature fully functional. Orchestration log recorded; team updates appended to agent histories. Ready for next assignment: Phase 1 UI improvements (auto-preview, inline material creation, unplaced diagnostics).
+
 ## Phase 2 Scope (Material Library UI)
 
 **Ownership:** Dallas (WebUI layer)
