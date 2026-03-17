@@ -278,3 +278,5 @@ Reviewed alongside Parker's import-flow recovery and Ripley's layout recovery to
 CSS fix correctly addresses root cause. All four gate conditions verified. No regressions. Results viewer repair locked and ready for integration.
 
 **Timestamp:** 2026-03-17T05:03:53Z
+
+📌 2026-03-17T15:46:43Z: **GROUPED NESTING TEST COVERAGE COMPLETE** — Test matrix: ShelfNestingService (8 scenarios: no-group, single, multi-group, spillover, ungrouped-last, mixed, all-ungrouped, integration), Import (3 scenarios: present/absent/alias), PartEditorService (add/update/delete with group), FlatBuffers (round-trip + legacy compatibility). Bridge spec fix: ImportBridgeSpecs now asserts against ImportFieldNames.All for mapping coverage. Validation: 163 tests (161 passed, 2 skipped, 0 failed). All grouped-nesting tests executable post-implementation.

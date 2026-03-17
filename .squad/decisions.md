@@ -3008,3 +3008,285 @@ The implementation is complete and functionally correct. No rebuild required. Th
 
 Low. Fix is architectural (content detection) and implementation (build order). Installer workflow unchanged except for trust seam relying on desktop publish output.
 
+
+---
+
+## Phase 6 / Grouped Nesting Slice Decisions
+
+### Decision: Ripley — Grouped Nesting — Design Review
+
+# Decision: Grouped Nesting — Design Review
+
+**Author:** Ripley | **Date:** 2026-03-17 | **Status:** Proposed
+
+## Context
+
+Brandon requests an optional "Group" column during panel import/editing. Groups control nesting order: all parts from group 1 nest before group 2, and so on. The last sheet of a completed group can accept spillover from the next group. When no groups are defined, nesting behaves exactly as it does today.
+
+## Scope Boundary
+
+This slice adds **one optional import field**, **one sort-order change** in the nesting engine, and **one UI column**. It does NOT add:
+- Group display in results/PDF (v2 if users want it)
+- Explicit group ordering UI (v2)
+- Group-level summary statistics (v2)
+
+---
+
+## Contract: The `Group` Field
+
+### Data Model
+
+| Record | Property | Type | Default | Notes |
+|---|---|---|---|---|
+| `PartRow` | `Group` | `string?` | `null` | Nullable. Blank/null = ungrouped. |
+| `PartRowUpdate` | `Group` | `string` | `""` | Empty string = no group. |
+| `ExpandedPart` | `Group` | `string?` | `null` | Carried from source `PartRow`. |
+
+### Blank / Missing Group Behavior
+
+- **Blank, null, or whitespace** group values mean the part is **ungrouped**.
+- All ungrouped parts form a single implicit group.
+- Ungrouped parts are nested **last**, after all named groups.
+- If every part is ungrouped, the nesting engine produces identical results to today's behavior (no-op path).
+
+### Group Order
+
+Groups are ordered by **first appearance** in the part list (import order), not alphabetically. This gives users deterministic control via their source file layout.
+
+Example: If the import file has rows in order `[Group="Ceiling", Group="Walls", Group="", Group="Ceiling"]`, the nesting order is:
+1. `Ceiling` (first seen at row 1)
+2. `Walls` (first seen at row 2)
+3. Ungrouped (always last)
+
+### Spillover Rule
+
+When the nesting engine finishes placing all parts from group N:
+- The **last sheet** used by group N carries forward as an eligible sheet for group N+1.
+- Earlier sheets from group N are **not** eligible for group N+1 parts.
+- Within a group, all sheets belonging to that group (including the carry-forward sheet) are eligible for placement.
+- This maximizes utilization on the boundary sheet without scattering later-group parts across earlier sheets.
+
+**Implementation:** Track an `eligibleSheetStartIndex` in `ShelfNestingService`. After completing each group, set it to `max(0, sheets.Count - 1)`. Parts in the next group only try sheets from that index onward.
+
+---
+
+## Import Pipeline Changes
+
+### `ImportFieldNames` (Domain)
+
+Add `Group` as an **optional** field (not in `Required` list):
+
+```csharp
+public const string Group = "Group";
+public static readonly IReadOnlyList<string> Optional = [Group];
+```
+
+### `ImportMappingResolver` (Services)
+
+Add header aliases for Group:
+```
+"group", "groupname", "groupid", "category", "section", "batch", "set", "zone"
+```
+
+Extend `ResolveColumns` to handle optional fields: same alias-matching logic, but no error when missing. Include optional mappings in `ColumnMappingPlan` so the import services can read them when present.
+
+### CSV / XLSX Import Services
+
+When the Group column is mapped, read the cell value into `PartRowUpdate.Group`. When not mapped, leave as empty string. No validation error for missing Group column.
+
+### `PartRowValidator`
+
+No validation on Group. Any string value (including blank) is valid. Pass through to `PartRow.Group`.
+
+### `PartEditorService`
+
+`ToUpdate()` must carry `Group` from `PartRow` to `PartRowUpdate`. Add/Update operations pass through the Group value.
+
+---
+
+## Nesting Engine Changes
+
+### `ShelfNestingService.NestAsync`
+
+This is the core change. Current flow:
+
+```
+expand parts → sort by area desc → place greedily on sheets
+```
+
+New flow:
+
+```
+expand parts → partition by group (first-seen order, ungrouped last)
+→ for each group:
+    sort group parts by area desc (existing heuristic)
+    place parts on sheets[eligibleSheetStartIndex..]
+    update eligibleSheetStartIndex = max(0, sheets.Count - 1)
+```
+
+The `TryPlaceOnExistingSheets` method gains a `startIndex` parameter to limit which sheets are eligible. The rest of the placement logic (shelf creation, rotation, spacing) is unchanged.
+
+### `BatchNestingService`
+
+**No changes.** It groups by material and delegates to `ShelfNestingService`. Group ordering is orthogonal to material grouping and lives entirely inside the nesting engine.
+
+---
+
+## Persistence Changes
+
+### FlatBuffers Schema (`ProjectPersistence.fbs`)
+
+Append `group:string` to the `PartRow` table. FlatBuffers appending is backward-compatible — old files without this field read as empty string (which means ungrouped). No version bump needed.
+
+### `ProjectFlatBufferSerializer`
+
+- `WritePartRow`: add `Fb.PartRow.AddGroup(builder, group)`.
+- `ReadParts`: read `value.Group ?? string.Empty` into `PartRow.Group`.
+
+### JSON Serializer
+
+No changes needed. `System.Text.Json` handles nullable/optional properties gracefully.
+
+---
+
+## WebUI Changes
+
+### TypeScript Types (`contracts.ts`)
+
+```typescript
+// PartRow
+group?: string | null;
+
+// PartRowUpdate
+group: string;
+```
+
+### Import Page (`ImportPage.tsx`)
+
+- Add "Group" column to the parts table (between Material and Status).
+- Add Group text input to the add/edit part row form.
+- Add `'group'` to `SortKey` union type.
+- Group column should show blank for ungrouped parts, not "—" or "N/A".
+
+### No Bridge Changes
+
+`PartRow` and `PartRowUpdate` already flow through the bridge as JSON. Adding optional properties is backward-compatible. No new bridge message types needed.
+
+---
+
+## File & Seam Ownership
+
+### Parker (Domain + Services) — 11 files
+
+| File | Change |
+|---|---|
+| `src/PanelNester.Domain/Models/PartRow.cs` | Add `Group` property, update `Equals`/`GetHashCode` |
+| `src/PanelNester.Domain/Models/PartRowUpdate.cs` | Add `Group` property |
+| `src/PanelNester.Domain/Models/ExpandedPart.cs` | Add `Group` property |
+| `src/PanelNester.Domain/Models/ImportOptions.cs` | Add `ImportFieldNames.Group`, add `Optional` list |
+| `src/PanelNester.Services/Import/ImportMappingResolver.cs` | Add Group aliases, extend `ResolveColumns` for optional fields |
+| `src/PanelNester.Services/Import/CsvImportService.cs` | Read Group column when mapped |
+| `src/PanelNester.Services/Import/XlsxImportService.cs` | Read Group column when mapped |
+| `src/PanelNester.Services/Import/PartRowValidator.cs` | Pass through Group value |
+| `src/PanelNester.Services/Import/PartEditorService.cs` | Carry Group in `ToUpdate()`, add/update flows |
+| `src/PanelNester.Services/Nesting/ShelfNestingService.cs` | Implement group-partitioned nesting with carry-forward sheet |
+| `src/PanelNester.Services/Persistence/ProjectPersistence.fbs` | Append `group:string` to PartRow table |
+
+### Parker (Persistence) — 2 files
+
+| File | Change |
+|---|---|
+| `src/PanelNester.Services/Persistence/ProjectFlatBufferSerializer.cs` | Read/write `Group` field |
+| `src/PanelNester.Services/Persistence/ProjectJsonSerializer.cs` | No explicit changes (auto via serialization) — verify round-trip |
+
+### Dallas (WebUI) — 2 files
+
+| File | Change |
+|---|---|
+| `src/PanelNester.WebUI/src/types/contracts.ts` | Add `group` to PartRow and PartRowUpdate |
+| `src/PanelNester.WebUI/src/pages/ImportPage.tsx` | Add Group column, sort key, edit form field |
+
+### Bishop (Desktop) — 0 files
+
+No bridge changes. JSON serialization of optional properties is already handled.
+
+### Hicks (Tests) — Test matrix
+
+| Test Area | Coverage |
+|---|---|
+| **ShelfNestingService** | No-group (identical to current); single group; multi-group ordering; spillover from last sheet; no spillover from earlier sheets; ungrouped-last ordering; mixed groups + ungrouped; all-ungrouped = current behavior |
+| **Import (CSV/XLSX)** | Group column present; Group column absent; Group column with blank values; Group mapped via alias |
+| **PartEditorService** | Add row with group; update row group; delete row preserves other groups |
+| **FlatBuffers round-trip** | Save/load project with groups; load legacy project without groups (backward compat) |
+| **Integration** | End-to-end: import with groups → nest → verify sheet ordering |
+
+---
+
+## Risks & Mitigations
+
+| Risk | Severity | Mitigation |
+|---|---|---|
+| FlatBuffers schema change breaks old files | Low | Appending fields is backward-compatible. Old files read Group as empty string = ungrouped. Verify with explicit test. |
+| `PartRow.Equals`/`GetHashCode` regression | Medium | `PartRow` has custom `Equals`/`GetHashCode`. Must add `Group` to both. Existing tests will catch if equality contract breaks. |
+| Import column resolution for optional fields | Medium | `ImportMappingResolver.ResolveColumns` currently only handles required fields. Must cleanly extend for optional fields without breaking existing required-field logic. |
+| Nesting sort stability | Low | First-seen group order is deterministic from the part list. No randomness. Add explicit test for ordering. |
+| WebUI backward compat (old project without groups) | Low | `group` is optional/nullable in TypeScript types. UI renders blank for null/undefined. |
+
+---
+
+## Open Questions (Resolved)
+
+1. **Q: Should Group be required or optional?** → **Optional.** No group = ungrouped. No validation error.
+2. **Q: What order for groups?** → **First-seen in part list.** User controls via file layout.
+3. **Q: Where do ungrouped parts go?** → **Last**, after all named groups.
+4. **Q: Which sheets eligible for spillover?** → **Only the last sheet** of the completed group.
+5. **Q: Should results/PDF show groups?** → **No for v1.** Sheets and placements don't carry group info. Parts link back via PartId → source row → group.
+6. **Q: Does Bishop need changes?** → **No.** Optional JSON properties work transparently.
+
+---
+
+## Reviewer Recommendation
+
+**Implementation can proceed now.** The contract is narrow, backward-compatible, and touches well-understood seams. No architectural risk.
+
+**Execution order:**
+1. **Batch 1 (parallel):** Parker — domain model changes + import pipeline + FlatBuffers schema. Dallas — TypeScript types + UI column.
+2. **Batch 2 (sequential, depends on Batch 1):** Parker — ShelfNestingService group-partitioned nesting.
+3. **Batch 3:** Hicks — full test matrix + integration gate.
+
+**Gate criteria:** All existing tests pass (150 baseline). New tests cover the 8 ShelfNestingService scenarios, 4 import scenarios, 3 editor scenarios, and 2 persistence scenarios listed above. No regressions.
+
+
+---
+
+### Decision: Dallas — Optional Group in Import UI
+
+# Dallas: optional group stays optional in import UI
+
+- Added `Group` as an optional WebUI import field while keeping the required import mapping set unchanged.
+- Blank or empty group values are treated as ungrouped in the import/edit UI so older payloads still render cleanly.
+
+**Author:** Dallas | **Date:** 2026-03-17 | **Status:** Approved
+
+---
+
+### Decision: Hicks — Grouped Nesting Test Gate
+
+
+- Date: 2026-03-17
+- Decision: Land this slice under a spec-first gate: keep one live regression on the existing no-group material batching path, and encode grouped sequencing, spillover, import/edit round-trips, persistence, and equality/hash expectations as skipped tests until the seams exist.
+- Blockers called out by the gate: optional `Group` data is still missing from `PartRow`, `PartRowUpdate`, `ImportFieldNames`/mapping aliases, bridge payloads, and the FlatBuffers project schema, so those tests cannot be made executable yet without primary implementation.
+
+**Author:** Hicks | **Date:** 2026-03-17 | **Status:** Approved
+
+---
+
+### Decision: Hicks — Bridge Import Spec and Optional Group Mapping
+
+The import bridge spec should distinguish between source columns present in the file and target fields the importer can map.
+
+Because `Group` is optional, files without a `Group` column still expose only the required source columns, but the bridge should return a sixth mapping entry for `Group` with a null `SourceColumn`.
+
+I updated the spec to assert against `ImportFieldNames.Required` for visible columns and `ImportFieldNames.All` for mapping coverage so the test documents the intended behavior without relying on a stale magic number.
+
+**Author:** Hicks | **Date:** 2026-03-17 | **Status:** Approved

@@ -93,3 +93,5 @@ I own architecture, scope control, and reviewer gating for the full product.
 ## Next Steps
 
 - Phase 7 scoping or additional hardening work
+
+📌 2026-03-17T15:46:43Z: **GROUPED NESTING DESIGN REVIEW COMPLETE** — Architecture contract for optional panel grouping during import/editing. Groups control nesting order (first-seen), ungrouped parts nest last, spillover rule allows last sheet of group N to accept group N+1. No changes to Phase 0-5 vocabulary or behavior. Backward-compatible FlatBuffers schema append. Parker owns 13 files (domain/import/nesting/persistence), Dallas owns 2 (TypeScript types + UI column), Hicks test matrix (8 ShelfNestingService scenarios + import/editor/persistence). Decision merged into decisions.md. Ready for team execution.
