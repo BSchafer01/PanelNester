@@ -1,3 +1,44 @@
+# Panel Nester Decisions
+
+## Decision: Paginate large import payload tables
+
+- **Author:** Dallas
+- **Date:** 2026-03-17
+
+### Context
+
+The import/edit page becomes sluggish with large payloads because the UI was mounting every imported row at once. The provided `02_multi_material_7500_rows.xlsx` stress file contains 7,500 data rows, which is enough to make entering/leaving the Import tab and interacting with the table feel heavy.
+
+### Decision
+
+Keep the existing filter/sort/edit flow, but paginate the payload table when the filtered result set exceeds the selected page size. Default to 250 rows per page, with 100/250/500 row options and explicit page navigation controls.
+
+### Why
+
+- Preserves the operator workflow without changing import semantics.
+- Cuts DOM work dramatically for large imports, which improves route changes and table interaction.
+- Keeps small imports unchanged: if the filtered set fits inside the selected page size, the page still renders as a single table.
+
+### Follow-up
+
+If operators still need smoother scanning across very large datasets, the next frontend step would be row virtualization. Pagination is the lowest-risk fix that materially improves responsiveness now.
+
+
+---
+
+## Hicks — large import results responsiveness coverage
+
+- Added Desktop revision-gate coverage that locks the WebUI performance-sensitive contract to nesting payloads only:
+  - `ResultsPage` must not accept or re-scan `PartRow[]`
+  - group-review state must derive from `NestPlacement.group`
+  - `App` must not forward `state.importResponse.parts` into `ResultsPage`
+  - `SheetViewer` continues to consume group metadata from the shared placement contract instead of re-declaring it locally
+- Automated performance timing is still unrealistic in the current stack because we do not have a browser/UI test harness that can measure tab-switch latency or React commit cost against the 7,500-row workbook.
+- Remaining manual gate: import `02_multi_material_7500_rows.xlsx`, switch into and back out of the affected results workspace tabs repeatedly, and confirm there is no visible stall/regression compared with the prior build while group review still renders correctly.
+
+
+---
+
 
 ---
 
@@ -649,5 +690,6 @@ The TypeScript `NestPlacement` interface in `contracts.ts` was missing the `grou
 ## Verdict
 
 The grouped nesting slice is architecturally sound and well-integrated. Immediate priority is housekeeping (WebUI tests, PDF groups) before adding new features. Items #3 and #4 can queue behind the first two without risk.
+
 
 
