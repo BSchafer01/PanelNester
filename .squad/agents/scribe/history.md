@@ -81,6 +81,21 @@ I maintain code quality, project standards, and team coordination records. I doc
   - Agent histories updated: Bishop (viewer repair added), Hicks (gate review and approval added)
   - All test baselines maintained (143 tests passing)
 
+📌 2026-03-17T05:30:01Z: **BISHOP RUNTIME BUNDLE FIX COMPLETE**
+  - Diagnosed stale desktop bundle risk: `dotnet publish` was packaging placeholder only
+  - Content resolver preferred source-tree over bundled `WebApp`, allowing stale versions in shipped binaries
+  - Fixed: Desktop publish now builds WebUI and includes current dist in WebApp folder
+  - Fixed: Content resolver detects bundled builds via `WebApp\assets` marker, prefers over source-tree
+  - Fixed: Installer simplified to trust desktop publish output (removed secondary copy)
+  - Added resolver tests for bundled detection and fallback order
+  - Validation: 134 tests / 132 passed / 2 skipped (no regressions)
+  - Orchestration log created (2026-03-17T05-30-01Z-bishop-runtime-bundle.md)
+  - Session log created (2026-03-17T05-30-01Z-runtime-bundle-fix.md)
+  - Five inbox decision files merged to decisions.md (bishop-results-runtime-mismatch, hicks-results-rebuild-gate, hicks-results-rebuild-review, hicks-results-repair-review, parker-results-rebuild)
+  - All inbox files deleted; inbox now empty
+  - Updated Bishop history with runtime bundle fix details
+  - Ready to commit .squad/ changes
+
 ## Learnings
 
 - Scribe initializes documentation infrastructure for team coordination.

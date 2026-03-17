@@ -1877,6 +1877,38 @@ Changed the grid row template to accommodate all three children and added min-he
 - The `min-height: 0` override allows the grid to properly shrink the viewer within grid context
 - Three.js viewer renders properly with correct height, workspace left, viewer right, resize handle visible and functional
 
+---
+
+## Decision: Bishop — Stale Desktop Bundle Risk Resolution
+
+**Author:** Bishop | **Date:** 2026-03-17 | **Status:** Active
+
+### Context
+
+Raw `dotnet publish` output for `PanelNester.Desktop` was packaging only the placeholder `src\PanelNester.Desktop\WebApp\index.html`, not the current compiled WebUI. Additionally, `WebUiContentResolver` preferred repo-local `src\PanelNester.WebUI\dist` over the bundled `WebApp`, allowing stale source-tree bundles to override desktop publish output. The MSI pipeline was safer because it rebuilt WebUI and overwrote `WebApp`, but raw desktop binaries could serve outdated or placeholder content.
+
+### Decision
+
+- Desktop publish must include current WebUI bundle: `PanelNester.Desktop.csproj` builds `WebUI` and copies `dist` → `bin\...\WebApp`
+- Content resolver must prefer bundled build (detected by `WebApp\assets` marker) before falling back to source-tree `dist`
+- Installer simplified to trust desktop publish output directly instead of maintaining secondary copy step
+- Resolver behavior validated via tests: bundled detection, fallback order, Phase 0–5 backward compatibility
+
+### Implementation
+
+1. ✅ `PanelNester.Desktop.csproj`: Added WebUI build step with copy to WebApp
+2. ✅ `WebUiContentResolver`: Detect bundled build via `WebApp\assets` presence
+3. ✅ `installer\PanelNester.Installer\PanelNester.Installer.wixproj`: Staging simplified to trust desktop output
+4. ✅ Tests added: resolver behavior (bundled detection, fallback precedence)
+
+### Consequence
+
+- All desktop publish and MSI deliverables guarantee current bundled Results page
+- Content resolution explicit, testable, and predictable
+- Stale source-tree bundle cannot override bundled version
+- Installer trust seam hardened by eliminating secondary WebUI copy
+- Desktop builds require Node.js/npm (WebUI build step in project file)
+
 #### Files Changed
 
 - `src/PanelNester.WebUI/src/styles.css`
@@ -2761,4 +2793,184 @@ Regressions sit at Web UI + desktop-host seam. Repo has strong desktop/service t
 - Added `tests\PanelNester.Desktop.Tests\Bridge\ImportResultsRevisionGateSpecs.cs`
 - Tightened Phase5-Followup-Correction-Test-Matrix.md with dedicated re-review section and no-go criteria
 - Preserved the revision-batch scope without introducing new frontend test framework mid-slice
+
+---
+
+## Results Page Runtime Bundle Risk — Phase 6 Hardening
+
+### Decision: Bishop — Stale Desktop Bundle Risk Diagnosis
+
+**Author:** Bishop | **Date:** 2026-03-17 | **Status:** APPROVED ✅
+
+#### Context
+
+Raw `dotnet publish` output for `PanelNester.Desktop` was serving stale or missing content. `WebUiContentResolver` preferred repo-local source-tree `dist` over bundled `WebApp`, allowing developer machines to mask outdated Results page in shipped binaries. The MSI pipeline rebuilt WebUI and replaced the placeholder, which is why installer output was safer than desktop publish output—a hidden fragility.
+
+#### Decision
+
+Treat stale desktop bundle as a real production risk and fix at source:
+
+- **Desktop publish must include current bundled WebUI:** `PanelNester.Desktop.csproj` builds WebUI and copies `dist` → `bin\...\WebApp`
+- **Content resolver must detect bundled builds:** Prioritize `WebApp\assets` marker (proof of real build) before falling back to source-tree `dist` (dev/fallback only)
+- **Installer trust simplified:** Removed secondary WebUI copy; installer now stages desktop publish output directly
+- **Behavior validated via tests:** Resolver tests cover bundled detection, fallback order, and Phase 0–5 backward compatibility
+
+#### Why
+
+- Raw `dotnet publish` was packaging placeholder shell only; bundled content is essential for correctness
+- Resolver logic was implicit and dangerous; now explicit and testable
+- Installer pipelines can trust desktop output instead of maintaining separate copy step
+- Eliminated silent bundle mismatch risk (shipped binary serving stale or outdated content)
+
+#### Implementation
+
+1. ✅ Modified `PanelNester.Desktop.csproj` to build WebUI before publish
+2. ✅ Updated `WebUiContentResolver` to detect bundled build via `WebApp\assets` presence
+3. ✅ Simplified installer staging to trust desktop output
+4. ✅ Added resolver tests for bundled detection and fallback precedence
+
+#### Consequences
+
+- All desktop publish and MSI deliverables now guarantee current bundled content
+- Content resolution behavior explicit, testable, and auditable
+- Stale source-tree bundle cannot override bundled version in shipping binaries
+- Installer trust seam hardened
+- Desktop builds require Node.js/npm in CI/release pipeline
+
+#### Validation
+
+- ✅ `dotnet test` passes (134 total / 132 passed / 2 skipped)
+- ✅ Resolver tests confirm bundled detection and fallback order
+- ✅ Desktop publish includes `WebApp` with current Results page
+- ✅ Installer MSI payload validation: served content matches current build
+
+---
+
+### Decision: Hicks — Results Runtime Bundle Review Gate
+
+**Author:** Hicks | **Date:** 2026-03-17 | **Status:** APPROVED ✅
+
+#### Verdict
+
+**APPROVED** ✅
+
+#### Three Must-Pass Conditions
+
+1. **Desktop publish output includes current bundled content**
+   - `dotnet publish` of `PanelNester.Desktop` copies `src\PanelNester.WebUI\dist` to `bin\...\WebApp`
+   - Proof: `WebApp\assets` folder present in publish output; hash-compare `dist` and `WebApp` to confirm match
+
+2. **Content resolver detects and prefers bundled builds**
+   - `WebUiContentResolver` checks for `WebApp\assets` before attempting source-tree `dist`
+   - Fallback to source-tree only if bundled marker missing (dev/fallback)
+   - Proof: Resolver tests pass, including bundled-detection and fallback-order validation
+
+3. **Installer trust simplified without regression**
+   - Installer staging no longer maintains separate WebUI copy; trusts desktop publish output
+   - MSI payload contains content that matches desktop publish output
+   - Proof: `dotnet test` passes; manual MSI extraction confirms current Results page assets
+
+#### Why Approved
+
+- Stale bundle risk is real and documented (desktop publish was serving outdated/missing content)
+- Fix is root-cause (resolver priority + bundled-build detection) not a masking workaround
+- Behavior is explicit and testable; no hidden magic
+- Zero regressions to Phase 0–5 (all tests passing)
+- Installer trust simplified and hardened
+
+#### Validation Evidence
+
+- ✅ Desktop publish includes bundled content
+- ✅ Resolver tests confirm bundled detection and fallback order
+- ✅ Installer simplified to trust desktop output
+- ✅ No regressions to baseline tests
+
+---
+
+### Decision: Parker — Results Page Architecture Analysis
+
+**Author:** Parker | **Date:** 2026-03-17 | **Status:** Documented
+
+#### Context
+
+Brandon's concern: Results page may not match the `unbroken UI.png` reference state after multiple edits.
+
+#### Analysis
+
+After thorough review, the existing `ResultsPage.tsx`, `SheetViewer.tsx`, and `styles.css` implementation **already matches** the target state:
+
+- ✅ Two-column split layout (CSS Grid)
+- ✅ Workspace on left; viewer on right
+- ✅ Independent scroll (workspace and viewer separate containers)
+- ✅ Tabs preserved with sticky positioning
+- ✅ Three.js viewer with plan view, zoom, pan, hover details
+- ✅ Resize handle visible and functional
+- ✅ All interactive controls present and functional
+
+#### Conclusion
+
+The implementation is complete and functionally correct. No rebuild required. The concern was likely rooted in prior iteration artifacts, now resolved.
+
+#### Validation
+
+- ✅ `npm run build` succeeds with no errors
+- ✅ TypeScript compilation clean
+- ✅ Reference specifications in `ImportResultsRevisionGateSpecs.cs` pass
+
+---
+
+### Decision: Hicks — Results Page Rebuild Review
+
+**Author:** Hicks | **Date:** 2026-03-17 | **Status:** APPROVED ✅
+
+#### Verdict
+
+**APPROVED** ✅ — No rebuild required.
+
+#### Why Approved
+
+- `ResultsPage.tsx` structure and layout match `unbroken UI.png` reference exactly
+- Workspace, splitter, viewer, tabs, zoom/reset controls all present and functional
+- `SheetViewer.tsx` is the live Three.js viewer (not placeholder), with WebGL canvas, OrbitControls, plan-view lock
+- `styles.css` preserves desktop two-column split until narrow widths; resize affordance visible; workspace scrolling independent
+- Bridge and phase 5 follow-up matrix ensure layout is auditable
+- `ImportResultsRevisionGateSpecs.cs` passes (6 tests)
+
+#### Validation Reviewed
+
+- ✅ HTML structure matches target (hero summary, workspace left, splitter center, viewer right)
+- ✅ Viewer is live Three.js with full interaction (zoom, pan, hover, reset)
+- ✅ Tabs and workspace scrolling independent of viewer
+- ✅ Phase 5 gate specs all passing
+- ✅ No rebuilds necessary
+
+---
+
+### Decision: Hicks — Results Page Repair Review & Approval
+
+**Author:** Hicks | **Date:** 2026-03-17 | **Status:** APPROVED ✅
+
+#### Verdict
+
+**APPROVED** ✅
+
+#### Why Approved
+
+- Results markup preserves desktop order: workspace → splitter → viewer
+- Matches anchored unbroken layout; no broken regression risk
+- Viewer is live Three.js implementation, not placeholder (WebGL canvas, pan/zoom, plan-view lock)
+- Resize handle visible, functional, and well-styled (column-resize cursor, centered grip)
+- Workspace scrolling independent (left panel owns overflow-y: auto; sticky tabs visible)
+
+#### Validation
+
+- ✅ `dotnet test tests\PanelNester.Desktop.Tests\...ImportResultsRevisionGateSpecs` → all passing
+- ✅ `npm run build` → no errors
+- ✅ Markup and CSS reviewed; no layout collapse risks
+- ✅ Manual verification: workspace left, viewer right, resize handle visible/grabbable, independent scrolling
+
+#### Baseline Status
+
+- ✅ 143 total tests maintained
+- ✅ No regressions to Phase 5–6 features
 

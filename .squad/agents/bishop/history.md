@@ -2,11 +2,11 @@
 
 PanelNester is a local desktop nesting tool with WPF host, WebView2 UI, and per-user MSI distribution. Bishop owns desktop bridge integration.
 
-**Key deliverables:** Phase 0–5 bridge contracts (import, materials, projects, nesting, PDF export); Phase 6 error messaging; single-file MSI packaging with WebUI integration; app icon branding; rebuild validation procedures; results viewer layout repair.
+**Key deliverables:** Phase 0–5 bridge contracts (import, materials, projects, nesting, PDF export); Phase 6 error messaging; single-file MSI packaging with WebUI integration; app icon branding; rebuild validation procedures; results viewer layout repair; **stale desktop bundle risk elimination (2026-03-17)**.
 
-**Current status:** All phases delivered and approved. Most recent work (2026-03-17T05:03:53Z): Results page Three.js viewer layout repair — fixed CSS grid row template from `auto 1fr` to `auto auto 1fr` and added min-height constraint. Viewer was collapsing to 0px because SheetViewer renders three children but grid template only defined two rows. Solution ensures Three.js canvas gets explicit height via `1fr` allocation. Hicks approved against four gate conditions: workspace left ✅, viewer right ✅, resize handle visible/grabbable ✅, independent workspace scrolling ✅.
+**Current status:** All phases delivered and approved. Most recent work (2026-03-17T05:30:01Z): Diagnosed and fixed stale desktop bundle risk by ensuring desktop `dotnet publish` includes current WebUI and content resolver prioritizes bundled build detection over source-tree fallback. Simplified installer trust to desktop output. All tests passing (134 / 132 passed / 2 skipped).
 
-**Key learnings:** Per-user WiX flow (repo-owned, .NET 8, embedded CAB); WebView2 title sync via DocumentTitleChanged; error messages split (technical vs user-facing); dialog marshalling for reliability; icon reuse across desktop/installer; CSS grid layout requires explicit row allocation for all children when Three.js renderer expects container height.
+**Key learnings:** Per-user WiX flow (repo-owned, .NET 8, embedded CAB); WebView2 title sync via DocumentTitleChanged; error messages split (technical vs user-facing); dialog marshalling for reliability; icon reuse across desktop/installer; CSS grid layout requires explicit row allocation for all children when Three.js renderer expects container height; **desktop bundles must explicitly include current WebUI; content resolver must detect bundled builds and prefer over source-tree.**
 
 ------
 # Bishop History
@@ -232,6 +232,37 @@ PanelNester is a local desktop nesting tool with WPF host, WebView2 UI, and per-
 - Request contracts: `ListMaterialsRequest`, `GetMaterialRequest`, `CreateMaterialRequest`, `UpdateMaterialRequest`, `DeleteMaterialRequest`
 - Response contracts: Corresponding `-Response` types with data or error results
 - Error codes integrated with validation service responses
+
+## 2026-03-17T05:30:01Z — Stale Desktop Bundle Risk Resolution
+
+**Assignment:** Diagnose and fix stale desktop bundle risk where raw `dotnet publish` output was serving outdated or missing content.
+
+**Root Cause Identification:**
+1. Desktop publish was packaging only placeholder `WebApp\index.html`, not current compiled WebUI
+2. `WebUiContentResolver` preferred repo-local `src\PanelNester.WebUI\dist` over bundled `WebApp`
+3. This allowed source-tree bundles to override bundled version in shipped binaries
+4. Installer was safer because it rebuilt WebUI and replaced `WebApp`, hiding the fragility in desktop output
+
+**Deliverables:**
+- ✅ Modified `PanelNester.Desktop.csproj` to build WebUI and copy `dist` → `bin\...\WebApp`
+- ✅ Updated `WebUiContentResolver` to detect bundled build via `WebApp\assets` marker
+- ✅ Simplified installer staging to trust desktop publish output directly
+- ✅ Added resolver tests validating bundled detection and fallback precedence
+- ✅ Tests: 134 total / 132 passed / 2 skipped (no regressions)
+
+**Files Modified:**
+- `src\PanelNester.Desktop\PanelNester.Desktop.csproj`: Added WebUI build step
+- `src\PanelNester.Desktop\WebAppContentResolver.cs`: Bundled detection logic
+- `installer\PanelNester.Installer\PanelNester.Installer.wixproj`: Simplified staging
+- `tests\PanelNester.Desktop.Tests\*`: Added resolver behavior tests
+
+**Impact:** All desktop publish and MSI deliverables now guarantee current bundled Results page. Stale bundle risk eliminated. Content resolution explicit and auditable.
+
+**Consequences:**
+- Desktop builds require Node.js/npm (WebUI build step)
+- Resolver behavior now testable and locked
+- Installer trust simplified
+- Watch CI/release pipeline to ensure Node.js available
 
 **Success Criteria Met:**
 - ✅ Bridge contracts match established vocabulary pattern (list/get/create/update/delete)
