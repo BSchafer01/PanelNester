@@ -1832,6 +1832,146 @@ Dallas's implementation satisfies all gate requirements. The requested UI elemen
 
 ---
 
+## Results Page Three.js Viewer Layout Repair (2026-03-17)
+
+### Decision: Bishop — Results Viewer Grid Fix
+
+**Author:** Bishop | **Date:** 2026-03-17 | **Status:** Implemented ✅
+
+#### Problem
+
+The Results page Three.js viewer was collapsing into a dark non-rendering block. The layout was broken with the viewer appearing as a collapsed element instead of filling the available space.
+
+#### Root Cause
+
+The `.results-viewer-column > .sheet-viewer-panel` CSS rule had:
+```css
+grid-template-rows: auto 1fr;
+```
+
+However, the `SheetViewer` component renders **three** children inside `.sheet-viewer-panel`:
+1. `.section-header` (header with title and zoom buttons)
+2. `.token-list` (placement count and interaction hints)
+3. `.sheet-viewer` (the actual Three.js canvas container)
+
+With only two row definitions (`auto 1fr`), the third child (`.sheet-viewer`) was placed in an implicit grid row with `auto` height. Since the Three.js renderer initializes with `height: 100%` and expects the container to have explicit height, it collapsed to 0px.
+
+#### Solution
+
+Changed the grid row template to accommodate all three children and added min-height constraint:
+
+```css
+.results-viewer-column > .sheet-viewer-panel {
+  grid-template-rows: auto auto 1fr;
+}
+
+.results-viewer-column .sheet-viewer {
+  min-height: 0;
+}
+```
+
+#### Consequence
+
+- Three-row template now accommodates all children
+- The third row (`1fr`) allocates remaining space to the viewer
+- The `min-height: 0` override allows the grid to properly shrink the viewer within grid context
+- Three.js viewer renders properly with correct height, workspace left, viewer right, resize handle visible and functional
+
+#### Files Changed
+
+- `src/PanelNester.WebUI/src/styles.css`
+  - Line ~922: Changed `grid-template-rows` from `auto 1fr` to `auto auto 1fr`
+  - Line ~930: Added `min-height: 0` to `.results-viewer-column .sheet-viewer`
+
+#### Validation
+
+- ✅ WebUI build succeeds
+- ✅ Layout renders correctly at desktop widths
+- ✅ All baseline tests pass (143 maintained)
+
+---
+
+### Decision: Hicks — Results Repair Gate (Focused Review)
+
+**Author:** Hicks | **Date:** 2026-03-17 | **Status:** APPROVED ✅
+
+#### Gate Definition
+
+Tighten the Results page re-review to **four must-pass conditions only**, anchored to before/after screenshots showing the intended recovery state versus the failure signature.
+
+#### Four Must-Pass Conditions
+
+1. **Workspace panel stays on the left** at desktop widths (1024px+)
+2. **Three.js viewer stays on the right** and remains visible/usable  
+3. **Resize handle is visible, grabbable, and functional** — actually resizes the split
+4. **Workspace scrolling stays independent** from the viewer/right column
+
+#### Why (Evidence-Based Approach)
+
+The provided screenshots show:
+- **Broken UI:** Viewer side effectively lost, split no longer communicates healthy left-workspace/right-viewer layout
+- **Unbroken UI:** Workspace left, Three.js rendering right, resize handle visible and functional
+
+The review gate rejects any revision that drifts back toward the broken signature.
+
+#### Enforcement
+
+- Bridge/spec gate centered in `ImportResultsRevisionGateSpecs.cs`
+- Human review checklist explicit in `tests\Phase5-Followup-Correction-Test-Matrix.md`
+- Treat any failure of those four conditions as a no-go
+
+#### Validation Performed
+
+- ✅ All four conditions verified in current layout
+- ✅ Workspace panel confirmed left at 1024px+
+- ✅ Three.js viewer confirmed right and fully rendered
+- ✅ Resize handle visible and functional
+- ✅ Workspace scroll independent from viewer
+- ✅ No regressions (143 tests baseline maintained)
+
+#### Verdict
+
+**APPROVED** ✅
+
+Bishop's CSS fixes satisfy all four must-pass conditions. Layout recovery is complete and locked.
+
+---
+
+### Decision: Hicks — Import + Results Revision Batch Review
+
+**Author:** Hicks | **Date:** 2026-03-17 | **Status:** APPROVED ✅
+
+#### Scope
+
+Final review of the second-machine fixes batch:
+- Parker's import-flow recovery (two-step client flow)
+- Ripley's Results split recovery (900px breakpoint recalibration)
+- Bishop's Results viewer layout repair (grid row fix)
+
+#### Verdict
+
+**APPROVED** ✅
+
+#### Why
+
+- **Import flow:** Follows the two-step desktop path; native picker first, then `importFile` with the selected path carried through on first attempt. Desktop bridge keeps dialog calls serialized, reuses the chosen file path, posts response back on WebView dispatcher thread.
+- **Results layout:** Workspace left, splitter center, viewer right at desktop widths; splitter visibly grabbable and functional; workspace panel keeps own scroll container with sticky tabs.
+- **Viewer repair:** Grid template accommodates all three SheetViewer children; Three.js canvas gets explicit height through `1fr` allocation; min-height constraint ensures proper grid shrinking.
+- **Regression safety:** Focused revision coverage exists in `ImportResultsRevisionGateSpecs`, `ImportBridgeSpecs`, `NativeFileDialogServiceSpecs`; 143 tests baseline maintained.
+
+#### Evidence
+
+- ✅ Desktop tests passing: `dotnet test tests\PanelNester.Desktop.Tests\PanelNester.Desktop.Tests.csproj --no-restore`
+- ✅ Service tests passing: `dotnet test tests\PanelNester.Services.Tests\PanelNester.Services.Tests.csproj --no-restore`
+- ✅ WebUI build green
+- ✅ No blocking regressions in baseline
+
+#### Status
+
+All three decisions in this batch are approved and locked. Scribe tasks: merge to active decisions, delete inbox files, update agent histories, commit to git.
+
+---
+
 ## Maximize Clipping Fix — Host Content Inset
 
 **Author:** Bishop | **Date:** 2026-03-15 | **Status:** Approved ✅

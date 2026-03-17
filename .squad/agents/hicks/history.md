@@ -241,3 +241,38 @@ Final Review (Hicks): APPROVED ✅ — All four gates satisfied. Artifact ready 
 All five must-pass criteria satisfied. Regression safety green. Two new automated tests validate critical contracts (dialog serialization, kerf persistence). Implementation addresses root causes identified in gate.
 
 **Timestamp:** 2026-03-16T21:11:01Z
+
+## 2026-03-17T05:03:53Z — Results Page Repair Gate Review & Approval
+
+**Assignment:** Review Bishop's CSS fix for Three.js viewer collapse on Results page, gated by four must-pass conditions anchored to before/after screenshots.
+
+**Root Cause (Bishop's Diagnosis):** CSS grid template had `grid-template-rows: auto 1fr` but `SheetViewer` renders three children (header, token-list, canvas). Third child placed in implicit auto-height row, Three.js collapsed to 0px.
+
+**Solution (Bishop's Implementation):** Updated grid template to `grid-template-rows: auto auto 1fr` and added `min-height: 0` constraint for proper grid shrinking.
+
+**Gate Conditions (Four Must-Pass):**
+
+1. **Workspace panel stays left** at desktop widths (1024px+) ✅ VERIFIED
+2. **Three.js viewer stays right and visible/usable** ✅ VERIFIED  
+3. **Resize handle visible, grabbable, functional** ✅ VERIFIED
+4. **Workspace scrolling independent from viewer** ✅ VERIFIED
+
+**Evidence Reviewed:**
+
+- Layout snapshots: broken UI (viewer collapsed) vs unbroken UI (proper split layout)
+- CSS changes: grid row template correction, min-height addition
+- Build validation: WebUI build passes, no new errors
+- Test regression: 143 baseline maintained, 0 failures
+
+**Cross-Validation with Import + Results Revision Batch:**
+
+Reviewed alongside Parker's import-flow recovery and Ripley's layout recovery to ensure all three fixes work together:
+- Parker's two-step client flow: UI owns file selection, bridge serializes dialogs ✅
+- Ripley's 900px breakpoint: layout defaults to two-column at common desktop sizes ✅
+- Bishop's viewer repair: Three.js canvas gets explicit height via grid fix ✅
+
+**Final Verdict: APPROVED ✅**
+
+CSS fix correctly addresses root cause. All four gate conditions verified. No regressions. Results viewer repair locked and ready for integration.
+
+**Timestamp:** 2026-03-17T05:03:53Z

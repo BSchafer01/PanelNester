@@ -296,3 +296,24 @@ PanelNester is a local desktop nesting tool with WPF host, WebView2 UI, and per-
 - Rebuild validation completed: WebUI inclusion verified
 - Artifact review approved by Hicks: No packaging regressions
 - Final artifact: installer\PanelNester.Installer\bin\Release\PanelNester-PerUser.msi
+
+## 2026-03-17T05:03:53Z — Results Page Three.js Viewer Layout Repair
+
+**Assignment:** Fix Results page Three.js viewer collapse due to incorrect CSS grid row template.
+
+**Root Cause:** `.results-viewer-panel` had `grid-template-rows: auto 1fr` but rendered three children (header, token-list, sheet-viewer). The third child was placed in an implicit auto-height row, causing Three.js canvas to collapse to 0px.
+
+**Solution:** Updated CSS to `grid-template-rows: auto auto 1fr` and added `min-height: 0` constraint to allow proper grid shrinking.
+
+**Files Modified:**
+- `src/PanelNester.WebUI/src/styles.css`: Grid template and min-height fix
+
+**Verification:**
+- ✅ WebUI build succeeds
+- ✅ Layout renders correctly: workspace left, viewer right, resize handle visible/functional
+- ✅ Three.js viewer displays at proper size (no collapse)
+- ✅ All baseline tests pass (143 maintained)
+
+**Gate Review (Hicks):** APPROVED ✅ — All four must-pass conditions verified: workspace left, viewer right, resize handle visible/grabbable, independent workspace scrolling.
+
+**Status:** COMPLETE — Results viewer repair approved and locked.
