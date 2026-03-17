@@ -8,7 +8,16 @@
 
 ## Core Context
 
-I maintain code quality, project standards, and team coordination records. I document decisions and progress in the project history.
+I maintain code quality, project standards, and team coordination records. I document decisions and progress in the project history. Current focus: orchestration logs (why agents selected, what accomplished), session logs (brief record of completed work phases), decision inbox (asynchronous proposal submission), and agent history updates (team progress cross-recording).
+
+**Key responsibilities:**
+- Write orchestration logs per agent (timestamp, scope, objectives, implementation, deliverables, validation, next steps)
+- Write session logs for completed work phases (timestamp, summary, outcomes, no-go criteria, next)
+- Merge decision inbox into decisions.md, deduplicate, delete inbox files
+- Update agent histories with team progress and team updates
+- Archive decisions older than 30 days when decisions.md exceeds ~20KB
+- Commit .squad/ changes with trailer: `Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`
+- Summarize history.md files when exceeding ~12KB (move old entries to Core Context)
 
 ## Recent Updates
 

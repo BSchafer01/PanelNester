@@ -7,7 +7,7 @@
 - **Stack:** C#/.NET desktop host, WPF shell, WebView2 UI, React + TypeScript web app, Three.js viewer, local JSON/SQLite persistence, CsvHelper/ClosedXML import, QuestPDF reporting
 - **Description:** Local desktop tool for importing rectangular parts, nesting them by material, visualizing sheet layouts, and exporting PDF summaries.
 
-## Core Context — Phases 0–6 Complete
+## Core Context — Phases 0–6 Complete + Results Repair
 
 I own acceptance criteria, regression coverage, and reviewer verdicts for the full product. Spec-first test scaffolding strategy (one runnable smoke/contract test per seam, skipped integration tests with explicit blockers) has been applied across all phases. Cross-layer review gates require shared contract names, a dispatcher-backed round-trip through real seams, and live results consumption.
 
@@ -19,6 +19,7 @@ I own acceptance criteria, regression coverage, and reviewer verdicts for the fu
 - **Phase 5:** Results viewer & PDF reporting gates (rendering fidelity, PDF accuracy, multi-material determinism, export reliability); 110 tests (after Ripley revision + follow-up + bugfix batch)
 - **Phase 6:** Hardening & smoke verification (empty-result export, dense-layout readability, viewer edge cases, bridge error surfaces); 127 tests (125 passed, 2 skipped)
 - **Recent Batches:** FlatBuffers migration, UI cleanup, Import page cleanup, Material/Results page cleanup, Maximize clipping fix, Per-user MSI packaging, Stock-width nesting preference
+- **Current (2026-03-17T05:03:53Z):** Results viewer repair approval — Bishop fixed CSS grid row template (`auto 1fr` → `auto auto 1fr`). Approved against four gate conditions: workspace left ✅, viewer right ✅, resize handle visible/grabbable ✅, independent workspace scrolling ✅. Test baseline: 143 passing, 0 regressions.
 
 **Key Learnings:**
 - Spec-first scaffolding works with one runnable smoke/contract test per seam and explicit blockers for skipped tests
@@ -33,6 +34,7 @@ I own acceptance criteria, regression coverage, and reviewer verdicts for the fu
 - Viewer `resetViewToken` cleanly separates "same sheet, resize" from "different sheet, re-center"
 - Dialog serialization via SemaphoreSlim prevents rapid cancel/retry race conditions
 - Bridge proposal reversal: replaced proposed `update-window-title` message with WebView2's native `DocumentTitleChanged` event (smaller vocabulary, existing infrastructure, single source of truth)
+- CSS grid layout requires explicit row allocation for all children; Three.js renderer expects container height for proper canvas initialization
 
 ## Recent Work (2026-03-15)
 

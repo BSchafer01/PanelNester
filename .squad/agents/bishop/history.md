@@ -2,13 +2,13 @@
 
 PanelNester is a local desktop nesting tool with WPF host, WebView2 UI, and per-user MSI distribution. Bishop owns desktop bridge integration.
 
-**Key deliverables:** Phase 0–5 bridge contracts (import, materials, projects, nesting, PDF export); Phase 6 error messaging; single-file MSI packaging with WebUI integration; app icon branding; rebuild validation procedures.
+**Key deliverables:** Phase 0–5 bridge contracts (import, materials, projects, nesting, PDF export); Phase 6 error messaging; single-file MSI packaging with WebUI integration; app icon branding; rebuild validation procedures; results viewer layout repair.
 
-**Current status:** All phases delivered and approved. Most recent work: MSI rebuild validation (2026-03-16T01:36:09Z) — WebUI inclusion verified through dist file comparison and MSI File table query. Final artifact: installer\PanelNester.Installer\bin\Release\PanelNester-PerUser.msi. **New assignment (2026-03-17T04:04:02Z):** Second machine fixes — file dialog first-try failure fix implemented (dispatcher marshaling, service init timing). Threading issues resolved. Tests passing; manual validation recommended.
+**Current status:** All phases delivered and approved. Most recent work (2026-03-17T05:03:53Z): Results page Three.js viewer layout repair — fixed CSS grid row template from `auto 1fr` to `auto auto 1fr` and added min-height constraint. Viewer was collapsing to 0px because SheetViewer renders three children but grid template only defined two rows. Solution ensures Three.js canvas gets explicit height via `1fr` allocation. Hicks approved against four gate conditions: workspace left ✅, viewer right ✅, resize handle visible/grabbable ✅, independent workspace scrolling ✅.
 
-**Key learnings:** Per-user WiX flow (repo-owned, .NET 8, embedded CAB); WebView2 title sync via DocumentTitleChanged; error messages split (technical vs user-facing); dialog marshalling for reliability; icon reuse across desktop/installer.
+**Key learnings:** Per-user WiX flow (repo-owned, .NET 8, embedded CAB); WebView2 title sync via DocumentTitleChanged; error messages split (technical vs user-facing); dialog marshalling for reliability; icon reuse across desktop/installer; CSS grid layout requires explicit row allocation for all children when Three.js renderer expects container height.
 
----
+------
 # Bishop History
 
 ## Project Context
