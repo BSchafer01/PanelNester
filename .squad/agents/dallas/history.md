@@ -42,6 +42,8 @@ PanelNester WebUI built with React + TypeScript. Dallas owns UI flows, component
 
 - 2026-03-17T20:37:36Z: **IMPORT PAGE PERFORMANCE OPTIMIZATION COMPLETE.** Paginated large row table when filtered result set exceeds selected page size. Default 250 rows/page with 100/250/500 options; explicit page navigation controls. Preserved all existing filter/sort/edit flows and inline delete behavior. For small imports (filtered set < page size), renders as single table. Consolidated memoized passes avoid repeated row-summary scans across large datasets. Stress-tested with 7,500-row workbook. WebUI build passed. Ready for manual validation: import large workbook in live app, toggle import tab repeatedly, confirm responsiveness vs. prior build.
 
+- 2026-03-18T15:21:19Z: **MATERIALS-RECONNECT LAYOUT SLICE APPROVED.** Moved reconnect/retry action out of Import page into app-level chrome (visible only on bridge disconnect). Materials page: hid passive loaded-status copy, moved Refresh into library heading, removed redundant top-level New button (create editor remains available). Targeted desktop revision-gate suite passed. WebUI production build passed. Manual validation pending: launch app and confirm reconnect appears only in top chrome on disconnect/failure; verify Materials page layout matches requested screenshot.
+
 ## Phase 2 Scope (Material Library UI)
 
 **Ownership:** Dallas (WebUI layer)
