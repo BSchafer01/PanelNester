@@ -348,3 +348,7 @@ PanelNester is a local desktop nesting tool with WPF host, WebView2 UI, and per-
 **Gate Review (Hicks):** APPROVED ✅ — All four must-pass conditions verified: workspace left, viewer right, resize handle visible/grabbable, independent workspace scrolling.
 
 **Status:** COMPLETE — Results viewer repair approved and locked.
+
+## Learnings
+
+- 2026-03-18: Material library relocation should stay on the existing `JsonMaterialRepository` seam: let the WebUI send an empty `choose-material-library-location` request, have the desktop bridge open the native `.json` save picker with overwrite prompt disabled, and serialize `MaterialLibraryLocation` to the web contract names (`currentPath`, `defaultPath`, `usingDefaultLocation`). Key files: `src\PanelNester.Desktop\Bridge\DesktopBridgeRegistration.cs`, `src\PanelNester.Desktop\Bridge\BridgeContracts.cs`, `src\PanelNester.Domain\Models\MaterialLibraryLocation.cs`, `src\PanelNester.Services\Materials\JsonMaterialRepository.cs`.

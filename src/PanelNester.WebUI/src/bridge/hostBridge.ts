@@ -5,6 +5,8 @@ import {
   type BridgeHandshakeResponse,
   type BridgeMessage,
   type CreateMaterialRequest,
+  type ChooseMaterialLibraryLocationRequest,
+  type ChooseMaterialLibraryLocationResponse,
   type DeletePartRowRequest,
   type DeleteMaterialRequest,
   type DeleteMaterialResponse,
@@ -28,6 +30,8 @@ import {
   type OpenFileDialogResponse,
   type OpenProjectRequest,
   type ProjectOperationResponse,
+  type RestoreDefaultMaterialLibraryLocationRequest,
+  type RestoreDefaultMaterialLibraryLocationResponse,
   type SaveProjectAsRequest,
   type SaveProjectRequest,
   type UpdatePartRowRequest,
@@ -210,6 +214,20 @@ class HostBridgeClient {
     return this.invoke<ListMaterialsResponse>(
       bridgeMessageTypes.listMaterials,
       {} satisfies ListMaterialsRequest,
+    );
+  }
+
+  chooseMaterialLibraryLocation(): Promise<ChooseMaterialLibraryLocationResponse> {
+    return this.invoke<ChooseMaterialLibraryLocationResponse>(
+      bridgeMessageTypes.chooseMaterialLibraryLocation,
+      {} satisfies ChooseMaterialLibraryLocationRequest,
+    );
+  }
+
+  restoreDefaultMaterialLibraryLocation(): Promise<RestoreDefaultMaterialLibraryLocationResponse> {
+    return this.invoke<RestoreDefaultMaterialLibraryLocationResponse>(
+      bridgeMessageTypes.restoreDefaultMaterialLibraryLocation,
+      {} satisfies RestoreDefaultMaterialLibraryLocationRequest,
     );
   }
 

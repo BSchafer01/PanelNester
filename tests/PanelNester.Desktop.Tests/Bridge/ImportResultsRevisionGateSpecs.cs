@@ -58,6 +58,230 @@ public sealed class ImportResultsRevisionGateSpecs
     }
 
     [Fact]
+    public void Webui_nest_placement_contract_keeps_optional_group_metadata_across_results_and_report_shapes()
+    {
+        var contracts = Normalize(ReadRepositoryText("src", "PanelNester.WebUI", "src", "types", "contracts.ts"));
+
+        AssertContains(
+            contracts,
+            """
+            export interface NestPlacement {
+              placementId: string;
+              sheetId: string;
+              partId: string;
+              group?: string | null;
+            """);
+        AssertContains(
+            contracts,
+            """
+            export interface NestResponse {
+              success: boolean;
+              sheets: NestSheet[];
+              placements: NestPlacement[];
+            """);
+        AssertContains(
+            contracts,
+            """
+            export interface ReportSheetDiagram {
+              sheetId: string;
+              sheetNumber: number;
+              sheetLength: number;
+              sheetWidth: number;
+              utilizationPercent: number;
+              placements: NestPlacement[];
+            }
+            """);
+    }
+
+    [Fact]
+    public void Results_page_large_import_group_review_is_driven_by_nesting_payloads_not_full_import_rows()
+    {
+        var resultsPage = Normalize(ReadRepositoryText("src", "PanelNester.WebUI", "src", "pages", "ResultsPage.tsx"));
+
+        Assert.DoesNotContain("  PartRow,", resultsPage);
+        Assert.DoesNotContain("  parts: PartRow[];", resultsPage);
+        Assert.DoesNotContain("function getBasePartId(", resultsPage);
+        Assert.DoesNotContain("function buildPlacementGroupLookup(", resultsPage);
+        Assert.DoesNotContain("const activeMaterialParts = useMemo(", resultsPage);
+        Assert.DoesNotContain("const activeMaterialPlacementGroups = useMemo(", resultsPage);
+
+        Assert.Contains("const hasGroupedPlacements = useMemo(", resultsPage);
+        Assert.Contains("result.response.placements.some((placement) => normalizeGroup(placement.group) !== null),", resultsPage);
+        Assert.Contains("const activeMaterialPlacements = useMemo(", resultsPage);
+        Assert.Contains("() => (activeMaterialResult ? decoratePlacements(activeMaterialResult.response.placements) : []),", resultsPage);
+        Assert.Contains("() => buildGroupSummaries(activeMaterialPlacements),", resultsPage);
+    }
+
+    [Fact]
+    public void App_results_route_does_not_forward_large_import_rows_into_the_results_page()
+    {
+        var app = Normalize(ReadRepositoryText("src", "PanelNester.WebUI", "src", "App.tsx"));
+
+        Assert.Contains("<ResultsPage", app);
+        Assert.Contains("nestResponse={state.nestResponse}", app);
+        Assert.Contains("batchNestResponse={state.batchNestResponse}", app);
+        Assert.DoesNotContain("parts={state.importResponse.parts}", app);
+    }
+
+    [Fact]
+    public void Reconnect_control_lives_in_app_chrome_and_not_on_the_import_page()
+    {
+        var app = Normalize(ReadRepositoryText("src", "PanelNester.WebUI", "src", "App.tsx"));
+        var appShell = Normalize(ReadRepositoryText("src", "PanelNester.WebUI", "src", "components", "AppShell.tsx"));
+        var importPage = Normalize(ReadRepositoryText("src", "PanelNester.WebUI", "src", "pages", "ImportPage.tsx"));
+        var styles = Normalize(ReadRepositoryText("src", "PanelNester.WebUI", "src", "styles.css"));
+
+        Assert.Contains("bridgeConnected={state.bridge.connected}", app);
+        Assert.Contains("bridgeStatusMessage={", app);
+        Assert.Contains("onReconnect={retryHandshake}", app);
+        Assert.DoesNotContain("onRetryHandshake={retryHandshake}", app);
+
+        Assert.Contains("bridgeConnected: boolean;", appShell);
+        Assert.Contains("bridgeStatusMessage?: string;", appShell);
+        Assert.Contains("const [reconnectBusy, setReconnectBusy] = useState(false);", appShell);
+        Assert.Contains("!bridgeConnected ? (", appShell);
+        Assert.Contains("title={bridgeStatusMessage ?? 'Desktop host connection unavailable.'}", appShell);
+        Assert.Contains("{reconnectBusy ? 'Reconnecting…' : 'Reconnect'}", appShell);
+
+        Assert.DoesNotContain("onRetryHandshake", importPage);
+        Assert.DoesNotContain(">Retry<", importPage);
+
+        Assert.Contains(".app-shell__header-actions {", styles);
+        Assert.Contains(".app-shell__reconnect-button {", styles);
+    }
+
+    [Fact]
+    public void Materials_page_keeps_refresh_in_the_library_header_and_hides_passive_loaded_status_copy()
+    {
+        var materialsPage = Normalize(ReadRepositoryText("src", "PanelNester.WebUI", "src", "pages", "MaterialsPage.tsx"));
+
+        Assert.Contains("function shouldShowMaterialsStatus(message: string): boolean {", materialsPage);
+        Assert.Contains("!normalized.startsWith('loaded ')", materialsPage);
+        Assert.Contains("!normalized.startsWith('material library synced')", materialsPage);
+        Assert.Contains("shouldShowMaterialsStatus(materialsMessage)", materialsPage);
+        Assert.Contains("<h2>Reusable material library</h2>", materialsPage);
+        Assert.Contains("const handleRefreshMaterials = () => {", materialsPage);
+        Assert.Contains("onClick={handleRefreshMaterials}", materialsPage);
+        Assert.DoesNotContain("New material", materialsPage);
+        Assert.DoesNotContain("{materialsBusy ? 'Refreshing…' : 'Refresh'}", materialsPage);
+
+        var libraryHeadingIndex = materialsPage.IndexOf("<p className=\"eyebrow\">Library</p>", StringComparison.Ordinal);
+        var refreshButtonIndex = materialsPage.IndexOf("onClick={handleRefreshMaterials}", StringComparison.Ordinal);
+
+        Assert.True(libraryHeadingIndex >= 0, "The material library heading should exist.");
+        Assert.True(refreshButtonIndex > libraryHeadingIndex, "Refresh should be attached to the material library heading area.");
+    }
+
+    [Fact]
+    public void Materials_page_threads_library_location_state_and_repoint_actions_through_app_and_bridge_contracts()
+    {
+        var app = Normalize(ReadRepositoryText("src", "PanelNester.WebUI", "src", "App.tsx"));
+        var materialsPage = Normalize(ReadRepositoryText("src", "PanelNester.WebUI", "src", "pages", "MaterialsPage.tsx"));
+        var hostBridge = Normalize(ReadRepositoryText("src", "PanelNester.WebUI", "src", "bridge", "hostBridge.ts"));
+        var contracts = Normalize(ReadRepositoryText("src", "PanelNester.WebUI", "src", "types", "contracts.ts"));
+        var styles = Normalize(ReadRepositoryText("src", "PanelNester.WebUI", "src", "styles.css"));
+
+        Assert.Contains("materialLibraryLocation={state.materialLibraryLocation}", app);
+        Assert.Contains("bridgeMessageTypes.chooseMaterialLibraryLocation", app);
+        Assert.Contains("bridgeMessageTypes.restoreDefaultMaterialLibraryLocation", app);
+        Assert.Contains("onChooseMaterialLibraryLocation={chooseMaterialLibraryLocation}", app);
+        Assert.Contains("onRestoreDefaultMaterialLibraryLocation={", app);
+
+        Assert.Contains("materialLibraryLocation?: MaterialLibraryLocation | null;", materialsPage);
+        Assert.Contains("canChooseMaterialLibraryLocation: boolean;", materialsPage);
+        Assert.Contains("canRestoreDefaultMaterialLibraryLocation: boolean;", materialsPage);
+        Assert.Contains("className=\"library-location-card\"", materialsPage);
+        Assert.Contains("Choose location…", materialsPage);
+        Assert.Contains("Restore default", materialsPage);
+
+        Assert.Contains("chooseMaterialLibraryLocation(): Promise<ChooseMaterialLibraryLocationResponse>", hostBridge);
+        Assert.Contains("restoreDefaultMaterialLibraryLocation(): Promise<RestoreDefaultMaterialLibraryLocationResponse>", hostBridge);
+
+        Assert.Contains("chooseMaterialLibraryLocation: 'choose-material-library-location'", contracts);
+        Assert.Contains("'restore-default-material-library-location'", contracts);
+        Assert.Contains("export interface MaterialLibraryLocation {", contracts);
+
+        Assert.Contains(".library-location-card {", styles);
+        Assert.Contains(".library-location-actions {", styles);
+    }
+
+    [Fact]
+    public void Import_page_manual_add_material_field_uses_material_library_combobox_suggestions()
+    {
+        var app = Normalize(ReadRepositoryText("src", "PanelNester.WebUI", "src", "App.tsx"));
+        var importPage = Normalize(ReadRepositoryText("src", "PanelNester.WebUI", "src", "pages", "ImportPage.tsx"));
+        var materialCombobox = Normalize(ReadRepositoryText("src", "PanelNester.WebUI", "src", "components", "MaterialCombobox.tsx"));
+
+        Assert.Contains("materials={state.materials}", app);
+        Assert.Contains("import { MaterialCombobox } from '../components/MaterialCombobox';", importPage);
+        Assert.Contains("const manualAddMaterialComboboxId = 'import-manual-add-material';", importPage);
+        Assert.Contains("const materialLibraryNames = useMemo(", importPage);
+        Assert.Contains(".map((material) => material.name.trim())", importPage);
+        Assert.Contains(".filter((name) => name.length > 0)", importPage);
+        Assert.Contains("[materials],", importPage);
+        Assert.Contains("<span>Material</span>", importPage);
+        Assert.Contains("inputId={manualAddMaterialComboboxId}", importPage);
+        Assert.Contains("materials={materialLibraryNames}", importPage);
+        Assert.Contains("value={addDraft.materialName ?? ''}", importPage);
+
+        AssertContains(
+            materialCombobox,
+            """
+            interface MaterialComboboxProps {
+              inputId: string;
+              value: string;
+              materials: string[];
+              onChange: (value: string) => void;
+              disabled?: boolean;
+            }
+            """);
+        Assert.Contains("role=\"combobox\"", materialCombobox);
+        Assert.Contains("role=\"listbox\"", materialCombobox);
+        Assert.Contains("role=\"option\"", materialCombobox);
+        Assert.Contains("aria-haspopup=\"listbox\"", materialCombobox);
+        Assert.Contains("aria-expanded={showSuggestions}", materialCombobox);
+        Assert.Contains("autoComplete=\"off\"", materialCombobox);
+        Assert.Contains("visibleOptions.map((materialName, index) => {", materialCombobox);
+        Assert.Contains("commitSelection(visibleOptions[activeIndex]);", materialCombobox);
+    }
+
+    [Fact]
+    public void Material_combobox_styles_keep_manual_add_suggestions_attached_to_the_field()
+    {
+        var styles = Normalize(ReadRepositoryText("src", "PanelNester.WebUI", "src", "styles.css"));
+
+        AssertContains(
+            styles,
+            """
+            .material-combobox {
+              position: relative;
+            }
+            """);
+        AssertContains(
+            styles,
+            """
+            .material-combobox__list {
+              position: absolute;
+              top: calc(100% + 4px);
+              left: 0;
+              right: 0;
+            """);
+        Assert.Contains("  z-index: 2;", styles);
+        Assert.Contains("  max-height: 240px;", styles);
+        Assert.Contains("  overflow-y: auto;", styles);
+        Assert.Contains("  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.32);", styles);
+        AssertContains(
+            styles,
+            """
+            .material-combobox__option:hover,
+            .material-combobox__option--active {
+              background: rgba(0, 122, 204, 0.18);
+              color: var(--vsc-text-bright);
+            }
+            """);
+    }
+
+    [Fact]
     public void Results_page_markup_keeps_workspace_then_splitter_then_viewer()
     {
         var resultsPage = ReadRepositoryText("src", "PanelNester.WebUI", "src", "pages", "ResultsPage.tsx");
@@ -287,24 +511,28 @@ public sealed class ImportResultsRevisionGateSpecs
     [Fact]
     public void Results_page_only_adds_group_review_when_placements_expose_group_data()
     {
+        var contracts = ReadRepositoryText("src", "PanelNester.WebUI", "src", "types", "contracts.ts");
         var resultsPage = ReadRepositoryText("src", "PanelNester.WebUI", "src", "pages", "ResultsPage.tsx");
-        var app = ReadRepositoryText("src", "PanelNester.WebUI", "src", "App.tsx");
 
-        Assert.Contains("const hasGroupedParts = useMemo(", resultsPage);
+        Assert.Contains("group?: string | null;", contracts);
+        Assert.Contains("const hasGroupedPlacements = useMemo(", resultsPage);
+        Assert.Contains("normalizeGroup(placement.group) !== null", resultsPage);
         Assert.Contains("{ id: 'group-review', label: 'Review by group' },", resultsPage);
         Assert.Contains("const activeMaterialGroupSummaries = useMemo(", resultsPage);
         Assert.Contains("No grouped panels in the active material result", resultsPage);
         Assert.Contains("<th>Group</th>", resultsPage);
         Assert.Contains("{selectedPlacement.displayGroup}", resultsPage);
         Assert.Contains("<td>{placement.displayGroup}</td>", resultsPage);
-        Assert.Contains("parts={state.importResponse.parts}", app);
+        Assert.Contains("function decoratePlacements(placements: NestPlacement[]): ResultsPlacement[] {", resultsPage);
     }
 
     [Fact]
     public void Sheet_viewer_keeps_mixed_group_sheets_dimmed_outside_the_active_group_and_shows_group_hover_details()
     {
-        var sheetViewer = ReadRepositoryText("src", "PanelNester.WebUI", "src", "components", "SheetViewer.tsx");
+        var sheetViewer = Normalize(ReadRepositoryText("src", "PanelNester.WebUI", "src", "components", "SheetViewer.tsx"));
 
+        Assert.Contains("interface SheetViewerPlacement extends NestPlacement {", sheetViewer);
+        Assert.DoesNotContain("  group?: string | null;", sheetViewer);
         Assert.Contains("activeGroup?: string;", sheetViewer);
         Assert.Contains("activeGroupLabel?: string;", sheetViewer);
         Assert.Contains("const hasActiveGroup = activeGroupRef.current !== undefined;", sheetViewer);

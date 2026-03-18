@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text.Json;
 using PanelNester.Desktop.Bridge;
+using PanelNester.Desktop.Tests.Specifications;
 using PanelNester.Domain.Contracts;
 using PanelNester.Domain.Models;
 using PanelNester.Services.Import;
@@ -41,7 +42,8 @@ public sealed class BridgeHandshakeSpecs
             new StubImportService(),
             new PartEditorService(DemoMaterialCatalog.All),
             new StubNestingService(),
-            () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true));
+            () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true),
+            new StubMaterialLibraryLocationService());
         var request = new BridgeMessageEnvelope(
             BridgeMessageTypes.BridgeHandshake,
             "req-handshake-001",
@@ -54,6 +56,8 @@ public sealed class BridgeHandshakeSpecs
                         BridgeMessageTypes.OpenFileDialog,
                         BridgeMessageTypes.ImportCsv,
                         BridgeMessageTypes.ListMaterials,
+                        Phase02BridgeExpectations.MaterialMessageTypes[1],
+                        Phase02BridgeExpectations.MaterialMessageTypes[2],
                         BridgeMessageTypes.RunNesting
                     ]),
                 SerializerOptions));
@@ -70,6 +74,8 @@ public sealed class BridgeHandshakeSpecs
         Assert.Equal("PanelNester Desktop Host", payload.HostName);
         Assert.Equal("webview2", payload.BridgeMode);
         Assert.Contains(BridgeMessageTypes.ListMaterials, payload.Capabilities);
+        Assert.Contains(Phase02BridgeExpectations.MaterialMessageTypes[1], payload.Capabilities);
+        Assert.Contains(Phase02BridgeExpectations.MaterialMessageTypes[2], payload.Capabilities);
         Assert.Contains(BridgeMessageTypes.RunNesting, payload.Capabilities);
     }
 
@@ -151,5 +157,25 @@ public sealed class BridgeHandshakeSpecs
     {
         public Task<NestResponse> NestAsync(NestRequest request, CancellationToken cancellationToken = default) =>
             Task.FromResult(new NestResponse { Success = true });
+    }
+
+    private sealed class StubMaterialLibraryLocationService : IMaterialLibraryLocationService
+    {
+        public Task<MaterialLibraryLocation> GetLocationAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(CreateLocation());
+
+        public Task<MaterialLibraryLocation> RepointAsync(string filePath, CancellationToken cancellationToken = default) =>
+            Task.FromResult(CreateLocation());
+
+        public Task<MaterialLibraryLocation> RestoreDefaultAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(CreateLocation());
+
+        private static MaterialLibraryLocation CreateLocation() =>
+            new()
+            {
+                ActiveFilePath = @"C:\mock\materials.json",
+                DefaultFilePath = @"C:\mock\materials.json",
+                UsesDefaultLocation = true
+            };
     }
 }

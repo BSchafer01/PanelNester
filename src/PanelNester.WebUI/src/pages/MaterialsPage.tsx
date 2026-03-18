@@ -3,15 +3,21 @@ import type {
   ImportResponse,
   Material,
   MaterialDraft,
+  MaterialLibraryLocation,
 } from '../types/contracts';
 
 interface MaterialsPageProps {
   materials: Material[];
+  materialLibraryLocation?: MaterialLibraryLocation | null;
   selectedMaterialId?: string;
   importResponse: ImportResponse;
   materialsBusy: boolean;
   materialsMessage: string;
+  canChooseMaterialLibraryLocation: boolean;
+  canRestoreDefaultMaterialLibraryLocation: boolean;
   onRefreshMaterials: () => Promise<void>;
+  onChooseMaterialLibraryLocation: () => Promise<void>;
+  onRestoreDefaultMaterialLibraryLocation: () => Promise<void>;
   onSelectMaterial: (materialId: string) => void;
   onLoadMaterial: (materialId: string) => Promise<Material>;
   onCreateMaterial: (draft: MaterialDraft) => Promise<Material>;
@@ -95,13 +101,30 @@ function formatCost(costPerSheet?: number | null): string {
   return costPerSheet == null ? '—' : `$${costPerSheet.toFixed(2)}`;
 }
 
+function shouldShowMaterialsStatus(message: string): boolean {
+  const normalized = message.trim().toLowerCase();
+  if (normalized.length === 0) {
+    return false;
+  }
+
+  return (
+    !normalized.startsWith('loaded ') &&
+    !normalized.startsWith('material library synced')
+  );
+}
+
 export function MaterialsPage({
   materials,
+  materialLibraryLocation,
   selectedMaterialId,
   importResponse,
   materialsBusy,
   materialsMessage,
+  canChooseMaterialLibraryLocation,
+  canRestoreDefaultMaterialLibraryLocation,
   onRefreshMaterials,
+  onChooseMaterialLibraryLocation,
+  onRestoreDefaultMaterialLibraryLocation,
   onSelectMaterial,
   onLoadMaterial,
   onCreateMaterial,
@@ -120,6 +143,16 @@ export function MaterialsPage({
       .map((part) => part.materialName.trim())
       .filter((name) => name.length > 0),
   );
+  const currentLibraryPath = materialLibraryLocation?.currentPath?.trim();
+  const defaultLibraryPath = materialLibraryLocation?.defaultPath?.trim();
+  const usingDefaultLocation = materialLibraryLocation?.usingDefaultLocation ?? false;
+  const canManageLibraryLocation =
+    canChooseMaterialLibraryLocation || canRestoreDefaultMaterialLibraryLocation;
+  const locationStatusLabel = currentLibraryPath
+    ? usingDefaultLocation
+      ? 'Default location'
+      : 'Custom location'
+    : 'Location pending';
 
   useEffect(() => {
     if (
@@ -219,6 +252,26 @@ export function MaterialsPage({
     }
   };
 
+  const handleRestoreDefaultLocation = () => {
+    if (
+      !window.confirm(
+        'Restore the default material library location? PanelNester will point back to the standard materials.json file and recreate it there if needed.',
+      )
+    ) {
+      return;
+    }
+
+    void onRestoreDefaultMaterialLibraryLocation().catch(() => undefined);
+  };
+
+  const handleRefreshMaterials = () => {
+    void onRefreshMaterials().catch(() => undefined);
+  };
+
+  const handleChooseMaterialLibraryLocation = () => {
+    void onChooseMaterialLibraryLocation().catch(() => undefined);
+  };
+
   return (
     <div className="page-grid">
       <section className="panel">
@@ -227,27 +280,11 @@ export function MaterialsPage({
             <p className="eyebrow">Materials</p>
             <h2>Reusable material library</h2>
           </div>
-          <div className="button-row">
-            <button
-              className="secondary-button"
-              disabled={materialsBusy}
-              onClick={() => void onRefreshMaterials()}
-              type="button"
-            >
-              Refresh
-            </button>
-            <button
-              className="primary-button"
-              disabled={editorBusy}
-              onClick={handleCreateNew}
-              type="button"
-            >
-              New material
-            </button>
-          </div>
         </div>
 
-        <p className="muted">{materialsMessage}</p>
+        {shouldShowMaterialsStatus(materialsMessage) ? (
+          <p className="muted">{materialsMessage}</p>
+        ) : null}
 
         <div className="stats-grid">
           <article className="stat-card">
@@ -394,8 +431,85 @@ export function MaterialsPage({
       </section>
 
       <section className="panel">
-        <p className="eyebrow">Library</p>
-        <h3>Current materials</h3>
+        <div className="section-header">
+          <div>
+            <p className="eyebrow">Library</p>
+            <h3>Current materials</h3>
+          </div>
+        </div>
+        <div className="library-location-card">
+          <div className="library-location-card__header">
+            <div className="row-stack">
+              <span>Library file</span>
+              <strong>{locationStatusLabel}</strong>
+            </div>
+            {currentLibraryPath ? (
+              <span
+                className={`status-pill ${usingDefaultLocation ? 'status-pill--ok' : 'status-pill--muted'}`}
+              >
+                {usingDefaultLocation ? 'Default' : 'Custom'}
+              </span>
+            ) : null}
+          </div>
+
+          <p className="import-path">
+            {currentLibraryPath ??
+              'Location data will appear here when the desktop host supports material library repointing.'}
+          </p>
+
+          <p className="section-note">
+            {defaultLibraryPath ? (
+              <span>
+                Restore default switches back to{' '}
+                <span className="library-location-inline-path">
+                  {defaultLibraryPath}
+                </span>{' '}
+                and recreates materials.json there if needed.
+              </span>
+            ) : (
+              'Restore default switches back to the standard materials.json file and recreates it if needed.'
+            )}
+          </p>
+
+          <div className="library-location-actions">
+            <button
+              className="secondary-button"
+              disabled={materialsBusy}
+              onClick={handleRefreshMaterials}
+              type="button"
+            >
+              Refresh
+            </button>
+            {canChooseMaterialLibraryLocation ? (
+              <button
+                className="secondary-button"
+                disabled={materialsBusy}
+                onClick={handleChooseMaterialLibraryLocation}
+                type="button"
+              >
+                Choose location…
+              </button>
+            ) : null}
+            {canRestoreDefaultMaterialLibraryLocation ? (
+              <button
+                className="secondary-button"
+                disabled={materialsBusy || usingDefaultLocation}
+                onClick={handleRestoreDefaultLocation}
+                type="button"
+              >
+                Restore default
+              </button>
+            ) : null}
+          </div>
+
+          {!canManageLibraryLocation ? (
+            <p className="section-note">
+              Location controls will light up when the connected desktop host
+              exposes this library-management capability.
+            </p>
+          ) : null}
+        </div>
+
         <p className="section-note">
           Delete is blocked while the current import or active selector still
           references a material.

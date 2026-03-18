@@ -1,5 +1,105 @@
 # Panel Nester Decisions
 
+## Decision: Material Library Relocation (Consolidated)
+
+**Consolidated from inbox:** Bishop, Hicks, Dallas, Parker, Ripley (2026-03-18)
+
+### Executive Summary
+
+Users can now repoint the active material library from the default `%LOCALAPPDATA%\PanelNester\materials.json` to a custom file location, persist that selection across app restarts, and restore the default location on demand. This involves three parallel work streams:
+
+1. **Desktop bridge alignment** (Bishop) — Host-owned native file picker via `choose-material-library-location` and `restore-default-material-library-location` messages
+2. **Service layer** (Parker + Bishop) — Path persistence in `app-settings.json` with fallback recovery; `JsonMaterialRepository` separation of explicit repointing from implicit recovery
+3. **WebUI implementation** (Dallas) — Materials page owns all relocation controls; `Refresh`, `Choose location…`, and `Restore default` in one library card; bridge `libraryLocation` treated as authoritative
+
+### Decisions
+
+#### Bishop — Desktop-Owned Material Library Chooser
+- Keep relocation on existing `JsonMaterialRepository` path-persistence seam
+- Desktop bridge owns native `SaveFileDialog` flow for choosing `.json` file
+- Bridge calls `IMaterialLibraryLocationService.RepointAsync(...)` with chosen path and returns refreshed materials + location metadata
+- Prevents duplicate state and weakens contract
+
+#### Parker — Material Library Location Recovery
+- `JsonMaterialRepository` separates **explicit user-driven repointing** from **implicit recovery**
+- `RepointAsync` normalizes path, validates/seeds file, persists override
+- Routine loads (`GetAllAsync`, CRUD reads) must **not** recreate missing custom library—fallback to canonical default, clear stored override
+- Invalid payloads surface as `InvalidDataException` for consistent bridge mapping
+- Keeps recovery deterministic; explicit repointing is intentional; implicit startup/mid-session recovery is not
+
+#### Ripley — Cross-Layer Design Review (Architecture Validated)
+- **Recommended seam:** Store active library path in `%LOCALAPPDATA%\PanelNester\app-settings.json` as separate setting (not embedded in repository)
+- Keep `DesktopStoragePaths` as read-only utility for **default** paths
+- Create focused seam for **active** path persistence; no changes to `IMaterialRepository`
+- Follows established pattern for `WebView2` user data relocation
+- Survives app updates without invalidating default path constants
+- Allows fallback: missing/corrupt settings file defaults to hardcoded path
+
+#### Dallas — Material Library Location Card Owns Refresh + Authoritative Path State
+- Keep **all library-affecting controls** inside Materials page library card: `Refresh`, `Choose location…`, `Restore default`
+- Treat bridge `libraryLocation` as **authoritative** even when null/undefined (current-path UI clears instead of stale state)
+- Disable `Restore default` when active location is already the default path
+- All material-library reload paths thread through single app-level sync helper (`App.tsx`)
+- `list-materials`, `choose-material-library-location`, `restore-default-material-library-location` all return materials[] + optional `libraryLocation`
+
+#### Dallas — Material Library Relocation UI Contract
+- WebUI contract: `chooseMaterialLibraryLocation` and `restoreDefaultMaterialLibraryLocation` remain frontend vocabulary
+- Both choose/restore requests stay **empty** on UI side—host owns picker responsibility
+- This matches operator flow already shipped in `MaterialsPage` and current review expectations
+- Do not "fix" UI by making it collect file paths; desktop bridge naming/payload ownership should be realigned deliberately before any WebUI contract change
+
+#### Hicks — Material Library Repointing Test Gate
+- **Layer 1:** Executable settings/file behavior specs in `MaterialLibraryLocationSpecs.cs`
+  - Chosen library path persists through `app-settings.json` round-trip
+  - Restore-default clears custom setting and targets canonical default
+  - Restore-default recreates default library file when missing
+- **Layer 2:** Desktop source-contract gates in `MaterialLibraryLocationRevisionGateSpecs.cs`
+  - Bridge contracts expose active library location plus repoint/restore actions
+  - `MaterialsPage.tsx` surfaces current path and two user actions
+  - Desktop host wiring routes restore-default to canonical default path
+
+#### Hicks — Relocation Review APPROVED
+- Material-library relocation slice: implementation-complete for merge review
+- Desktop bridge now exposes `choose-material-library-location` and `restore-default-material-library-location`
+- WebUI contract names match; shared `MaterialLibraryLocation` payload aliased to Web property names
+- **Evidence:** 27/27 targeted tests passed (desktop bridge specs, services specs, import results specs)
+- **Manual gate:** Live desktop pass—choose new location, restart, confirm reload; use Restore default, confirm recreation
+
+### Architecture Seam Ownership
+
+| Seam | Owner | Responsibility |
+|------|-------|-----------------|
+| **Startup path resolution** | Desktop Host (MainWindow) | Read app-settings, fallback to default |
+| **Settings persistence** | Desktop Host (AppSettings class) | R/W app-settings.json atomically |
+| **choose-library-location handler** | Desktop Host | Validate, create-if-needed, persist, error handling |
+| **restore-default-library-location handler** | Desktop Host | Clear setting, recreate default if needed |
+| **File dialog trigger** | WebUI + Bridge (existing `open-file-dialog`) | User picks file → pass to handler |
+| **UI buttons & messaging** | WebUI (Materials page) | Show current location, "Change" / "Restore" buttons |
+| **Error resolution** | Desktop Host (BridgeError resolvers) | Map codes to user messages |
+| **E2E validation** | Test suite (xUnit integration tests) | Contract verification, fallback, persistence |
+
+### Test Coverage Status
+
+✅ **Desktop Tests:** 27/27 passed
+- `MaterialBridgeSpecs`
+- `MaterialBridgeContractSpecs`
+- `MaterialLibraryLocationRevisionGateSpecs`
+- `ImportResultsRevisionGateSpecs`
+- `MaterialLibraryLocationSpecs` (Services)
+
+✅ **WebUI Build:** `npm run build` passed
+
+### Remaining Validation
+
+**Manual e2e smoke test (recommended):**
+1. Choose new material-library location from Materials page
+2. Restart application
+3. Verify custom location persists and loads correctly
+4. Use "Restore default" action
+5. Verify default `materials.json` recreated if missing
+
+---
+
 ## Decision: Paginate large import payload tables
 
 - **Author:** Dallas

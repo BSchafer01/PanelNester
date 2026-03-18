@@ -61,6 +61,7 @@ button {
 .app-shell__header {
   display: flex;
   align-items: center;
+  gap: 12px;
   min-height: 35px;
   padding: 0 8px;
   background: var(--vsc-bg-sidebar);
@@ -72,8 +73,21 @@ button {
 
 .app-shell__menu-bar {
   display: flex;
+  flex: 1 1 auto;
   align-items: stretch;
   min-height: 34px;
+  min-width: 0;
+}
+
+.app-shell__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.app-shell__reconnect-button {
+  min-width: 104px;
 }
 
 .app-shell__menu {
@@ -445,6 +459,47 @@ h3 {
   resize: vertical;
 }
 
+.material-combobox {
+  position: relative;
+}
+
+.field .material-combobox__input {
+  padding-right: 28px;
+}
+
+.field .material-combobox__input--open {
+  border-color: var(--vsc-accent);
+}
+
+.material-combobox__list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 2;
+  display: grid;
+  max-height: 240px;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  overflow-y: auto;
+  border: 1px solid var(--vsc-border);
+  background: var(--vsc-bg-sidebar);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.32);
+}
+
+.material-combobox__option {
+  padding: 7px 8px;
+  color: var(--vsc-text);
+  cursor: pointer;
+}
+
+.material-combobox__option:hover,
+.material-combobox__option--active {
+  background: rgba(0, 122, 204, 0.18);
+  color: var(--vsc-text-bright);
+}
+
 .checkbox-field {
   display: inline-flex;
   align-items: center;
@@ -505,6 +560,51 @@ h3 {
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   align-items: end;
   margin-top: 12px;
+}
+
+.pagination-bar,
+.pagination-controls,
+.pagination-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.pagination-bar {
+  align-items: end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.pagination-summary {
+  display: grid;
+  gap: 4px;
+}
+
+.pagination-summary strong {
+  color: var(--vsc-text-bright);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.pagination-summary span {
+  color: var(--vsc-text-muted);
+  font-size: 12px;
+}
+
+.pagination-controls {
+  align-items: end;
+  flex-wrap: wrap;
+  justify-content: end;
+}
+
+.pagination-buttons {
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.pagination-field {
+  min-width: 140px;
 }
 
 .toolbar-button {
@@ -641,6 +741,44 @@ h3 {
 .results-empty-intent > span {
   color: var(--vsc-text-muted);
   font-size: 12px;
+}
+
+.library-location-card {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--vsc-border);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.library-location-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.library-location-card__header strong {
+  color: var(--vsc-text-bright);
+  font-weight: 600;
+}
+
+.library-location-card .import-path {
+  margin: 0;
+}
+
+.library-location-inline-path {
+  font-family: Consolas, "Courier New", monospace;
+  word-break: break-all;
+  color: var(--vsc-text);
+}
+
+.library-location-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .empty-state {
@@ -1027,6 +1165,16 @@ td {
 }
 
 @media (max-width: 720px) {
+  .app-shell__header {
+    flex-wrap: wrap;
+    padding-bottom: 8px;
+  }
+
+  .app-shell__header-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
   .app-shell__body {
     grid-template-columns: 1fr;
   }

@@ -16,6 +16,7 @@ public partial class MainWindow : Window
 
     private readonly IFileDialogService _fileDialogService;
     private readonly IMaterialRepository _materialRepository;
+    private readonly IMaterialLibraryLocationService _materialLibraryLocationService;
     private readonly IMaterialService _materialService;
     private readonly IProjectService _projectService;
     private readonly IImportService _importService;
@@ -32,7 +33,14 @@ public partial class MainWindow : Window
         InitializeComponent();
         
         _fileDialogService = new NativeFileDialogService();
-        _materialRepository = new JsonMaterialRepository(DesktopStoragePaths.MaterialsFilePath);
+        var materialRepository = new JsonMaterialRepository(
+            new JsonMaterialRepositoryOptions
+            {
+                DefaultFilePath = DesktopStoragePaths.MaterialsFilePath,
+                LocationStoreFilePath = DesktopStoragePaths.MaterialLibrarySettingsFilePath
+            });
+        _materialRepository = materialRepository;
+        _materialLibraryLocationService = materialRepository;
         _materialService = new MaterialService(_materialRepository);
         _projectService = new ProjectService(_materialService);
         var validator = new PartRowValidator();
@@ -77,7 +85,8 @@ public partial class MainWindow : Window
                 _batchNestingService,
                 _reportDataService,
                 _pdfReportExporter,
-                () => contentLocation);
+                () => contentLocation,
+                materialLibraryLocationService: _materialLibraryLocationService);
 
             if (_bridge is not null)
             {

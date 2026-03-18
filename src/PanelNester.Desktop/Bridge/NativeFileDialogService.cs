@@ -77,7 +77,7 @@ public sealed class NativeFileDialogService : IFileDialogService
                         Title = string.IsNullOrWhiteSpace(request.Title) ? "Save PanelNester project" : request.Title,
                         AddExtension = true,
                         CheckPathExists = true,
-                        OverwritePrompt = true,
+                        OverwritePrompt = request.OverwritePrompt,
                         DefaultExt = defaultExtension,
                         FileName = ResolveFileName(request, defaultExtension),
                         Filter = BuildFilter(request.Filters, BuildSaveFallbackFilter(defaultExtension))

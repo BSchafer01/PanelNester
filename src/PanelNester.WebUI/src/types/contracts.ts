@@ -11,6 +11,9 @@ export const bridgeMessageTypes = {
   exportPdfReport: 'export-pdf-report',
   updateReportSettings: 'update-report-settings',
   listMaterials: 'list-materials',
+  chooseMaterialLibraryLocation: 'choose-material-library-location',
+  restoreDefaultMaterialLibraryLocation:
+    'restore-default-material-library-location',
   getMaterial: 'get-material',
   createMaterial: 'create-material',
   updateMaterial: 'update-material',
@@ -245,6 +248,12 @@ export interface MaterialDraft {
   costPerSheet: number | null;
 }
 
+export interface MaterialLibraryLocation {
+  currentPath: string;
+  defaultPath?: string | null;
+  usingDefaultLocation: boolean;
+}
+
 export interface ProjectMetadata {
   projectName: string;
   projectNumber: string;
@@ -304,12 +313,25 @@ export interface ProjectRecord {
 
 export interface ListMaterialsRequest {}
 
-export interface ListMaterialsResponse {
+export interface MaterialLibraryOperationResponse {
   success: boolean;
   materials: Material[];
+  libraryLocation?: MaterialLibraryLocation | null;
   error?: BridgeError | null;
   message?: string;
 }
+
+export interface ListMaterialsResponse extends MaterialLibraryOperationResponse {}
+
+export interface ChooseMaterialLibraryLocationRequest {}
+
+export interface ChooseMaterialLibraryLocationResponse
+  extends MaterialLibraryOperationResponse {}
+
+export interface RestoreDefaultMaterialLibraryLocationRequest {}
+
+export interface RestoreDefaultMaterialLibraryLocationResponse
+  extends MaterialLibraryOperationResponse {}
 
 export interface GetMaterialRequest {
   materialId: string;
@@ -413,6 +435,7 @@ export interface NestPlacement {
   placementId: string;
   sheetId: string;
   partId: string;
+  group?: string | null;
   x: number;
   y: number;
   width: number;
@@ -537,6 +560,8 @@ export const requestedBridgeCapabilities: BridgeCapability[] = [
   bridgeMessageTypes.exportPdfReport,
   bridgeMessageTypes.updateReportSettings,
   bridgeMessageTypes.listMaterials,
+  bridgeMessageTypes.chooseMaterialLibraryLocation,
+  bridgeMessageTypes.restoreDefaultMaterialLibraryLocation,
   bridgeMessageTypes.getMaterial,
   bridgeMessageTypes.createMaterial,
   bridgeMessageTypes.updateMaterial,

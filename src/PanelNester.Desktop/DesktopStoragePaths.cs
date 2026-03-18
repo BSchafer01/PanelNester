@@ -12,6 +12,9 @@ public static class DesktopStoragePaths
     public static string MaterialsFilePath =>
         Path.Combine(AppDataRootDirectory, "materials.json");
 
+    public static string MaterialLibrarySettingsFilePath =>
+        Path.Combine(AppDataRootDirectory, "material-library-location.json");
+
     public static string WebViewUserDataDirectory =>
         Path.Combine(AppDataRootDirectory, "WebView2", "UserData");
 }

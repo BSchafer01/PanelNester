@@ -107,6 +107,36 @@ public sealed class NativeFileDialogServiceSpecs
     }
 
     [Fact]
+    public async Task Save_async_can_disable_overwrite_prompts_for_location_selection()
+    {
+        var selectedPath = Path.Combine(Path.GetTempPath(), $"materials-{Guid.NewGuid():N}.json");
+        bool? capturedOverwritePrompt = null;
+
+        var service = new NativeFileDialogService(
+            null,
+            static () => null,
+            static (_, _) => throw new NotSupportedException(),
+            (dialog, _) =>
+            {
+                capturedOverwritePrompt = dialog.OverwritePrompt;
+                dialog.FileName = selectedPath;
+                return true;
+            });
+
+        var response = await service.SaveAsync(
+            new SaveFileDialogRequest(
+                "Choose material library location",
+                "materials.json",
+                [new FileDialogFilter("Material library files", ["json"])],
+                ".json",
+                false));
+
+        Assert.True(response.Success);
+        Assert.Equal(selectedPath, response.FilePath);
+        Assert.False(capturedOverwritePrompt);
+    }
+
+    [Fact]
     public async Task Open_async_serializes_rapid_cancel_and_retry_without_deadlock()
     {
         var selectedPath = Path.Combine(Path.GetTempPath(), $"open-{Guid.NewGuid():N}.pnest");

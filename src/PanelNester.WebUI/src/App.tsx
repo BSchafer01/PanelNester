@@ -27,6 +27,8 @@ import {
   type ImportOptions,
   type Material,
   type MaterialDraft,
+  type MaterialLibraryLocation,
+  type MaterialLibraryOperationResponse,
   type NestResponse,
   type OpenFileDialogResponse,
   type PartRowUpdate,
@@ -50,6 +52,7 @@ interface AppState {
   nestResponse: NestResponse;
   batchNestResponse: BatchNestResponse;
   materials: Material[];
+  materialLibraryLocation?: MaterialLibraryLocation | null;
   selectedMaterialId?: string;
   lastNestMaterial?: Material;
   selectedFilePath?: string;
@@ -82,6 +85,7 @@ type AppAction =
   | {
       type: 'materials-loaded';
       materials: Material[];
+      materialLibraryLocation: MaterialLibraryLocation | null | undefined;
       selectedMaterialId?: string;
       message: string;
     }
@@ -279,6 +283,7 @@ const initialState: AppState = {
   nestResponse: emptyNestResponse,
   batchNestResponse: emptyBatchNestResponse,
   materials: [],
+  materialLibraryLocation: undefined,
   selectedMaterialId: undefined,
   lastNestMaterial: undefined,
   selectedFilePath: undefined,
@@ -912,6 +917,7 @@ function reducer(state: AppState, action: AppAction): AppState {
         ...state,
         materialsBusy: false,
         materials: sortMaterials(action.materials),
+        materialLibraryLocation: action.materialLibraryLocation,
         selectedMaterialId: action.selectedMaterialId,
         materialsMessage: action.message,
       };
@@ -1262,6 +1268,38 @@ export default function App() {
     selectedMaterialId: state.selectedMaterialId,
   });
 
+  const applyMaterialLibraryResponse = (
+    response: MaterialLibraryOperationResponse,
+    options?: {
+      message?: string;
+      preferredMaterialId?: string;
+      selectionContext?: {
+        importResponse: ImportResponse;
+        selectedMaterialId?: string;
+      };
+    },
+  ) => {
+    const selectionContext = options?.selectionContext ?? materialSelectionRef.current;
+
+    dispatch({
+      type: 'materials-loaded',
+      materials: response.materials,
+      materialLibraryLocation: response.libraryLocation,
+      selectedMaterialId: pickMaterialId(
+        response.materials,
+        selectionContext.importResponse,
+        selectionContext.selectedMaterialId,
+        options?.preferredMaterialId,
+      ),
+      message:
+        options?.message ??
+        response.message ??
+        `Loaded ${response.materials.length} material(s) from the library.`,
+    });
+
+    return response.materials;
+  };
+
   const loadMaterials = async (options?: {
     message?: string;
     preferredMaterialId?: string;
@@ -1292,21 +1330,11 @@ export default function App() {
         );
       }
 
-      dispatch({
-        type: 'materials-loaded',
-        materials: response.materials,
-        selectedMaterialId: pickMaterialId(
-          response.materials,
-          selectionContext.importResponse,
-          selectionContext.selectedMaterialId,
-          options?.preferredMaterialId,
-        ),
-        message:
-          options?.message ??
-          response.message ??
-          `Loaded ${response.materials.length} material(s) from the library.`,
+      return applyMaterialLibraryResponse(response, {
+        message: options?.message,
+        preferredMaterialId: options?.preferredMaterialId,
+        selectionContext,
       });
-      return response.materials;
     } catch (error) {
       const message = getErrorMessage(
         error,
@@ -1378,6 +1406,95 @@ export default function App() {
       await loadMaterials({
         message: 'Material library synced with the desktop host.',
       }).catch(() => undefined);
+    }
+  };
+
+  const chooseMaterialLibraryLocation = async (): Promise<void> => {
+    if (!hasCapability(bridgeMessageTypes.chooseMaterialLibraryLocation)) {
+      dispatch({
+        type: 'materials-failed',
+        message:
+          'The connected desktop host has not exposed material library relocation yet.',
+      });
+      return;
+    }
+
+    dispatch({
+      type: 'materials-request-started',
+      message: 'Choosing a different material library location…',
+    });
+
+    try {
+      const response = await hostBridge.chooseMaterialLibraryLocation();
+      if (!response.success) {
+        if (response.error?.code === 'cancelled') {
+          dispatch({
+            type: 'materials-request-finished',
+            message: response.message ?? 'Material library location change cancelled.',
+          });
+          return;
+        }
+
+        throw new Error(
+          getBridgeErrorMessage(
+            response.error,
+            response.message ?? 'The material library location could not be changed.',
+          ),
+        );
+      }
+
+      applyMaterialLibraryResponse(response, {
+        message: response.message ?? 'Material library location updated.',
+      });
+    } catch (error) {
+      const message = getErrorMessage(
+        error,
+        'The desktop host could not change the material library location.',
+      );
+      dispatch({ type: 'materials-failed', message });
+      throw new Error(message);
+    }
+  };
+
+  const restoreDefaultMaterialLibraryLocation = async (): Promise<void> => {
+    if (!hasCapability(bridgeMessageTypes.restoreDefaultMaterialLibraryLocation)) {
+      dispatch({
+        type: 'materials-failed',
+        message:
+          'The connected desktop host has not exposed default material library recovery yet.',
+      });
+      return;
+    }
+
+    dispatch({
+      type: 'materials-request-started',
+      message: 'Restoring the default material library location…',
+    });
+
+    try {
+      const response = await hostBridge.restoreDefaultMaterialLibraryLocation();
+      if (!response.success) {
+        throw new Error(
+          getBridgeErrorMessage(
+            response.error,
+            response.message ??
+              'The default material library location could not be restored.',
+          ),
+        );
+      }
+
+      applyMaterialLibraryResponse(response, {
+        message:
+          response.message ??
+          'Restored the default material library location and reloaded the library.',
+      });
+    } catch (error) {
+      const message = getErrorMessage(
+        error,
+        'The desktop host could not restore the default material library location.',
+      );
+      dispatch({ type: 'materials-failed', message });
+      throw new Error(message);
     }
   };
 
@@ -2488,7 +2605,6 @@ export default function App() {
           onUpdatePartRow={updatePartRow}
           onDeletePartRow={deletePartRow}
           onRunNesting={runNesting}
-          onRetryHandshake={retryHandshake}
         />
       );
       break;
@@ -2496,13 +2612,24 @@ export default function App() {
       content = (
         <MaterialsPage
           materials={state.materials}
+          materialLibraryLocation={state.materialLibraryLocation}
           selectedMaterialId={state.selectedMaterialId}
           importResponse={state.importResponse}
           materialsBusy={state.materialsBusy}
           materialsMessage={state.materialsMessage}
+          canChooseMaterialLibraryLocation={hasCapability(
+            bridgeMessageTypes.chooseMaterialLibraryLocation,
+          )}
+          canRestoreDefaultMaterialLibraryLocation={hasCapability(
+            bridgeMessageTypes.restoreDefaultMaterialLibraryLocation,
+          )}
           onRefreshMaterials={async () => {
             await loadMaterials();
           }}
+          onChooseMaterialLibraryLocation={chooseMaterialLibraryLocation}
+          onRestoreDefaultMaterialLibraryLocation={
+            restoreDefaultMaterialLibraryLocation
+          }
           onSelectMaterial={(materialId) =>
             dispatch({ type: 'material-selected', materialId })
           }
@@ -2521,7 +2648,6 @@ export default function App() {
           kerfWidth={state.projectSettings.kerfWidth}
           nestResponse={state.nestResponse}
           batchNestResponse={state.batchNestResponse}
-          parts={state.importResponse.parts}
           statusMessage={state.nestingMessage}
           savedMaterialSnapshots={state.projectMaterialSnapshots}
           pendingMaterialSnapshots={pendingProjectSnapshots}
@@ -2606,6 +2732,13 @@ export default function App() {
         hasCapability(bridgeMessageTypes.saveProjectAs)
       }
       canSaveProjectAs={hasCapability(bridgeMessageTypes.saveProjectAs)}
+      bridgeConnected={state.bridge.connected}
+      bridgeStatusMessage={
+        state.bridge.lastError ??
+        state.bridge.handshake.message ??
+        'Desktop host connection unavailable.'
+      }
+      onReconnect={retryHandshake}
     >
       <div className={contentClassName}>{content}</div>
     </AppShell>

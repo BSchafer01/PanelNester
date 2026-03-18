@@ -1,4 +1,5 @@
 using System.IO;
+using PanelNester.Desktop;
 using PanelNester.Domain.Contracts;
 using PanelNester.Domain.Models;
 using PanelNester.Services.Import;
@@ -13,7 +14,8 @@ public static class DesktopBridgeRegistration
         IProjectService projectService,
         IImportService importService,
         INestingService nestingService,
-        Func<WebUiContentLocation> contentLocationAccessor) =>
+        Func<WebUiContentLocation> contentLocationAccessor,
+        IMaterialLibraryLocationService? materialLibraryLocationService = null) =>
         CreateDefault(
             fileDialogService,
             materialService,
@@ -21,7 +23,8 @@ public static class DesktopBridgeRegistration
             importService,
             new NoOpPartEditorService(),
             nestingService,
-            contentLocationAccessor);
+            contentLocationAccessor,
+            materialLibraryLocationService);
 
     public static BridgeMessageDispatcher CreateDefault(
         IFileDialogService fileDialogService,
@@ -30,7 +33,8 @@ public static class DesktopBridgeRegistration
         IImportService importService,
         IPartEditorService partEditorService,
         INestingService nestingService,
-        Func<WebUiContentLocation> contentLocationAccessor) =>
+        Func<WebUiContentLocation> contentLocationAccessor,
+        IMaterialLibraryLocationService? materialLibraryLocationService = null) =>
         CreateDefault(
             fileDialogService,
             materialService,
@@ -38,10 +42,11 @@ public static class DesktopBridgeRegistration
             importService,
             partEditorService,
             nestingService,
-            null,
-            null,
-            null,
-            contentLocationAccessor);
+            batchNestingService: null,
+            reportDataService: null,
+            pdfReportExporter: null,
+            contentLocationAccessor,
+            materialLibraryLocationService);
 
     public static BridgeMessageDispatcher CreateDefault(
         IFileDialogService fileDialogService,
@@ -53,7 +58,8 @@ public static class DesktopBridgeRegistration
         IBatchNestingService? batchNestingService,
         IReportDataService? reportDataService,
         IPdfReportExporter? pdfReportExporter,
-        Func<WebUiContentLocation> contentLocationAccessor)
+        Func<WebUiContentLocation> contentLocationAccessor,
+        IMaterialLibraryLocationService? materialLibraryLocationService = null)
     {
         ArgumentNullException.ThrowIfNull(fileDialogService);
         ArgumentNullException.ThrowIfNull(materialService);
@@ -382,11 +388,15 @@ public static class DesktopBridgeRegistration
             async (_, cancellationToken) =>
             {
                 var materials = await materialService.ListAsync(cancellationToken).ConfigureAwait(false);
+                var libraryLocation = materialLibraryLocationService is null
+                    ? null
+                    : await materialLibraryLocationService.GetLocationAsync(cancellationToken).ConfigureAwait(false);
                 return new ListMaterialsResponse(
                     true,
                     materials,
                     null,
-                    $"Loaded {materials.Count} material(s).");
+                    $"Loaded {materials.Count} material(s).",
+                    libraryLocation);
             });
 
         dispatcher.Register<GetMaterialRequest>(
@@ -466,6 +476,132 @@ public static class DesktopBridgeRegistration
                         GetFirstErrorCode(result.Errors, "material-delete-failed"),
                         GetFirstErrorMessage(result.Errors, $"Material '{request.MaterialId}' could not be deleted."));
             });
+
+        if (materialLibraryLocationService is not null)
+        {
+            dispatcher.Register<ChooseMaterialLibraryLocationRequest>(
+                BridgeMessageTypes.ChooseMaterialLibraryLocation,
+                async (_, cancellationToken) =>
+                {
+                    SaveFileDialogResponse dialogResult;
+                    try
+                    {
+                        var currentLocation = await materialLibraryLocationService
+                            .GetLocationAsync(cancellationToken)
+                            .ConfigureAwait(false);
+                        dialogResult = await fileDialogService
+                            .SaveAsync(
+                                new SaveFileDialogRequest(
+                                    "Choose material library location",
+                                    BuildMaterialLibraryFileName(currentLocation),
+                                    MaterialLibraryFileFilters,
+                                    ".json",
+                                    false),
+                                cancellationToken)
+                            .ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (InvalidDataException ex)
+                    {
+                        return ChooseMaterialLibraryLocationResponse.Failure(
+                            "material-library-load-failed",
+                            ex.Message);
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        return ChooseMaterialLibraryLocationResponse.Failure(
+                            "material-library-location-update-failed",
+                            ex.Message);
+                    }
+
+                    if (!dialogResult.Success || string.IsNullOrWhiteSpace(dialogResult.FilePath))
+                    {
+                        return ChooseMaterialLibraryLocationResponse.Cancelled();
+                    }
+
+                    try
+                    {
+                        var location = await materialLibraryLocationService
+                            .RepointAsync(dialogResult.FilePath, cancellationToken)
+                            .ConfigureAwait(false);
+                        var materials = await materialService.ListAsync(cancellationToken).ConfigureAwait(false);
+                        return new ChooseMaterialLibraryLocationResponse(
+                            true,
+                            materials,
+                            location,
+                            null,
+                            $"Material library now points to '{location.ActiveFilePath}'.");
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (ArgumentException ex)
+                    {
+                        return ChooseMaterialLibraryLocationResponse.Failure(
+                            "material-library-invalid-path",
+                            ex.Message);
+                    }
+                    catch (InvalidDataException ex)
+                    {
+                        return ChooseMaterialLibraryLocationResponse.Failure(
+                            "material-library-load-failed",
+                            ex.Message);
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        return ChooseMaterialLibraryLocationResponse.Failure(
+                            "material-library-location-update-failed",
+                            ex.Message);
+                    }
+                });
+
+            dispatcher.Register<RestoreDefaultMaterialLibraryLocationRequest>(
+                BridgeMessageTypes.RestoreDefaultMaterialLibraryLocation,
+                async (_, cancellationToken) =>
+                {
+                    try
+                    {
+                        var previousLocation = await materialLibraryLocationService
+                            .GetLocationAsync(cancellationToken)
+                            .ConfigureAwait(false);
+                        var defaultFileExisted = File.Exists(previousLocation.DefaultFilePath);
+                        var location = await materialLibraryLocationService
+                            .RestoreDefaultAsync(cancellationToken)
+                            .ConfigureAwait(false);
+                        var materials = await materialService.ListAsync(cancellationToken).ConfigureAwait(false);
+                        var responseMessage = defaultFileExisted
+                            ? "Material library restored to the default location."
+                            : $"Default material library was recreated at '{location.DefaultFilePath}'.";
+
+                        return new RestoreDefaultMaterialLibraryLocationResponse(
+                            true,
+                            materials,
+                            location,
+                            null,
+                            responseMessage);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (InvalidDataException ex)
+                    {
+                        return RestoreDefaultMaterialLibraryLocationResponse.Failure(
+                            "material-library-load-failed",
+                            ex.Message);
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        return RestoreDefaultMaterialLibraryLocationResponse.Failure(
+                            "material-library-restore-failed",
+                            ex.Message);
+                    }
+                });
+        }
 
         dispatcher.Register<NestRequest>(
             BridgeMessageTypes.RunNesting,
@@ -569,6 +705,12 @@ public static class DesktopBridgeRegistration
         new FileDialogFilter("All files", ["*.*"])
     ];
 
+    private static readonly IReadOnlyList<FileDialogFilter> MaterialLibraryFileFilters =
+    [
+        new FileDialogFilter("Material library files", ["json"]),
+        new FileDialogFilter("All files", ["*.*"])
+    ];
+
     private static string BuildProjectFileName(Project project)
     {
         var rawName = string.IsNullOrWhiteSpace(project.Metadata.ProjectName)
@@ -597,6 +739,19 @@ public static class DesktopBridgeRegistration
         return fileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)
             ? fileName
             : $"{fileName}.pdf";
+    }
+
+    private static string BuildMaterialLibraryFileName(MaterialLibraryLocation location)
+    {
+        var rawName = Path.GetFileName(string.IsNullOrWhiteSpace(location.ActiveFilePath)
+            ? location.DefaultFilePath
+            : location.ActiveFilePath);
+
+        return string.IsNullOrWhiteSpace(rawName)
+            ? "materials.json"
+            : rawName.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+                ? rawName
+                : $"{rawName}.json";
     }
 
     private static IReadOnlyList<string> GetCapabilities(

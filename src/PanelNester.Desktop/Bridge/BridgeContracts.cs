@@ -19,6 +19,8 @@ public static class BridgeMessageTypes
     public const string CreateMaterial = "create-material";
     public const string UpdateMaterial = "update-material";
     public const string DeleteMaterial = "delete-material";
+    public const string ChooseMaterialLibraryLocation = "choose-material-library-location";
+    public const string RestoreDefaultMaterialLibraryLocation = "restore-default-material-library-location";
     public const string NewProject = "new-project";
     public const string OpenProject = "open-project";
     public const string SaveProject = "save-project";
@@ -63,6 +65,12 @@ public sealed record BridgeError(string Code, string Message, string? UserMessag
                 "The desktop host ran into an unexpected problem. Please try again.",
             "material-id-required" =>
                 "Choose a material and try again.",
+            "material-library-path-required" =>
+                "Choose a material library file and try again.",
+            "material-library-invalid-path" =>
+                "Choose a valid .json file and try again.",
+            "material-library-load-failed" =>
+                "The selected material library could not be opened.",
             "project-not-found" =>
                 "The selected project file could not be found.",
             "project-corrupt" =>
@@ -79,6 +87,10 @@ public sealed record BridgeError(string Code, string Message, string? UserMessag
                 "The report settings could not be updated.",
             "report-export-failed" =>
                 "The PDF report could not be exported. Please try again.",
+            "material-library-location-update-failed" =>
+                "The material library location could not be changed.",
+            "material-library-restore-failed" =>
+                "The default material library could not be restored.",
             "invalid-output-path" =>
                 "Choose a different save location and try again.",
             _ => string.IsNullOrWhiteSpace(message)
@@ -227,7 +239,8 @@ public sealed record SaveFileDialogRequest(
     string? Title,
     string? FileName,
     IReadOnlyList<FileDialogFilter>? Filters,
-    string? DefaultExtension = null);
+    string? DefaultExtension = null,
+    bool OverwritePrompt = true);
 
 public sealed record SaveFileDialogResponse(bool Success, string? FilePath, BridgeError? Error, string? Message)
 {
@@ -243,7 +256,12 @@ public sealed record SaveFileDialogResponse(bool Success, string? FilePath, Brid
 
 public sealed record ListMaterialsRequest();
 
-public sealed record ListMaterialsResponse(bool Success, IReadOnlyList<Material> Materials, BridgeError? Error, string? Message)
+public sealed record ListMaterialsResponse(
+    bool Success,
+    IReadOnlyList<Material> Materials,
+    BridgeError? Error,
+    string? Message,
+    MaterialLibraryLocation? LibraryLocation = null)
 {
     public static ListMaterialsResponse Failure(string code, string message, string? userMessage = null)
     {
@@ -296,6 +314,41 @@ public sealed record DeleteMaterialResponse(bool Success, string MaterialId, Bri
     {
         var failure = BridgeFailure.Create(code, message, userMessage);
         return new(false, materialId, failure.Error, failure.ResponseMessage);
+    }
+}
+
+public sealed record ChooseMaterialLibraryLocationRequest();
+
+public sealed record ChooseMaterialLibraryLocationResponse(
+    bool Success,
+    IReadOnlyList<Material> Materials,
+    MaterialLibraryLocation? LibraryLocation,
+    BridgeError? Error,
+    string? Message)
+{
+    public static ChooseMaterialLibraryLocationResponse Cancelled() =>
+        Failure("cancelled", "Material library location selection was cancelled.");
+
+    public static ChooseMaterialLibraryLocationResponse Failure(string code, string message, string? userMessage = null)
+    {
+        var failure = BridgeFailure.Create(code, message, userMessage);
+        return new(false, Array.Empty<Material>(), null, failure.Error, failure.ResponseMessage);
+    }
+}
+
+public sealed record RestoreDefaultMaterialLibraryLocationRequest();
+
+public sealed record RestoreDefaultMaterialLibraryLocationResponse(
+    bool Success,
+    IReadOnlyList<Material> Materials,
+    MaterialLibraryLocation? LibraryLocation,
+    BridgeError? Error,
+    string? Message)
+{
+    public static RestoreDefaultMaterialLibraryLocationResponse Failure(string code, string message, string? userMessage = null)
+    {
+        var failure = BridgeFailure.Create(code, message, userMessage);
+        return new(false, Array.Empty<Material>(), null, failure.Error, failure.ResponseMessage);
     }
 }
 
