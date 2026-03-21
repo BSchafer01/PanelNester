@@ -25,6 +25,7 @@
 
     <Feature Id="MainFeature" Title="PanelNester" Level="1">
       <ComponentGroupRef Id="AppPayload" />
+      <ComponentGroupRef Id="ProjectFileAssociationGroup" />
       <ComponentGroupRef Id="StartMenuShortcutGroup" />
     </Feature>
   </Package>
@@ -32,6 +33,34 @@
   <Fragment>
     <ComponentGroup Id="AppPayload" Directory="INSTALLFOLDER">
       <Files Include="$(var.DesktopPublishDir)**" />
+    </ComponentGroup>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="ProjectFileAssociationGroup">
+      <Component Id="ProjectFileAssociationComponent" Directory="INSTALLFOLDER" Guid="24e31c87-fe64-4553-963f-674f744d4512">
+        <RegistryValue
+          Root="HKCU"
+          Key="Software\Classes\.pnest"
+          Type="string"
+          Value="PanelNester.Project"
+          KeyPath="yes" />
+        <RegistryValue
+          Root="HKCU"
+          Key="Software\Classes\PanelNester.Project"
+          Type="string"
+          Value="PanelNester Project" />
+        <RegistryValue
+          Root="HKCU"
+          Key="Software\Classes\PanelNester.Project\DefaultIcon"
+          Type="string"
+          Value="&quot;[INSTALLFOLDER]PanelNester.Desktop.exe&quot;,0" />
+        <RegistryValue
+          Root="HKCU"
+          Key="Software\Classes\PanelNester.Project\shell\open\command"
+          Type="string"
+          Value="&quot;[INSTALLFOLDER]PanelNester.Desktop.exe&quot; &quot;%1&quot;" />
+      </Component>
     </ComponentGroup>
   </Fragment>
 

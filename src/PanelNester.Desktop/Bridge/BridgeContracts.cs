@@ -6,6 +6,7 @@ namespace PanelNester.Desktop.Bridge;
 public static class BridgeMessageTypes
 {
     public const string BridgeHandshake = "bridge-handshake";
+    public const string BridgeUiReady = "bridge-ui-ready";
     public const string OpenFileDialog = "open-file-dialog";
     public const string ImportCsv = "import-csv";
     public const string ImportFile = "import-file";
@@ -133,6 +134,8 @@ public sealed record BridgeHandshakeResponse(
     string BridgeMode,
     IReadOnlyList<string> Capabilities,
     string? Message);
+
+public sealed record BridgeUiReadyRequest();
 
 public sealed record OpenFileDialogRequest(string? Title, IReadOnlyList<FileDialogFilter>? Filters);
 

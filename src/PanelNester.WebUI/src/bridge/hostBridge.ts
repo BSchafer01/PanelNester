@@ -4,6 +4,8 @@ import {
   type BridgeHandshakeRequest,
   type BridgeHandshakeResponse,
   type BridgeMessage,
+  type BridgeOperationResponse,
+  type BridgeUiReadyRequest,
   type CreateMaterialRequest,
   type ChooseMaterialLibraryLocationRequest,
   type ChooseMaterialLibraryLocationResponse,
@@ -301,6 +303,13 @@ class HostBridgeClient {
     return this.invoke<ProjectOperationResponse>(
       bridgeMessageTypes.openProject,
       request,
+    );
+  }
+
+  notifyUiReady(): Promise<BridgeOperationResponse> {
+    return this.invoke<BridgeOperationResponse>(
+      bridgeMessageTypes.bridgeUiReady,
+      {} satisfies BridgeUiReadyRequest,
     );
   }
 

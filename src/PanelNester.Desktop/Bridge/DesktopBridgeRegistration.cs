@@ -87,6 +87,10 @@ public static class DesktopBridgeRegistration
                 return Task.FromResult<object?>(response);
             });
 
+        dispatcher.Register<BridgeUiReadyRequest>(
+            BridgeMessageTypes.BridgeUiReady,
+            (_, _) => Task.FromResult<object?>(new BridgeOperationResponse(true, "Web UI ready.")));
+
         dispatcher.Register<OpenFileDialogRequest>(
             BridgeMessageTypes.OpenFileDialog,
             async (request, cancellationToken) =>
@@ -169,7 +173,7 @@ public static class DesktopBridgeRegistration
             BridgeMessageTypes.OpenProject,
             async (request, cancellationToken) =>
             {
-                var filePath = request.FilePath;
+                var filePath = NormalizeFilePath(request.FilePath);
                 if (string.IsNullOrWhiteSpace(filePath))
                 {
                     var dialogResult = await fileDialogService

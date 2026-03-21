@@ -179,6 +179,69 @@ public sealed class ProjectBridgeSpecs : IDisposable
         Assert.Equal(FlatBufferVersion, BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan(4, 2)));
     }
 
+    [Fact]
+    public async Task Open_project_request_with_an_explicit_file_path_bypasses_the_native_dialog()
+    {
+        Directory.CreateDirectory(_workspacePath);
+
+        var materialFilePath = Path.Combine(_workspacePath, "materials.json");
+        var projectPath = Path.Combine(_workspacePath, "startup-open.pnest");
+        var repository = new JsonMaterialRepository(materialFilePath);
+        var materialService = new MaterialService(repository, idGenerator: () => "maple-ply-18");
+        var createdMaterial = await materialService.CreateAsync(
+            new Material
+            {
+                Name = "Maple Ply 18mm",
+                SheetLength = 96m,
+                SheetWidth = 48m,
+                AllowRotation = true,
+                DefaultSpacing = 0.125m,
+                DefaultEdgeMargin = 0.5m
+            });
+
+        Assert.True(createdMaterial.Success);
+        var material = Assert.IsType<Material>(createdMaterial.Material);
+
+        var dialogs = new RecordingFileDialogService();
+        var projectService = new ProjectService(materialService, idGenerator: () => "project-001");
+        var projectResult = await projectService.NewAsync(
+            new ProjectMetadata
+            {
+                ProjectName = "Startup Open"
+            },
+            new ProjectSettings
+            {
+                KerfWidth = 0.125m
+            });
+
+        Assert.True(projectResult.Success);
+        var project = Assert.IsType<Project>(projectResult.Project) with
+        {
+            State = CreateProjectState(material)
+        };
+
+        var saveResult = await projectService.SaveAsync(project, projectPath);
+        Assert.True(saveResult.Success);
+
+        var dispatcher = DesktopBridgeRegistration.CreateDefault(
+            dialogs,
+            materialService,
+            projectService,
+            new CsvImportService(repository),
+            new PartEditorService(repository),
+            new ShelfNestingService(),
+            () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true));
+
+        var openProjectResponse = await DispatchAsync<OpenProjectResponse>(
+            dispatcher,
+            BridgeMessageTypes.OpenProject,
+            new OpenProjectRequest(projectPath));
+
+        Assert.True(openProjectResponse.Success);
+        Assert.Equal(projectPath, openProjectResponse.FilePath);
+        Assert.Empty(dialogs.OpenRequests);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_workspacePath))

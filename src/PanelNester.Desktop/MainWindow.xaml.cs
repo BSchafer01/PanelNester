@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Windows;
 using Microsoft.Web.WebView2.Core;
 using PanelNester.Desktop.Bridge;
@@ -25,13 +26,14 @@ public partial class MainWindow : Window
     private readonly IBatchNestingService _batchNestingService;
     private readonly IReportDataService _reportDataService;
     private readonly IPdfReportExporter _pdfReportExporter;
+    private string? _initialProjectPath;
     private WebViewBridge? _bridge;
     private bool _initialized;
 
-    public MainWindow()
+    public MainWindow(string? initialProjectPath = null)
     {
         InitializeComponent();
-        
+
         _fileDialogService = new NativeFileDialogService();
         var materialRepository = new JsonMaterialRepository(
             new JsonMaterialRepositoryOptions
@@ -57,6 +59,7 @@ public partial class MainWindow : Window
         Activated += (_, _) => ApplyNativeFrameTheme();
         UpdateWindowStatePresentation();
         UpdateMaximizedContentMargin();
+        _initialProjectPath = initialProjectPath;
     }
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
@@ -101,6 +104,7 @@ public partial class MainWindow : Window
             _bridge.DocumentTitleChanged += HandleBridgeDocumentTitleChanged;
             await _bridge.InitializeAsync();
             HostErrorOverlay.Visibility = Visibility.Collapsed;
+            await TryOpenInitialProjectAsync();
         }
         catch (WebView2RuntimeNotFoundException)
         {
@@ -111,6 +115,26 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             ShowHostError("Desktop host initialization failed.", ex.Message);
+        }
+    }
+
+    private async Task TryOpenInitialProjectAsync()
+    {
+        var initialProjectPath = _initialProjectPath;
+        _initialProjectPath = null;
+
+        if (string.IsNullOrWhiteSpace(initialProjectPath) || _bridge is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _bridge.OpenProjectAsync(initialProjectPath);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Initial project open failed for '{initialProjectPath}': {ex}");
         }
     }
 

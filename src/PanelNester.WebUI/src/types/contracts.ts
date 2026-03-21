@@ -1,5 +1,6 @@
 export const bridgeMessageTypes = {
   handshake: 'bridge-handshake',
+  bridgeUiReady: 'bridge-ui-ready',
   openFileDialog: 'open-file-dialog',
   importCsv: 'import-csv',
   importFile: 'import-file',
@@ -56,6 +57,14 @@ export interface BridgeHandshakeResponse {
   bridgeMode: 'webview2' | 'standalone';
   capabilities: BridgeCapability[];
   message?: string;
+}
+
+export interface BridgeUiReadyRequest {}
+
+export interface BridgeOperationResponse {
+  success: boolean;
+  message: string;
+  error?: BridgeError | null;
 }
 
 export interface FileDialogFilter {
@@ -370,7 +379,9 @@ export interface NewProjectRequest {
   settings?: ProjectSettings | null;
 }
 
-export interface OpenProjectRequest {}
+export interface OpenProjectRequest {
+  filePath?: string;
+}
 
 export interface SaveProjectRequest {
   filePath?: string | null;
@@ -549,6 +560,7 @@ export interface HostBridgeSnapshot {
 
 export const requestedBridgeCapabilities: BridgeCapability[] = [
   bridgeMessageTypes.handshake,
+  bridgeMessageTypes.bridgeUiReady,
   bridgeMessageTypes.openFileDialog,
   bridgeMessageTypes.importCsv,
   bridgeMessageTypes.importFile,

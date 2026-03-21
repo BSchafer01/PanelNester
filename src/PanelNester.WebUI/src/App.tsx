@@ -31,6 +31,7 @@ import {
   type MaterialLibraryOperationResponse,
   type NestResponse,
   type OpenFileDialogResponse,
+  type OpenProjectRequest,
   type PartRowUpdate,
   type ProjectFileMetadata,
   type ProjectMaterialSnapshot,
@@ -41,6 +42,14 @@ import {
 } from './types/contracts';
 
 type AppRoute = 'overview' | 'import' | 'materials' | 'results';
+
+declare global {
+  interface Window {
+    panelNesterDesktopHost?: {
+      openProject: (request: OpenProjectRequest) => void | Promise<void>;
+    };
+  }
+}
 
 const importFileDialogTimeoutMs = 300000;
 const importBridgeTimeoutMs = 120000;
@@ -1267,6 +1276,10 @@ export default function App() {
     importResponse: state.importResponse,
     selectedMaterialId: state.selectedMaterialId,
   });
+  const hostReadyNotifiedRef = useRef(false);
+  const startupProjectOpenRef = useRef<(request: OpenProjectRequest) => void | Promise<void>>(
+    () => undefined,
+  );
 
   const applyMaterialLibraryResponse = (
     response: MaterialLibraryOperationResponse,
@@ -1353,6 +1366,21 @@ export default function App() {
   }, [state.importResponse, state.selectedMaterialId]);
 
   useEffect(() => {
+    const desktopHost = {
+      openProject: (request: OpenProjectRequest) => {
+        void startupProjectOpenRef.current(request);
+      },
+    };
+
+    window.panelNesterDesktopHost = desktopHost;
+    return () => {
+      if (window.panelNesterDesktopHost === desktopHost) {
+        delete window.panelNesterDesktopHost;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     const unsubscribe = hostBridge.subscribe((event) => {
       dispatch({
         type: 'bridge-updated',
@@ -1373,6 +1401,15 @@ export default function App() {
 
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    if (hostReadyNotifiedRef.current || !state.bridge.connected) {
+      return;
+    }
+
+    hostReadyNotifiedRef.current = true;
+    void hostBridge.notifyUiReady().catch(() => undefined);
+  }, [state.bridge.connected]);
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -1670,7 +1707,7 @@ export default function App() {
     });
   };
 
-  const openProject = async () => {
+  const openProject = async (request: OpenProjectRequest = {}) => {
     if (!hasCapability(bridgeMessageTypes.openProject)) {
       dispatch({
         type: 'project-operation-failed',
@@ -1680,7 +1717,10 @@ export default function App() {
       return;
     }
 
-    const canProceed = await confirmProjectTransition('opening another project');
+    const actionLabel = request.filePath
+      ? `opening ${fileNameFromPath(request.filePath)}`
+      : 'opening another project';
+    const canProceed = await confirmProjectTransition(actionLabel);
     if (!canProceed) {
       return;
     }
@@ -1691,7 +1731,7 @@ export default function App() {
     });
 
     try {
-      const response = await hostBridge.openProject({});
+      const response = await hostBridge.openProject(request);
       if (!response.success) {
         if (response.error?.code === 'cancelled') {
           dispatch({
@@ -1760,6 +1800,7 @@ export default function App() {
       });
     }
   };
+  startupProjectOpenRef.current = openProject;
 
   const importFile = async () => {
     dispatch({

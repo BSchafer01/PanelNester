@@ -21,6 +21,11 @@ public sealed class WebViewBridge
     private readonly BridgeMessageDispatcher _dispatcher;
     private readonly WebUiContentLocation _contentLocation;
     private readonly string _userDataFolder;
+    private readonly BridgeHostReadinessGate _hostReadinessGate = new();
+
+    internal Func<string, CancellationToken, Task<string>>? ScriptExecutorOverride { get; set; }
+
+    internal BridgeHostReadinessGate HostReadinessGate => _hostReadinessGate;
 
     public WebViewBridge(
         WebView2 webView,
@@ -63,6 +68,33 @@ public sealed class WebViewBridge
         _webView.Source = new Uri($"https://{VirtualHostName}/index.html");
     }
 
+    public async Task<bool> OpenProjectAsync(string filePath, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+
+        await WaitForHostReadyAsync(cancellationToken).ConfigureAwait(true);
+
+        var requestJson = JsonSerializer.Serialize(
+            new OpenProjectRequest(filePath.Trim()),
+            BridgeJson.SerializerOptions);
+        var script = $$"""
+            (async () => {
+                const desktopHost = window.panelNesterDesktopHost;
+                if (!desktopHost?.openProject) {
+                    return false;
+                }
+
+                await desktopHost.openProject({{requestJson}});
+                return true;
+            })();
+            """;
+        var result = await ExecuteScriptAsync(script, cancellationToken).ConfigureAwait(true);
+        return string.Equals(result, "true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public Task WaitForHostReadyAsync(CancellationToken cancellationToken = default) =>
+        _hostReadinessGate.WaitAsync(cancellationToken);
+
     private void HandleNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
     {
         if (!e.IsSuccess)
@@ -92,6 +124,8 @@ public sealed class WebViewBridge
                 OnStatusChanged("Ignored empty bridge message.");
                 return;
             }
+
+            _hostReadinessGate.TrySignalReady(request);
         }
         catch (JsonException)
         {
@@ -119,6 +153,27 @@ public sealed class WebViewBridge
 
         var json = JsonSerializer.Serialize(message, BridgeJson.SerializerOptions);
         _webView.CoreWebView2.PostWebMessageAsJson(json);
+    }
+
+    private async Task<string> ExecuteScriptAsync(string script, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(script);
+
+        if (ScriptExecutorOverride is not null)
+        {
+            return await ScriptExecutorOverride(script, cancellationToken).ConfigureAwait(true);
+        }
+
+        if (_webView.Dispatcher.CheckAccess())
+        {
+            return await _webView.CoreWebView2.ExecuteScriptAsync(script).WaitAsync(cancellationToken).ConfigureAwait(true);
+        }
+
+        return await _webView.Dispatcher
+            .InvokeAsync(() => _webView.CoreWebView2.ExecuteScriptAsync(script).WaitAsync(cancellationToken))
+            .Task
+            .Unwrap()
+            .ConfigureAwait(true);
     }
 
     private void OnStatusChanged(string status) => StatusChanged?.Invoke(this, status);
