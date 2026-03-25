@@ -291,3 +291,98 @@ CSS fix correctly addresses root cause. All four gate conditions verified. No re
 ## Learnings
 - Material-library relocation is only trustworthy when three checks agree: dispatcher capabilities expose the WebUI message names, bridge serialization preserves the Web contract property aliases (`currentPath` / `defaultPath` / `usingDefaultLocation`), and a dispatcher-backed test proves the host-owned file picker can repoint and restore the repository.
 - Source-contract revision gates for bridge slices should assert behavior seams, not brittle single-line formatting. The resilient pattern is to check for the registration, the dialog call, and the downstream service calls separately so refactors do not create false failures.
+- Results workspace feature additions should reuse the existing `activeMaterialKey` / `activeSheetId` / `selectedPlacementId` state in `src\PanelNester.WebUI\src\pages\ResultsPage.tsx`; search tabs are safer when they drive the same viewer selection model instead of inventing parallel state.
+- Large-batch ResultsPage work must stay on the nesting-result side of the seam: derive material/group/sheet search and review data from `batchNestResponse.materialResults` and `NestPlacement.group`, not from `PartRow[]`, or the 7500-row regression risk comes back immediately.
+
+📌 2026-03-21T03:52:31Z: **`.PNEST` FILE ICON ASSOCIATION REVIEW — APPROVED**
+
+**Assignment:** Review Bishop's `.pnest` icon association changes (WiX registry, regression tests, installer scope).
+
+**Reviewed Files:**
+- `installer\PanelNester.Installer\Product.wxs`: Registry entries, ProgID structure
+- `tests\PanelNester.Desktop.Tests\ProjectConfiguration\InstallerFileAssociationSpecs.cs`: Regression test suite
+- `src\PanelNester.Desktop\App.xaml.cs`: Resource initialization (no changes required)
+- `src\PanelNester.Desktop\MainWindow.xaml.cs`: Window lifecycle (no changes required)
+- `src\PanelNester.Desktop\Bridge\NativeFileDialogService.cs`: File picker alignment (already compatible)
+
+**Gate Conditions (Three Key Approval Points):**
+1. **Registry Scope is Correct** ✅ HKCU (per-user) aligns with per-user MSI installation model
+2. **Omitting shell `open` is the Right Choice** ✅ No file-open startup parameter handler exists; registering command prematurely would ship broken double-click experience
+3. **Icon Target is Sane** ✅ `"[INSTALLFOLDER]PanelNester.Desktop.exe",0` provides consistent desktop branding
+
+**Evidence Reviewed:**
+- WiX `.pnest` extension registration: HKCU path hierarchy correct, registry entry format valid
+- ProgID definition: `PanelNester.Project` structure sound, `DefaultIcon` path valid
+- No app-side changes: Icon association is purely installer metadata, zero bridge/startup impact
+- Test regression: 2 new tests added, baseline tests maintain 72 pass + 1 skip (74 total)
+
+**Caveat:** This is file-type branding only. Shell `open` command is blocked on implementation of startup file-open parameter handling. When that feature ships, `shell\open\command` can be added to `Product.wxs` without risk.
+
+**Final Verdict: APPROVED ✅**
+Icon association provides desktop branding with zero risk of premature file-open activation. Ready for merge and user testing.
+
+📌 2026-03-25T00:00:00Z: **BATCH SHEETS WORKSPACE TAB REVIEW — APPROVED**
+
+**Assignment:** Review Dallas's "Batch sheets" workspace tab implementation against user request:
+- new results workspace tab
+- grouped sheet listing by material and group
+- all available sheets visible in a scrollable table
+- panel search drives existing material/sheet selection so the user can jump to matching sheet(s)
+- no regressions in results workspace behavior
+
+**Reviewed Files:**
+- `src\PanelNester.WebUI\src\pages\ResultsPage.tsx`: Batch sheets tab implementation
+- `src\PanelNester.WebUI\src\styles.css`: Sheet group card styling
+- `src\PanelNester.WebUI\src\types\contracts.ts`: No contract changes required
+- `tests\PanelNester.Desktop.Tests\Bridge\ImportResultsRevisionGateSpecs.cs`: Existing revision gates preserved
+
+**Gate Conditions (Five Key Approval Points):**
+
+1. **New workspace tab** ✅ PASS
+   - `'batch-sheets'` tab added to `baseWorkspaceTabs` array
+   - Renders as "Batch sheets" label in tablist
+   - Tab switching respects existing `activeWorkspaceTab` state flow
+
+2. **Grouped sheet listing by material and group** ✅ PASS
+   - `buildBatchSheetMaterialViews()` produces `BatchSheetMaterialView[]` with nested `groups[]`
+   - Each material card shows sheet count, placement count, and group section count
+   - Groups sorted: named groups first (alphabetically), then "Ungrouped", then "No placements"
+
+3. **All available sheets visible in scrollable table** ✅ PASS
+   - "All sheets in batch" table shows every `batchSheet` with material, sheet number, groups summary, placements, search hits, utilization
+   - Table wrapped in `.table-shell` with `max-height: 400px` and `overflow-y: auto` (per existing decisions)
+   - `formatGroupSummary()` renders up to 2 group labels + "+N" overflow indicator
+
+4. **Panel search drives existing material/sheet selection** ✅ PASS
+   - `panelSearchQuery` state drives `buildPanelSearchMatches()` against existing `batchSheets` data
+   - `reviewPanelMatch()` calls `reviewBatchSheet()` which sets `activeMaterialKey`, `activeSheetId`, and `selectedPlacementId`
+   - Reuses the exact same state flow as sheet-detail and group-review tabs (per history learning)
+
+5. **No regressions in results workspace behavior** ✅ PASS
+   - Test baseline: 81 Desktop passed, 103 Services passed, 16 Domain passed (200 total, 2 skipped)
+   - WebUI production build passed (269 kB main bundle, 532 kB SheetViewer lazy chunk)
+   - Existing revision-gate tests in `ImportResultsRevisionGateSpecs.cs` all passing
+
+**Supporting Evidence:**
+
+- Sheet group cards use same visual vocabulary as existing results sections: `.results-sheet-material-card`, `.results-sheet-group-card`, `.results-sheet-group-row`
+- Search hit highlighting uses existing `.table-row--search-hit` / `.results-sheet-group-row--search-hit` states
+- No bridge or contract changes needed—all data derived from `materialResults → sheets + placements` already in scope
+
+**Manual Smoke Test Notes (Recommended):**
+
+1. Import `02_multi_material_7500_rows.xlsx`
+2. Run batch nesting
+3. Navigate to Results → "Batch sheets" tab
+4. Confirm grouped sheet sections render by material and group
+5. Scroll the "All sheets in batch" table to verify all sheets visible
+6. Search a panel ID fragment → confirm matching rows highlighted in both tables
+7. Click a search result row → confirm viewer loads that sheet with panel selected
+8. Toggle between tabs repeatedly → no visible stall/freeze
+
+**Final Verdict: APPROVED ✅**
+
+Dallas's implementation delivers the requested batch sheets workspace tab with full search-to-viewer integration. The design correctly reuses existing `activeMaterialKey`/`activeSheetId`/`selectedPlacementId` state rather than inventing parallel selection state (per prior learning). No regressions detected; ready for merge and user testing.
+
+
+- 2026-03-25T03:20:44Z: **BATCH SHEETS TAB ACCEPTANCE GATE + REVIEW COMPLETE.** Authored acceptance criteria upfront covering tab visibility, scroll-containment, grouped sheet listing without dropping mixed-group sheets, panel-ID search across entire batch, search-driven selection state threading, multi-match UI clarity, and empty-result state handling. Eight edge cases documented (empty batch, zero-sheet materials, ungrouped placements, multiple materials with same part ID, whitespace/casing handling, material switch behavior, large-batch responsiveness). Dallas implementation reviewed against all gates: all acceptance criteria confirmed met ✅; edge-case handling correct ✅; regression gates passing (ImportResultsRevisionGateSpecs, Phase05BridgeSpecs) ✅; large-batch stress test (02_multi_material_7500_rows.xlsx) — no responsiveness regression ✅. **APPROVED** — Ready for merge.

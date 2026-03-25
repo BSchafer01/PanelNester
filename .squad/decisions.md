@@ -98,6 +98,97 @@ Users can now repoint the active material library from the default `%LOCALAPPDAT
 4. Use "Restore default" action
 5. Verify default `materials.json` recreated if missing
 
+## Decision: Results Batch Sheets Tab (Consolidated)
+
+**Consolidated from inbox:** Dallas, Hicks (2026-03-25)
+
+### Executive Summary
+
+Users can now review all sheets from a batch nesting job in a dedicated `Batch sheets` tab within the Results workspace. The tab provides three coordinated surfaces: panel-ID search results, grouped sheet sections by material + group, and a scrollable all-sheets table. Search highlights matching sheets across both views and drives the shared Results selection state, enabling seamless viewer synchronization without reintroducing large part-row scans or separate preview modes.
+
+### Decisions
+
+#### Hicks — Results Sheets Tab Acceptance Gate
+
+Treat the proposed sheets tab as a **navigation/review surface over the existing batch nesting payload**, not as a second data model. It should derive rows from `batchNestResponse.materialResults`, `NestResponse.sheets`, and `NestPlacement.group`, and drive the existing Results-page selection state so the viewer follows the user's search and table picks.
+
+**Why this matters:**
+- The current Results workspace already owns material, sheet, group, and placement review state in one place.
+- The repo has an explicit regression gate forbidding `ResultsPage` from accepting or re-scanning `PartRow[]`; large imports must stay responsive.
+- The new tab is user-visible review/navigation, so trust comes from coherent selection behavior more than from adding another summary card.
+
+**Acceptance Criteria:**
+1. A new Results workspace tab appears with all batch sheets listed in a table, grouped by **material** and **group** without dropping any available sheets from the batch.
+2. The table remains scroll-contained inside the workspace (`.table-shell` style pattern or equivalent) when the batch is large; the page body and viewer column must not become the only scroll path.
+3. Mixed-group sheets still appear once and remain reviewable; grouping cannot hide sheets that contain both the chosen group and other groups.
+4. A panel search field lets the user search by panel/part ID and returns all matching placements/sheets across the batch.
+5. Choosing a search result updates the shared Results selection state so the correct material becomes active, the relevant sheet is selected, and the viewer/inspection tables show that sheet directly.
+6. If the search matches multiple sheets or materials, the UI makes that explicit and lets the user step through each match instead of silently picking one.
+7. Empty-result and no-match states are explicit, non-crashing, and keep existing unplaced/empty-run behavior intact.
+
+**Edge Cases:**
+- No batch results, zero-sheet material results, and sheets with zero placements
+- Ungrouped placements and mixed grouped + ungrouped sheets
+- Multiple materials containing the same part ID
+- Same part ID appearing more than once on different sheets
+- Search text with leading/trailing whitespace, casing differences, and clear/reset behavior
+- Material switch, tab switch, and rerun behavior resetting invalid active search/selection cleanly
+- Large-batch behavior (`02_multi_material_7500_rows.xlsx`) staying responsive without reintroducing `PartRow[]` scans
+
+#### Dallas — Results Batch Sheets Tab Implementation
+
+- Implemented dedicated `Batch sheets` tab inside Results workspace
+- Tab maintains shared Results selection model (`activeMaterialKey`, `activeSheetId`, `selectedPlacementId`)
+- Three coordinated surfaces: panel-ID search results, grouped sheet sections (material + group), scrollable all-sheets table
+- Panel search highlights matching sheets in both grouped and flat views, drives selection state directly to viewer
+- Reuses existing nesting payloads (`materialResults -> sheets + placements`); no new bridge or contract fields required
+- WebUI build: **PASSED**
+- Regression tests (ImportResultsRevisionGateSpecs, Phase05BridgeSpecs): **PASSED**
+
+#### Hicks — Results Sheets Tab Review APPROVED
+
+- Confirmed new `Batch sheets` tab exists with all batch sheets listed
+- Verified table scroll-containment in workspace (no page-level scroll escape)
+- Validated grouped sheet listing by material and group without dropping sheets
+- Confirmed mixed-group sheets appear once and remain reviewable
+- Tested panel search across entire batch; returns all matching placements/sheets
+- Verified search result selection updates shared Results state correctly
+- Confirmed multi-match handling and empty-result states are explicit, non-crashing
+- Validated regression gates: ImportResultsRevisionGateSpecs and Phase05BridgeSpecs both pass
+- Large-batch behavior (`02_multi_material_7500_rows.xlsx`) — no responsiveness regression
+
+**Result:** APPROVED — All acceptance criteria met; no blockers.
+
+### Architecture Seam Ownership
+
+| Seam | Owner | Responsibility |
+|------|-------|-----------------|
+| **Sheet data derivation** | WebUI (ResultsPage) | Transform materialResults[] → grouped + flat views |
+| **Search index & highlighting** | WebUI (ResultsPage) | Index placements by panel ID, highlight matches |
+| **Selection state threading** | WebUI (ResultsPage) | Drive activeMaterialKey, activeSheetId from search/table picks |
+| **Scroll containment** | WebUI (styles.css) | `.table-shell` and related scroll-lockdown patterns |
+| **Viewer synchronization** | WebUI (existing Results flow) | Viewer auto-selects when activeSheetId changes |
+| **Edge-case handling** | WebUI (ResultsPage) | Empty batch, zero-sheet materials, ungrouped placements |
+| **Contract alignment** | No changes required | Existing `batchNestResponse`, `NestResponse`, `NestPlacement` |
+
+### Test Coverage Status
+
+✅ **Regression Tests:** All pass
+- `ImportResultsRevisionGateSpecs` — No PartRow[] rescans, responsive on large batches
+- `Phase05BridgeSpecs` — Selection state threading correct
+
+✅ **WebUI Build:** `npm run build` passed
+
+✅ **Manual Smoke Test:** Focused validation
+- Run grouped multi-material batch; confirm every sheet reachable in table
+- Search for panel appearing once, then on multiple sheets/materials
+- Verify viewer jumps to correct sheet each time
+- Repeat with `02_multi_material_7500_rows.xlsx` — no stall on tab open, search, or tab switch
+
+### Remaining Validation
+
+None — implementation approved for merge.
+
 ---
 
 ## Decision: Paginate large import payload tables
@@ -554,6 +645,64 @@ Estimated total: 2–3 hours. Artifacts ready within same day.
 
 ---
 
+---
+
+## `.pnest` Startup Open Implementation
+
+### Decision 1: Startup File Open Parameter Handling (Bishop)
+
+**Context:** Desktop application needs to accept `.pnest` files passed as startup arguments and open them.
+
+**Decision:**
+- Implement `StartupProjectPathResolver.cs` that validates incoming startup arguments
+- Accept only fully qualified, existing `.pnest` file paths
+- Remove `StartupUri` from `App.xaml` to allow `App.xaml.cs` to construct `MainWindow` with resolved initial project path
+- Defer actual file-open logic to existing Web UI bridge `openProject` flow
+- Invoke `OpenProjectRequest(filePath)` bridge handler after WebUI readiness confirmed
+
+**Consequences:**
+- Startup path resolution provides strict validation and security boundary
+- Application can now be launched with `.pnest` file paths from file explorer or command line
+- No duplicate file-load logic; reuses existing UI flow
+
+**Status:** ✅ Implemented
+
+### Decision 2: Readiness Gate for Startup Open (Ripley)
+
+**Context:** Startup open calls can arrive after WebView handshake request but before WebUI finishes capability wiring, causing UI to refuse the operation.
+
+**Decision:**
+- Add `bridge-ui-ready` message sent by WebUI after handshake success and capability setup is complete
+- Gate `WebViewBridge.WaitForUiReadyAsync()` on explicit UI-ready signal instead of handshake request alone
+- Ensure `TryOpenInitialProjectAsync()` never executes before WebUI is fully prepared for open-project commands
+
+**Consequences:**
+- Startup open waits for explicit UI readiness before invoking project load
+- Eliminates launch-time refusal race
+- Preserves existing startup argument validation
+- No performance impact; readiness gate runs as background task
+
+**Status:** ✅ Implemented
+
+### Decision 3: Behavioral Readiness Testing (Parker)
+
+**Context:** Initial implementation was rejected due to insufficient proof of readiness guarantee. Source-level contract was too implicit; timing assertions were unreliable.
+
+**Decision:**
+- Add small test seam in `WebViewBridge` to allow unit tests to inspect readiness state independently
+- Author behavioral test spec validating that readiness gate does not release before explicit UI ready signal
+- Test state transitions, not millisecond-level timing
+- Validate startup path resolver independently with regression specs
+
+**Consequences:**
+- Strong, behavioral validation without tight coupling to implementation timing
+- Test coverage makes readiness guarantee explicit and verifiable
+- Future changes can confidently modify internal timing without breaking readiness contract
+
+**Status:** ✅ Implemented and Approved
+
+---
+
 ### 🟡 **P2: Placement Inspection Minimalism**
 
 **Problem:** Selected placement shows only position/rotation; no spec comparison.
@@ -793,3 +942,70 @@ The grouped nesting slice is architecturally sound and well-integrated. Immediat
 
 
 
+
+## Decision: `.pnest` File Icon Association (Consolidated)
+
+**Consolidated from orchestration:** Bishop, Hicks (2026-03-21)
+
+### Executive Summary
+
+Desktop installation now registers `.pnest` file extension with per-user Windows registry (`HKCU\Software\Classes`), creating `PanelNester.Project` ProgID and associating the icon to EXE index 0. File-open shell command intentionally omitted pending implementation of startup file-open parameter handling.
+
+### Decisions
+
+#### Bishop — Installer Registry Structure
+
+- Register `.pnest` extension in HKCU (per-user scope) — matches MSI installation model and user expectations
+- Create `PanelNester.Project` ProgID with `DefaultIcon` pointing to `"[INSTALLFOLDER]PanelNester.Desktop.exe",0`
+- Omit shell `open` command until `App.xaml.cs` and `MainWindow.xaml.cs` support file-open startup parameters
+- Registry entries in `Product.wxs` use WiX standard structures: `RegistryKey`, `RegistryValue`, `ProgId`
+- Changes confined to installer; zero modifications to app startup or bridge layers
+
+#### Hicks — Icon Association Review APPROVED
+
+- **Registry scope (HKCU):** Correct. Per-user registry aligns with per-user MSI installation.
+- **ProgID definition:** Sane structure with EXE reference at index 0 (icon payload).
+- **Omitted shell `open`:** Right choice today. No risk of premature file-open activation; future file-open handler can add this command separately.
+- **No app-side changes required:** Icon association is purely installer-level metadata.
+- **Regression test coverage:** 2 new tests verify installer registry structure; all 74/74 tests pass.
+
+### Architecture Seam Ownership
+
+| Seam | Owner | Status |
+|------|-------|--------|
+| **`.pnest` extension registration** | Installer (Product.wxs) | ✅ Complete |
+| **ProgID creation** | Installer (Product.wxs) | ✅ Complete |
+| **Icon reference** | Installer (EXE path) | ✅ Complete |
+| **Shell `open` command** | App (App.xaml.cs) | ⏳ Deferred |
+| **File-open parameter handling** | App (MainWindow.xaml.cs) | ⏳ Future phase |
+| **Registry scope (HKCU)** | Design | ✅ Validated |
+
+### Test Coverage
+
+✅ **Installer Tests:** 2 new regression tests in `DesktopAssociationSpecs.cs`
+- Verify `.pnest` extension registry entry exists in test registry hive
+- Verify `PanelNester.Project` ProgID and `DefaultIcon` are correctly registered
+
+✅ **Overall Test Suite:** 74/74 passed (1 skipped)
+- Baseline: 73 passed, 1 skipped
+- Final: 74 passed, 1 skipped (new association tests)
+
+✅ **Build:** `dotnet build .\installer\PanelNester.Installer\PanelNester.Installer.wixproj` passed
+
+### Rationale
+
+**Per-user scope:** HKCU matches the per-user MSI target and user mental model of application installation.
+
+**Deferred shell `open`:** Opening `.pnest` files from explorer would require the application to accept file path as startup parameter, parse it, and load the project. This capability does not yet exist. Registering the command prematurely risks confusing user experience (file opens app but no project loads). Current icon-only registration provides desktop branding with zero risk.
+
+**Icon target:** EXE index 0 ensures consistent icon branding on user desktop and file explorer. Icon resource can be extracted and refined in future desktop icon design phase.
+
+### Remaining Work
+
+File-open command registration is **blocked on:**
+1. Implement startup file-open parameter handling in `App.xaml.cs`
+2. Extend `MainWindow.xaml.cs` initialization to load project from file path
+3. Add registry command entry to `Product.wxs`
+4. Test file-open flow from explorer and command line
+
+This work is explicitly deferred. Current registration is complete and safe.
