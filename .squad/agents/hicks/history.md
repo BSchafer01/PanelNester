@@ -20,10 +20,16 @@ I own acceptance criteria, regression coverage, and reviewer verdicts for the fu
 - **Phase 6:** Hardening & smoke verification (empty-result export, dense-layout readability, viewer edge cases, bridge error surfaces); 127 tests (125 passed, 2 skipped)
 
 **Feature Batches Approved (2026-03-15 to present):**
-- FlatBuffers migration, UI cleanup, Import page cleanup, Material/Results page cleanup, Maximize clipping fix, Per-user MSI packaging, Stock-width nesting preference, Material library relocation (2026-03-18), Results batch sheets tab (2026-03-25).
+- FlatBuffers migration, UI cleanup, Import page cleanup, Material/Results page cleanup, Maximize clipping fix, Per-user MSI packaging, Stock-width nesting preference, Material library relocation (2026-03-18), Results batch sheets tab (2026-03-25), Results batch sheets follow-up (2026-03-25).
 
 **Latest Assignment (2026-03-25T03:20:44Z):**
 BATCH SHEETS TAB ACCEPTANCE GATE + REVIEW COMPLETE — Authored acceptance criteria upfront covering tab visibility, scroll-containment, grouped sheet listing, panel-ID search across batch, search-driven selection state, multi-match UI clarity, empty-result handling. Eight edge cases documented. Dallas implementation reviewed against all gates: acceptance criteria met ✅, edge cases handled ✅, regression gates passing (ImportResultsRevisionGateSpecs, Phase05BridgeSpecs) ✅, large-batch stress test (7,500 rows) — no regression ✅. **APPROVED** — Ready for merge.
+
+**Follow-up Assignment (2026-03-25T03:53:14Z):**
+BATCH SHEETS FOLLOW-UP GATE DEFINITION — Authored must-pass criteria and regression safety checks for follow-up implementation: card/list removal, responsiveness improvement, table-based flow preservation, test baselines maintained.
+
+**Follow-up Review (2026-03-25T03:53:15Z):**
+BATCH SHEETS FOLLOW-UP REVIEW COMPLETE — Dallas implementation reviewed: removed grouped card/list duplication ✅, improved search responsiveness via deferred value + memoized index ✅, preserved table-based review flow ✅, maintained selection state threading ✅, test baselines green (200 total, 198 passed, 2 skipped, 0 failed) ✅. **APPROVED** — Ready for user smoke testing.
 
 **Key Learnings:**
 - Spec-first scaffolding works with one runnable smoke/contract test per seam and explicit blockers for skipped tests
@@ -294,6 +300,7 @@ CSS fix correctly addresses root cause. All four gate conditions verified. No re
 - Source-contract revision gates for bridge slices should assert behavior seams, not brittle single-line formatting. The resilient pattern is to check for the registration, the dialog call, and the downstream service calls separately so refactors do not create false failures.
 - Results workspace feature additions should reuse the existing `activeMaterialKey` / `activeSheetId` / `selectedPlacementId` state in `src\PanelNester.WebUI\src\pages\ResultsPage.tsx`; search tabs are safer when they drive the same viewer selection model instead of inventing parallel state.
 - Large-batch ResultsPage work must stay on the nesting-result side of the seam: derive material/group/sheet search and review data from `batchNestResponse.materialResults` and `NestPlacement.group`, not from `PartRow[]`, or the 7500-row regression risk comes back immediately.
+- For responsive search in large data sets (7500+ rows), `useDeferredValue` keeps the input responsive while filtering happens in a lower-priority render pass—better UX than debouncing with arbitrary timeouts.
 
 📌 2026-03-21T03:52:31Z: **`.PNEST` FILE ICON ASSOCIATION REVIEW — APPROVED**
 
@@ -387,3 +394,54 @@ Dallas's implementation delivers the requested batch sheets workspace tab with f
 
 
 - 2026-03-25T03:20:44Z: **BATCH SHEETS TAB ACCEPTANCE GATE + REVIEW COMPLETE.** Authored acceptance criteria upfront covering tab visibility, scroll-containment, grouped sheet listing without dropping mixed-group sheets, panel-ID search across entire batch, search-driven selection state threading, multi-match UI clarity, and empty-result state handling. Eight edge cases documented (empty batch, zero-sheet materials, ungrouped placements, multiple materials with same part ID, whitespace/casing handling, material switch behavior, large-batch responsiveness). Dallas implementation reviewed against all gates: all acceptance criteria confirmed met ✅; edge-case handling correct ✅; regression gates passing (ImportResultsRevisionGateSpecs, Phase05BridgeSpecs) ✅; large-batch stress test (02_multi_material_7500_rows.xlsx) — no responsiveness regression ✅. **APPROVED** — Ready for merge.
+
+📌 2026-03-25T04:15:00Z: **BATCH SHEETS FOLLOW-UP REVIEW — APPROVED ✅**
+
+**Assignment:** Review Dallas's follow-up implementation addressing:
+- grouped card/list section removal (duplicate sheet cards breaking UI)
+- table-based review flow intact
+- search responsiveness on large batches
+- search-driven sheet selection correctness
+- no regressions in results workspace behavior
+
+**Verification Results:**
+
+1. **Grouped card/list removed** ✅ PASS
+   - Zero matches for `card-list|SheetCard|grouped-card|BatchSheetMaterialView|results-sheet-group-card` in ResultsPage.tsx
+   - `PartRow` prop removed from `ResultsPageProps` interface
+   - Group derivation now uses `NestPlacement.group` directly instead of building from `PartRow[]`
+
+2. **Table-based review flow intact** ✅ PASS
+   - "All sheets in batch" table renders every `batchSheet` with columns: Material, Sheet, Groups, Placed, Search hits, Utilization
+   - Panel search results table shows: Panel, Material, Group, Sheet, Size, Utilization
+   - Both tables use `reviewBatchSheet()`/`reviewPanelMatch()` to drive viewer selection
+
+3. **Search responsiveness** ✅ PASS
+   - `useDeferredValue` wraps `panelSearchQueryLabel` to prevent blocking on keystroke
+   - `isPanelSearchPending` state shows "Updating search results..." during transition
+   - `aria-busy` attribute on search section signals pending state to assistive tech
+
+4. **Search-driven sheet selection** ✅ PASS
+   - `reviewPanelMatch(match)` calls `reviewBatchSheet(materialKey, sheetId, placementId)`
+   - Same state flow (`activeMaterialKey`/`activeSheetId`/`selectedPlacementId`) reused—no parallel state invented
+   - Sheet table rows use `firstMatch?.placementId` to pre-select panel on click
+
+5. **No regressions** ✅ PASS
+   - Test baseline: 200 total (198 passed, 2 skipped, 0 failed)
+   - WebUI build: TypeScript clean, production build green (265 kB main, 532 kB SheetViewer)
+   - `ImportResultsRevisionGateSpecs` and `Phase05BridgeSpecs` all passing
+
+**CSS Support:**
+- `.table-row--search-hit td`: subtle highlight for matching sheets
+- `.table-row--active.table-row--search-hit td`: combined active + hit state
+- Both states cascade correctly for multi-selection clarity
+
+**Manual Smoke Test Notes:**
+1. Import 7,500-row batch → Batch sheets tab should render without stutter
+2. Type panel ID fragment → search results table should update responsively
+3. Click any search result row → viewer should load correct sheet with panel selected
+4. No duplicate grouped-card sections should appear anywhere in the tab
+
+**Final Verdict: APPROVED ✅**
+
+Dallas's follow-up correctly removes the duplicate card/list UI, adds `useDeferredValue` for search responsiveness, and keeps the table-based review flow intact. Selection flow reuses existing state exactly as documented in prior learnings. No regressions detected.

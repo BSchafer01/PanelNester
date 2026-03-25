@@ -104,7 +104,7 @@ Users can now repoint the active material library from the default `%LOCALAPPDAT
 
 ### Executive Summary
 
-Users can now review all sheets from a batch nesting job in a dedicated `Batch sheets` tab within the Results workspace. The tab provides three coordinated surfaces: panel-ID search results, grouped sheet sections by material + group, and a scrollable all-sheets table. Search highlights matching sheets across both views and drives the shared Results selection state, enabling seamless viewer synchronization without reintroducing large part-row scans or separate preview modes.
+Users can now review all sheets from a batch nesting job in a dedicated `Batch sheets` tab within the Results workspace. The tab provides three coordinated surfaces: panel-ID search results, grouped sheet sections by material + group, and a scrollable all-sheets table. Search highlights matching sheets across both views and drives the shared Results selection state, enabling seamless viewer synchronization without reintroducing large part-row scans or separate preview modes. Follow-up implementation removed duplicate grouped card/list duplication, improved panel-search responsiveness with deferred value and memoized indexing, and preserved the table-based review flow.
 
 ### Decisions
 
@@ -158,6 +158,25 @@ Treat the proposed sheets tab as a **navigation/review surface over the existing
 - Large-batch behavior (`02_multi_material_7500_rows.xlsx`) — no responsiveness regression
 
 **Result:** APPROVED — All acceptance criteria met; no blockers.
+
+#### Dallas — Batch Sheets Follow-up Implementation
+
+Follow-up work after initial implementation resolved residual UX issues from the first pass:
+
+- **Removed duplicate grouped card/list UI** — Eliminated `card-list`, `SheetCard`, and `BatchSheetMaterialView` patterns from Results Batch sheets tab that were echoing information already in the main all-sheets table
+- **Improved search responsiveness** — Added `useDeferredValue` hook to defer expensive filtering during panel-ID search on large batches (7500+ rows), with memoized search index built once per state change
+- **Preserved table-based review flow** — Kept flat all-sheets table as sole authoritative sheet inventory with group summary text and per-sheet hit counts; removed PartRow dependency by deriving group metadata directly from `NestPlacement.group`
+- **Maintained selection state threading** — Search-to-viewer flow (`reviewPanelMatch()` → `reviewBatchSheet()`) continues to drive existing Results selection state (activeMaterialKey, activeSheetId, selectedPlacementId)
+
+#### Hicks — Batch Sheets Follow-up Review APPROVED
+
+- **Card/list removal confirmed** — No `card-list`, `SheetCard`, or `BatchSheetMaterialView` patterns remain; tab uses pure table-based review
+- **Responsiveness improved** — Large-batch (7500+ row) panel-ID search now responsive without stutter via deferred filtering
+- **Selection flow correct** — Search results and table rows drive same Results selection state for seamless viewer synchronization
+- **Test baselines maintained** — 200 total tests (198 passed, 2 skipped, 0 failed); no new failures
+- **CSS support verified** — `.table-row--search-hit` and combined active+hit states present and functional
+
+**Result:** APPROVED — Implementation is clean; ready for user smoke testing before next phase.
 
 ### Architecture Seam Ownership
 
