@@ -1098,3 +1098,95 @@ File-open command registration is **blocked on:**
 4. Test file-open flow from explorer and command line
 
 This work is explicitly deferred. Current registration is complete and safe.
+
+---
+
+## Decision: Panel Search Precision — Retry (Consolidated)
+
+**Consolidated from inbox:** Dallas, Hicks (2026-03-25)
+
+### Executive Summary
+
+Batch sheet panel search was returning false positives: query `"04013"` matched panels like `PANEL-00004#2`, `PANEL-00040#1/#2`, `PANEL-00045#1/#2/#3` — none containing the full contiguous substring. The implementation has been retried using **strict contiguous substring matching on fully normalized panel-id paths**. Deferred rendering and click-to-select workflow remain intact. All acceptance gates and regression coverage validated.
+
+### Decisions
+
+#### Dallas — Panel Search Precision Retry Implementation
+
+- Normalize both query and panel IDs: trim, lowercase, remove non-alphanumeric (`/[^a-z0-9]+/g`)
+- Match when normalized query appears as **contiguous substring** of normalized panel ID
+- Use `.includes()` directly on full normalized string (not pre-computed fragment arrays)
+- Preserve `useDeferredValue` hook and memoized index for large-batch (7,500+ row) responsiveness
+- Keep click-to-select wiring (`reviewPanelMatch()` → `reviewBatchSheet()`) intact
+- Maintain sheet highlighting and batch-sheet inventory state threading
+
+**Result:** Search `04013` no longer matches false positives; returns only panels containing exact contiguous `04013` sequence.
+
+#### Hicks — Panel Search Precision Retry Gate (Read-Only Definition)
+
+**Acceptance criteria locked to exact user-reported false positives:**
+
+Must **NOT match** for query `"04013"`:
+- `PANEL-00004#2` (normalized: `panel000042`)
+- `PANEL-00040#1` (normalized: `panel000401`)
+- `PANEL-00040#2` (normalized: `panel000402`)
+- `PANEL-00045#1` (normalized: `panel000451`)
+- `PANEL-00045#2` (normalized: `panel000452`)
+- `PANEL-00045#3` (normalized: `panel000453`)
+
+Must **match** panels where normalized ID contains `"04013"` as contiguous substring.
+
+**Regression risks (critical):**
+1. Reintroducing tokenized/fuzzy matching → false positives return
+2. Removing deferred rendering → large-batch UI hang
+3. Changing comparison semantics (startsWith, match, search) → partial matches allowed
+4. Widening search scope beyond `placement.partId` → metadata false positives
+5. Breaking row-click wiring → no sheet load
+6. Losing search-state threading → no sheet highlighting
+7. Removing memoized index → performance regression on large batches
+
+#### Hicks — Panel Search Precision Retry Review APPROVED
+
+**Verdict: APPROVED ✅**
+
+**Gates Passed:**
+- Normalization logic correct (trim, lowercase, alphanum-only)
+- All six reported false-positive panel IDs properly excluded
+- Contiguous substring matching enforced via `.includes()` on full normalized ID
+- Deferred value and memoized search index preserved
+- Click-to-select flow (`reviewPanelMatch()` → sheet/placement selection) working
+- Sheet highlighting via `'table-row--search-hit'` CSS class intact
+- Test suite: 204 passed, 2 skipped, 0 failed
+- ImportResultsRevisionGateSpecs: All precision tests passing
+- Phase05BridgeSpecs: All selection flow tests passing
+- WebUI production build: Successful
+- No regressions detected
+
+**Status:** ✅ Ready for merge.
+
+### Architecture Seam Ownership
+
+| Seam | Owner | Responsibility |
+|------|-------|-----------------|
+| **Normalization** | WebUI (ResultsPage) | `normalizePanelSearchValue()` — trim, lowercase, strip non-alphanum |
+| **Match evaluation** | WebUI (ResultsPage) | `.includes()` on full normalized panel ID; no fragment arrays |
+| **Index building** | WebUI (ResultsPage) | Memoized placement index built once per state change |
+| **Deferred filtering** | WebUI (ResultsPage) | `useDeferredValue` hook defers expensive search on large batches |
+| **Selection flow** | WebUI (ResultsPage) | Search result click → `reviewPanelMatch()` → shared Results state |
+| **Sheet highlighting** | WebUI (ResultsPage + styles.css) | `'table-row--search-hit'` CSS class applied to matched sheets |
+| **Test validation** | Tests (ImportResultsRevisionGateSpecs) | Explicit test cases for exact false-positive examples |
+
+### Test Coverage Status
+
+✅ **Desktop Tests:** All precision tests passing
+- ImportResultsRevisionGateSpecs: 21/21 passed (4 new precision tests)
+- Phase05BridgeSpecs: 5/5 passed
+- ReportDataServiceSpecs: 6/6 passed
+
+✅ **Test Suite Total:** 204 passed, 2 skipped, 0 failed
+
+✅ **WebUI Build:** `npm run build` passed
+
+### Remaining Validation
+
+None — implementation approved for merge.

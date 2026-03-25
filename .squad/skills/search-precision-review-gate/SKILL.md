@@ -59,6 +59,14 @@ List scenarios that are easy to overlook:
 - Case variants (should return identical results)
 - Non-contiguous patterns scattered in ID (should NOT match; these are the false positives)
 
+### 4. Verify the Real Matching Primitive
+For structured IDs, prefer this implementation shape:
+- normalize the **full stored ID** once (`panel-04-013` → `panel04013`)
+- normalize the query once (`04013` → `04013`)
+- match with contiguous substring logic on the normalized full value
+
+Avoid precomputing token arrays or fragment permutations as the primary match surface. That abstraction can drift from the user's mental model and make false positives or false negatives harder to reason about.
+
 ## Outputs
 
 **For Tester Gate:**
@@ -82,6 +90,8 @@ User reports: "Search '04013' returns PANEL-00004, PANEL-00040, PANEL-00045 (fal
 3. **EC-001:** Confirm "04013" vs "00004" are not matching due to JavaScript `.includes()` edge case
 4. **Must-pass:** ImportResultsRevisionGateSpecs + Phase05BridgeSpecs green before merge
 5. **Must-fail:** If false positives still exist, fix is incomplete
+
+**Implementation note:** if the code indexes `normalizedPanelSearchValue` per row and filters with `normalizedPanelSearchValue.includes(normalizedQuery)`, the matching rule stays explicit and easy to regression-test with exact reported IDs.
 
 ## Anti-Patterns
 
