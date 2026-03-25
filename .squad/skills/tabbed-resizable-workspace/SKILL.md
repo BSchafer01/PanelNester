@@ -59,6 +59,8 @@ Build a memoized placement index once from `materialResults -> sheets + placemen
 
 When the searched value is a structured operator ID (panel ID, part ID, ticket number), normalize both the indexed value and the query first—lowercase, strip separators—then require the normalized query to appear as one contiguous substring. That preserves forgiving input (`panel-04-013`, `04013`) without sliding into loose ordered-character matches that erode review trust.
 
+Treat the filtered search result as a **single shared data object**. The summary count, rendered result rows, and sheet-highlight counts should all read from the same memoized search-results structure so the UI cannot report "7 matches across 3 sheets" while a broader row set or scrollbar survives from a different source.
+
 ## Example
 
 - src\PanelNester.WebUI\src\pages\ResultsPage.tsx

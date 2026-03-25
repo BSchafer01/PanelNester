@@ -1190,3 +1190,96 @@ Must **match** panels where normalized ID contains `"04013"` as contiguous subst
 ### Remaining Validation
 
 None — implementation approved for merge.
+
+---
+
+## Decision: Panel Search Live Rendering Bug Fix (Consolidated)
+
+**Consolidated from inbox:** Dallas, Hicks (2026-03-25)
+
+### Executive Summary
+
+Fixed the live rendered Batch sheets search bug where the summary count claimed "7 matches" but the table rendered many more rows including false positives. Root cause: the count calculation and row rendering pulled from different filtered sources. Solution: centralize all search filtering into one shared memoized result source that feeds the summary count, rendered rows, and sheet highlighting consistently.
+
+### Decisions
+
+#### Dallas — Panel Search Live Bug Fix
+
+The live `04013` report showed a trust-breaking state: the summary claimed 7 matches across 3 sheets while the rendered table still looked much broader, even though the filter logic was correct. The UI source-of-truth needed to be explicit so that the count card, table body, and highlighted sheet inventory all reflect the same filtered source.
+
+**Implementation:**
+- Extracted search/index helpers to `src\PanelNester.WebUI\src\pages\resultsBatchSheetSearch.ts`
+- `ResultsPage.tsx` now memoizes `panelSearchResults` from the deferred query and reuses it for:
+  - search-result count summary
+  - rendered search-result rows
+  - all-sheets table hit counts / first-hit selection wiring
+- Added executable regression coverage via `ResultsBatchSheetSearchExecutionSpecs` + `ResultsBatchSheetSearchFixture.cjs` with the screenshot false positives and exact valid `04013` rows
+
+**Impact:**
+- Deferred search responsiveness and click-to-review behavior remain intact
+- UI source-of-truth explicit enough that future search changes can be validated against real returned rows instead of only markup signatures
+
+#### Hicks — Panel Search Live Rendering Bug Gate
+
+**Status:** Locked acceptance criteria
+
+**Bug Description:** Query `"04013"` showed summary `"7 panel match(es) across 3 sheet(s)"` but the table rendered additional false-positive rows, including `PANEL-00004#2`, `PANEL-00040#1/2`, `PANEL-00045#1/2/3`, none of which contain the normalized substring `04013`.
+
+**Hard Gate:** Rendered row count must equal summary count
+1. For query `"04013"` in test dataset: Summary shows "7 matches", rendered rows = 7, no false positives
+2. Row rendering uses only `panelSearchMatches` array, no secondary filters or duplicate sources
+3. `panelSearchMatches.length` = rendered row count = unique sheet count validation
+
+**Regression Coverage:**
+- ✅ `Results_page_batch_sheet_search_requires_exact_contiguous_normalized_panel_id_fragments()`
+- ✅ `Results_page_batch_sheet_search_rejects_the_reported_false_positive_examples()`
+- ✅ `Results_page_batch_sheet_search_keeps_deferred_and_memoized_rendering_for_large_batches()`
+- ✅ `Results_page_batch_sheet_search_rows_still_drive_sheet_review_and_sheet_highlighting()`
+
+#### Hicks — Panel Search Live-Path Fix Review APPROVED
+
+**Status:** APPROVED ✅
+
+**Gate Criteria Verification:**
+- ✅ Rendered row count matches summary count (both from `panelSearchResults`)
+- ✅ False positives rejected (test validates `04013` returns only true matches)
+- ✅ Contiguous normalized matching correct (`normalizePanelSearchValue()` strips separators/case)
+- ✅ Deferred/memoized rendering preserved (`useDeferredValue` + `useMemo`)
+- ✅ Click-to-review flow intact (`reviewPanelMatch()` → selection state)
+- ✅ Tests assert actual returned rows, not just function signatures
+
+**Test Results:**
+- ImportResultsRevisionGateSpecs: All pass
+- Phase05BridgeSpecs: All pass
+- ReportDataServiceSpecs: All pass
+- Full suite: 206 total, 204 passed, 2 skipped, 0 failed
+- WebUI build: successful
+
+**Verdict:** Implementation correctly resolves the render-layer bug by ensuring summary count, rendered rows, and sheet highlighting all derive from a single filtered result source. False positives excluded; test suite comprehensive.
+
+### Architecture Seam Ownership
+
+| Seam | Owner | Responsibility |
+|------|-------|-----------------|
+| **Search index building** | WebUI (resultsBatchSheetSearch.ts) | Index all placements once, normalized |
+| **Search matching** | WebUI (resultsBatchSheetSearch.ts) | Filter index by normalized query |
+| **Result memoization** | WebUI (ResultsPage via useMemo) | Cache panelSearchResults object |
+| **Count display** | WebUI (ResultsPage) | Use panelSearchResults.totalMatchCount |
+| **Row rendering** | WebUI (ResultsPage) | Map panelSearchResults.matches only |
+| **Sheet highlighting** | WebUI (ResultsPage) | Use panelSearchResults.sheetCounts |
+| **Click-to-review** | WebUI (ResultsPage) | Drive selection state from panelSearchResults |
+
+### Test Coverage Status
+
+✅ **Desktop Tests:** All precision tests passing
+- ImportResultsRevisionGateSpecs: precision gate passing
+- Phase05BridgeSpecs: all pass
+- ReportDataServiceSpecs: all pass
+
+✅ **Test Suite Total:** 204 passed, 2 skipped, 0 failed
+
+✅ **WebUI Build:** `npm run build` passed
+
+### Remaining Validation
+
+None — implementation approved for merge and deployment.

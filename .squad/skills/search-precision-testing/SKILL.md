@@ -101,9 +101,27 @@ Panels that MUST match "USER_QUERY":
 - **Before re-attempting a search precision fix** to prevent regression to the same bug
 - **In code review** to verify the fix actually addresses the reported false positives, not just nearby issues
 
+## Render-Layer Validation (Critical)
+
+**New (2026-03-25):** A matching logic fix is necessary but not sufficient. Always validate the **render layer independently**:
+
+- ✓ Matching function returns correct array (verify via console.log or debugger)
+- ✓ Render component uses ONLY that array for `map()` — no secondary sources
+- ✓ Rendered row count = array length (count visible rows vs summary count)
+- ✓ State cleanup on search clear (search input reset should instantly empty table)
+- ✓ No stale renders (previous search results should not leak into new search)
+- ✓ Scrollbar visual state matches expected row count
+
+**Why this matters:** A false positive can come from two places:
+1. **Matching logic:** Function returns wrong set of matches (bug in `.includes()`, normalization, etc.)
+2. **Render logic:** Table renders more rows than the matched array contains (state leaks, concat errors, stale renders)
+
+If tests pass but the user sees false positives in the UI, suspect #2.
+
 ## Anti-Pattern
 
 Do NOT assume:
 - "The code looks right" without testing actual behavior
 - A passing unit test means no false positives exist
 - Substring matching is correct if tokenization is involved
+- Matching logic is sufficient; render layer automatically handles state correctly
