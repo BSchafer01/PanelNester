@@ -2,11 +2,19 @@
 
 PanelNester WebUI built with React + TypeScript. Dallas owns UI flows, components, and operator-facing clarity.
 
-**Key deliverables:** Phase 0 scaffold (contract-first shell); Phase 1 import page; Phase 2 material CRUD UI; Phase 3 project lifecycle; Phase 4 full import with mapping; Phase 5 results viewer with PDF export; Phase 6 UI cleanup; import mapping with create-new-material support.
+**Key deliverables:** Phase 0 scaffold (contract-first shell); Phase 1 import page; Phase 2 material CRUD UI; Phase 3 project lifecycle; Phase 4 full import with mapping; Phase 5 results viewer with PDF export; Phase 6 UI cleanup; import mapping with create-new-material support; Material library relocation UI (2026-03-18); Results batch sheets tab (2026-03-25).
 
-**Current status:** All phases delivered and approved. Most recent: Import mapping feature (2026-03-16T00:09:58Z) — happy path for exact headers/materials, rescue path for manual mapping, create-new-material flow, blocking conditions on unresolved materials. 143 tests passing. **Second machine fixes (2026-03-17T04:04:02Z):** Sticky Results workspace layout (sticky chrome, independent scrolling, combobox selectors, contained table scroll) + kerf width UI binding. **Latest assignment (2026-03-17T20:37:36Z):** Import page performance optimization — paginate large row table (default 250 rows/page, 100/250/500 options) to improve responsiveness with stress case `02_multi_material_7500_rows.xlsx` (7,500 rows). Implementation complete; WebUI build passed. Awaiting manual validation.
+**Full project timeline:**
+- **2026-03-14 (Day 1):** UI scaffold, VS Code dark theme, contract-first architecture. Phase 0/1 foundations complete.
+- **2026-03-15 (Day 2):** Material + Results page cleanup, two-column sticky layout with resizable viewer.
+- **2026-03-16 (Day 3):** Import mapping feature — happy path, rescue path, create-new-material support. 143 tests passing.
+- **2026-03-17 (Days 4-5):** Group-export slice, Import page performance optimization (pagination for 7,500-row stress case), Materials-reconnect layout cleanup, Material library location card UI.
+- **2026-03-18 (Day 6):** Material library relocation follow-through (authoritative libraryLocation state, app-level sync helper).
+- **2026-03-25 (Day 11):** Results batch sheets tab — three coordinated surfaces (search, grouped sections, all-sheets table) driving shared selection state to viewer.
 
-**Key learnings:** Contract-first shell unblocks other agents; VS Code dark theme matches native host; tabbed workspaces + resizable viewers for complex layouts; import mapping requires preview refresh gating before finalize.
+**Current status:** All phases delivered and approved. Latest (2026-03-25T03:20:44Z): Batch sheets tab complete — panel-ID search, grouped material/group sections, scrollable all-sheets table with shared selection state threading. WebUI build passed; ImportResultsRevisionGateSpecs and Phase05BridgeSpecs pass. Hicks review gate **APPROVED**.
+
+**Key learnings:** Contract-first shell unblocks parallel work; VS Code dark theme matches native host; sticky layout + resizable columns + tabbed workspaces suit complex UX; panel search + grouped display + flat table = three-surface navigation pattern; import mapping requires preview refresh gating; material library path state must be authoritative on bridge side.
 
 ---
 # Dallas History

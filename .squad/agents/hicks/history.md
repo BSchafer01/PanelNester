@@ -7,22 +7,23 @@
 - **Stack:** C#/.NET desktop host, WPF shell, WebView2 UI, React + TypeScript web app, Three.js viewer, local JSON/SQLite persistence, CsvHelper/ClosedXML import, QuestPDF reporting
 - **Description:** Local desktop tool for importing rectangular parts, nesting them by material, visualizing sheet layouts, and exporting PDF summaries.
 
-## Core Context — Phases 0–6 Complete + Results Repair
+## Core Context — Phases 0–6 Complete + Feature Batches
 
 I own acceptance criteria, regression coverage, and reviewer verdicts for the full product. Spec-first test scaffolding strategy (one runnable smoke/contract test per seam, skipped integration tests with explicit blockers) has been applied across all phases. Cross-layer review gates require shared contract names, a dispatcher-backed round-trip through real seams, and live results consumption.
 
-**Phase Progression:**
+**Test Baseline & Phase Progression:**
 - **Phase 0–1:** Test infrastructure and spec-first scaffolding (35 tests)
 - **Phase 2:** Material library CRUD gates; 61 tests; bridge contracts validated
 - **Phase 3:** Project persistence gates; 80 tests; snapshot-first validation
 - **Phase 4:** Import pipeline gates (regression safety, format parity, edit persistence, failure clarity); 93 tests
 - **Phase 5:** Results viewer & PDF reporting gates (rendering fidelity, PDF accuracy, multi-material determinism, export reliability); 110 tests (after Ripley revision + follow-up + bugfix batch)
 - **Phase 6:** Hardening & smoke verification (empty-result export, dense-layout readability, viewer edge cases, bridge error surfaces); 127 tests (125 passed, 2 skipped)
-- **Recent Batches:** FlatBuffers migration, UI cleanup, Import page cleanup, Material/Results page cleanup, Maximize clipping fix, Per-user MSI packaging, Stock-width nesting preference
-- **Current (2026-03-17T05:03:53Z):** Results viewer repair approval — Bishop fixed CSS grid row template (`auto 1fr` → `auto auto 1fr`). Approved against four gate conditions: workspace left ✅, viewer right ✅, resize handle visible/grabbable ✅, independent workspace scrolling ✅. Test baseline: 143 passing, 0 regressions.
-- **2026-03-17T18:58:10Z:** GROUP-EXPORT-SLICE COMPLETE — Added regression coverage for TypeScript contract seam (ImportResultsRevisionGateSpecs.cs) and grouped/ungrouped export behavior (ReportDataServiceSpecs.cs, QuestPdfReportExporterSpecs.cs). Proves mixed grouped + ungrouped placements survive report shaping and render distinct summary text in output. Test baseline: 167 passing, 2 skipped (expected). Manual gates outstanding: grouped results UI rendering, import mapping review, dense-layout PDF, pointer capture release (2–3 hours total).
-- **2026-03-17T20:37:36Z:** IMPORT PAGE PERFORMANCE REGRESSION GATES COMPLETE — Added Desktop revision-gate coverage to lock WebUI performance contract: `ResultsPage` must not accept or re-scan `PartRow[]` payloads; group-review state must derive from `NestPlacement.group` only; `App` must not forward `state.importResponse.parts` into `ResultsPage`; `SheetViewer` continues consuming group metadata from shared placement contract. Test results: 59 Desktop ✓, 99 Services ✓, WebUI build ✓. Automated latency measurement not practical in current stack (no browser/UI test harness). Manual gate pending: import `02_multi_material_7500_rows.xlsx`, toggle results tabs repeatedly, confirm no visible stall/regression vs. prior build while group review renders correctly.
-- **2026-03-18T15:21:19Z:** MATERIALS-RECONNECT LAYOUT SLICE REGRESSION GATES COMPLETE — Dallas implemented UI cleanup: reconnect control moved to app chrome (visible only on disconnect), Materials page passive status hidden, Refresh button moved to library heading, top-level New material button removed (create editor preserved). Hicks authored regression gates enforcing reconnect ownership and Materials page layout expectations. Targeted desktop revision-gate suite passed. WebUI production build passed. Manual validation pending: launch app to confirm reconnect chrome behavior on disconnect/failure and verify Materials page layout matches screenshot.
+
+**Feature Batches Approved (2026-03-15 to present):**
+- FlatBuffers migration, UI cleanup, Import page cleanup, Material/Results page cleanup, Maximize clipping fix, Per-user MSI packaging, Stock-width nesting preference, Material library relocation (2026-03-18), Results batch sheets tab (2026-03-25).
+
+**Latest Assignment (2026-03-25T03:20:44Z):**
+BATCH SHEETS TAB ACCEPTANCE GATE + REVIEW COMPLETE — Authored acceptance criteria upfront covering tab visibility, scroll-containment, grouped sheet listing, panel-ID search across batch, search-driven selection state, multi-match UI clarity, empty-result handling. Eight edge cases documented. Dallas implementation reviewed against all gates: acceptance criteria met ✅, edge cases handled ✅, regression gates passing (ImportResultsRevisionGateSpecs, Phase05BridgeSpecs) ✅, large-batch stress test (7,500 rows) — no regression ✅. **APPROVED** — Ready for merge.
 
 **Key Learnings:**
 - Spec-first scaffolding works with one runnable smoke/contract test per seam and explicit blockers for skipped tests
