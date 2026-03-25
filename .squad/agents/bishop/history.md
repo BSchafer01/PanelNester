@@ -163,6 +163,8 @@ PanelNester is a local desktop nesting tool with WPF host, WebView2 UI, and per-
 - 2026-03-15T18:00:00Z: For branded WPF shells with custom chrome, the safest seam is one shared multi-resolution `.ico`: use it as the desktop project's `<ApplicationIcon>`, set `Window.Icon` so taskbar/Alt+Tab/native shell surfaces inherit it, bind any custom titlebar glyph to that same `Window.Icon`, and reuse the same asset in WiX for `ARPPRODUCTICON` plus shortcut `Icon` so uninstall/start-menu branding stays aligned with the built exe.
 - 2026-03-16T18:35:00Z: For rebuild-only MSI deliveries, the calmest proof that the latest Web UI made it into the installer is a two-step check: first confirm `src\PanelNester.WebUI\dist` and `installer\PanelNester.Installer\obj\desktop-publish\WebApp` are hash-identical, then query the built MSI `File` table via the Windows Installer COM API to confirm every current dist asset filename is present in the package. That validates both the staging seam and the packaged payload without depending on a full administrative extraction.
 - 2026-03-16T19:05:00Z: Public GitHub publish readiness is a host-boundary audit, not just a `gh repo create` check: verify there is no existing remote, confirm `gh` is installed/authenticated and the target repo name is free, then clean the working tree by ignoring local IDE/build state before trusting `git status`. If most of the app still appears as untracked after that cleanup, stop—publishing would create a fragile or incomplete public repo until the intended source files are curated and committed.
+- 2026-03-21T18:10:00Z: Safe `.pnest` shell open support works best as a two-step seam: `App.xaml.cs` resolves a startup project path through `StartupProjectPathResolver`, then `MainWindow.xaml.cs` waits for `WebViewBridge` host readiness before asking the Web UI to reuse its existing `openProject` flow. That keeps command-line parsing strict and lets bad or missing paths fall back to a normal shell boot.
+- 2026-03-21T18:10:00Z: The reusable file-open contract now spans `src\PanelNester.Desktop\StartupProjectPathResolver.cs`, `src\PanelNester.Desktop\Bridge\WebViewBridge.cs`, `src\PanelNester.WebUI\src\App.tsx`, and `installer\PanelNester.Installer\Product.wxs`; when wiring explorer launch, keep the installer command quoted as `"[INSTALLFOLDER]PanelNester.Desktop.exe" "%1"` and prove the explicit file path bypass in `tests\PanelNester.Desktop.Tests\Bridge\ProjectBridgeSpecs.cs`.
 
 ## Recent Work (2026-03-14T18:14:59Z)
 
@@ -352,3 +354,33 @@ PanelNester is a local desktop nesting tool with WPF host, WebView2 UI, and per-
 ## Learnings
 
 - 2026-03-18: Material library relocation should stay on the existing `JsonMaterialRepository` seam: let the WebUI send an empty `choose-material-library-location` request, have the desktop bridge open the native `.json` save picker with overwrite prompt disabled, and serialize `MaterialLibraryLocation` to the web contract names (`currentPath`, `defaultPath`, `usingDefaultLocation`). Key files: `src\PanelNester.Desktop\Bridge\DesktopBridgeRegistration.cs`, `src\PanelNester.Desktop\Bridge\BridgeContracts.cs`, `src\PanelNester.Domain\Models\MaterialLibraryLocation.cs`, `src\PanelNester.Services\Materials\JsonMaterialRepository.cs`.
+- 2026-03-21: Per-user `.pnest` icon association is safest in WiX under `HKCU\Software\Classes`: map `.pnest` to a `PanelNester.Project` ProgID and point `DefaultIcon` at `"[INSTALLFOLDER]PanelNester.Desktop.exe",0` so Explorer reuses the executable's embedded icon. If desktop startup file-open handling is not wired, omit `shell\open\command` instead of shipping a broken double-click contract. Key files: `installer\PanelNester.Installer\Product.wxs`, `tests\PanelNester.Desktop.Tests\ProjectConfiguration\InstallerFileAssociationSpecs.cs`.
+- 2026-03-22: After the startup argument resolver and WebView bridge open flow are in place, it is safe to register `Software\Classes\PanelNester.Project\shell\open\command` with a fully quoted `"%1"` payload; keep tests asserting the command and the absence of `FileExts\.pnest\UserChoice`.
+
+## 2026-03-21T03:52:31Z — `.pnest` Custom Icon Association (MSI Registry)
+
+**Assignment:** Add per-user Windows registry integration for `.pnest` file icon association.
+
+**Delivery:**
+- Registered `.pnest` extension in HKCU\Software\Classes (per-user scope, aligns with per-user MSI)
+- Created `PanelNester.Project` ProgID with `DefaultIcon` pointing to `"[INSTALLFOLDER]PanelNester.Desktop.exe",0`
+- Intentionally omitted shell `open` command—startup file-open parameter handling does not exist yet
+
+**Files Modified:**
+- `installer\PanelNester.Installer\Product.wxs`: Added `.pnest` registry entries and ProgID
+- `tests\PanelNester.Desktop.Tests\ProjectConfiguration\InstallerFileAssociationSpecs.cs`: Added 2 regression tests
+
+**Test Results:**
+- ✅ New `DesktopAssociationSpecs`: 2 tests passed (`.pnest` extension registry, ProgID validation)
+- ✅ All existing tests: 72 passed, 1 skipped (74 total)
+- ✅ `dotnet build .\installer\PanelNester.Installer\PanelNester.Installer.wixproj`: Success
+- ✅ `dotnet test .\tests\PanelNester.Desktop.Tests\`: 74/74 passing
+
+**Gate Review (Hicks):** APPROVED ✅
+- HKCU per-user registry scope correct
+- Omitting shell open is the right choice (no file-open handler exists)
+- Icon target is sane (EXE index 0)
+- No app-side changes required; zero modifications to startup or bridge
+
+**Status:** COMPLETE — Icon association approved for user testing; file-open command deferred to future phase.
+

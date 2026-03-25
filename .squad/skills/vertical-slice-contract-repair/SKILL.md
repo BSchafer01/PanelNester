@@ -18,6 +18,7 @@ Use this when a desktop host, service layer, and frontend were built in parallel
 4. **Bound failure modes explicitly** so reviewers can gate on stable codes instead of prose (`empty-run`, `invalid-input`, etc.).
 5. **Promote skipped tests into real tests** as soon as the seam exists; don’t leave “blocked” markers hanging after the code is live.
 6. **Make the solution runnable for reviewers** by ensuring the real projects and test projects are included in the solution entry point.
+7. **Preserve responsibility boundaries while repairing drift**: if the UX contract says the host owns a file picker or shell interaction, don’t “fix” the frontend by making it gather raw paths just to match a temporary backend vocabulary change.
 
 ## Good signs
 
@@ -30,3 +31,4 @@ Use this when a desktop host, service layer, and frontend were built in parallel
 - Keeping transport-only DTO copies “just in case” when they already mirror domain models
 - Fixing UI text while the host still returns `not-ready`
 - Adding new Phase 2+ scope before the first vertical slice is actually runnable
+- Moving host-owned shell work into the frontend just because one layer drifted to a lower-level payload (`NewLibraryPath`, raw file paths, etc.)

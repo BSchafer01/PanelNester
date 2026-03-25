@@ -1,11 +1,11 @@
 ---
-updated_at: 2026-03-18T16:49:33Z
-focus_area: material library location management
+updated_at: 2026-03-25T03:01:44Z
+focus_area: results batch sheets tab and panel search
 active_issues: []
 ---
 
 # What We're Focused On
 
-The current active slice is making the reusable material library relocatable. The immediate goal is to let the user repoint the library to a different file location, persist that selection across app restarts, and provide a restore-default action that safely recreates the default `materials.json` file when it has been deleted or moved.
+The current active slice is the new results-workspace batch sheets tab. The immediate goal is to let users scan every generated sheet in a batch by material and group, keep the full sheet list available in a scrollable table, and search for a panel so the UI jumps directly to the matching sheet for review.
 
-The grouped import/nesting/results work and recent import-page UI polish remain complete. Validation for this slice should continue to rely on the existing .NET regression suites plus the WebUI production build, with manual confirmation in the live UI for file-picker behavior, persisted location recovery, and restore-default recovery.
+Validation for this slice should continue to rely on the existing .NET regression suites plus the WebUI production build, with manual confirmation in the live UI for grouped sheet rendering, panel-search-driven sheet selection, and large-batch responsiveness.

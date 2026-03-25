@@ -83,3 +83,36 @@ All delivery confirmed; orchestration logs recorded; team updates appended to ag
 
 - 2026-03-17T10:26:24Z: **LOCAL COMMIT EXECUTION COMPLETE.** Consolidated all grouped import, nesting, and results workflow changes into single atomic commit hash c95df7c. All 369 files staged and committed with Co-authored-by trailer. Git status clean. No push (no remote configured). Decision record appended to `decisions.md`. Orchestration log and session log created. Team ready for parallel implementation: Parker (domain model + nesting engine), Dallas (import gate fix + results UI), Hicks (test matrix).
 
+## Learnings (Continued)
+
+### Material Library Repointing Design Review (2026-03-19T00:00:00Z)
+
+**Context:** User requested ability to repoint material library to custom location, persist across restarts, and restore default with auto-creation if missing.
+
+**Key decisions:**
+1. **Separate settings file** — Store active library path in `app-settings.json` (new), not embedded in repository. Keeps `DesktopStoragePaths` as read-only utility for defaults.
+2. **Two new bridge messages** — `change-library-location` and `restore-default-library-location` with clean error codes and fallback behavior.
+3. **Silent fallback** — If custom path becomes inaccessible at startup, revert to default without orphaning app. User gets status message, not modal error.
+4. **No repository contract change** — `JsonMaterialRepository` and `IMaterialRepository` stay unchanged. Active path is resolved *before* instantiation.
+5. **Seam ownership** — Desktop host owns settings R/W, handlers, and fallback logic. WebUI owns buttons and messaging. Bridge owns contract definition.
+
+**Risk mitigations:**
+- Tested fallback: custom path deleted mid-session → graceful revert to default.
+- Settings file is optional at startup (missing file = use default).
+- Persisted path doesn't break projects (they snapshot materials).
+- Error codes map to user-friendly messages in bridge error resolver.
+
+**Estimated delivery:** 3–4 engineering days across team (no blockers, additive feature).
+
+**Files modified:** AppSettings (new), MainWindow, DesktopBridgeRegistration, contracts.ts, MaterialsPage.tsx, BridgeContracts.cs error mappings.
+
+**Decision record:** `.squad/decisions/inbox/ripley-material-library-repointing.md`
+
+### .pnest Startup Open Readiness (2026-03-19T00:00:00Z)
+
+**Context:** Startup `.pnest` opens could fire before the WebUI finished handshake/capability wiring.
+
+**Key decisions:**
+1. **Explicit UI-ready signal** — WebUI sends `bridge-ui-ready` after handshake success; desktop waits on that signal before startup open.
+2. **Readiness gate abstraction** — `BridgeHostReadinessGate` isolates the ready signal and is covered by a behavioral test.
+3. **Startup flow remains safe** — Startup arg parsing and invalid-path rejection stay unchanged; only the readiness seam moved.

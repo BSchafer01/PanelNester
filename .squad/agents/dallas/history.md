@@ -195,6 +195,8 @@ PanelNester WebUI built with React + TypeScript. Dallas owns UI flows, component
 
 **Integration Gate:** Phase 4 cleared all four non-negotiable gates (regression safety, format parity, edit persistence, failure clarity).
 
+- 2026-03-25T04:10:29Z: **PANEL SEARCH PRECISION ASSIGNMENT.** Tasked with fixing false-positive search behavior in batch sheets panel-ID lookup. Current search returns loose substring matches (e.g., "04013" matches PANEL-00004). Target: normalize both query and panel IDs (lowercase, remove non-alphanumeric), then match only when normalized query appears as **contiguous substring** in normalized ID. Preserve deferred render performance and click-to-select workflow. Authorized files include ResultsPage.tsx, styles.css, and test specs. Acceptance gate defined by Hicks; reviewer gate pending after implementation.
+
 ---
 
 ## Learnings
@@ -272,3 +274,4 @@ PanelNester WebUI built with React + TypeScript. Dallas owns UI flows, component
 - 2026-03-25T03:20:44Z: **BATCH SHEETS TAB APPROVED.** Results workspace now has a dedicated Batch sheets tab providing three coordinated surfaces: panel-ID search results, grouped sheet sections by material + group, and a scrollable all-sheets table for batch review. Search highlights matching sheets in both views and drives the shared Results selection state directly to the viewer. No new bridge or contract fields required; tab derives rows from existing materialResults -> sheets + placements payload. All acceptance criteria met; ImportResultsRevisionGateSpecs and Phase05BridgeSpecs pass. WebUI build green. Hicks review gate **APPROVED** ✅
 
 - 2026-03-25: **BATCH SHEETS FOLLOW-UP COMPLETE.** Removed the duplicated grouped sheet card/list from `src\PanelNester.WebUI\src\pages\ResultsPage.tsx` so the flat all-sheets table remains the single batch inventory surface and the tab stops burning vertical space on repeated sheet summaries. Panel-ID search now runs against a memoized batch-wide placement index and defers expensive filtering with `useDeferredValue`, which keeps typing responsive on large runs while preserving the same shared selection handoff (`activeMaterialKey`, `activeSheetId`, `selectedPlacementId`). Validation passed via `npm run build`, `ImportResultsRevisionGateSpecs`, `Phase05BridgeSpecs`, and `ReportDataServiceSpecs`.
+- 2026-03-25T04:20:00Z: Batch-sheet panel search should normalize panel IDs by stripping separators and case before matching, but still require the operator query to appear as one contiguous fragment in that normalized value. This keeps deferred, memoized search responsive while preventing loose ordered-character hits like `04013` matching `PANEL-00004#2`.

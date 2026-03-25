@@ -18,6 +18,7 @@ Use this when architecture or service seams are still being built, but the team 
 4. Add skipped tests with precise blocker text for the integration checks that cannot run yet.
 5. Pair the tests with a written matrix that maps each case to a success criterion or failure mode.
 6. Record contract gaps immediately so implementation teams know what must stabilize for the placeholders to turn live.
+7. For desktop+WebUI slices without a browser test harness, combine passing .NET spec helpers for file/settings behavior with source-contract gate tests that inspect TypeScript contracts and page markup directly.
 
 ## Good signs
 

@@ -681,6 +681,76 @@ Estimated total: 2–3 hours. Artifacts ready within same day.
 
 **Consequences:**
 - Startup path resolution provides strict validation and security boundary
+
+## Decision: Panel Search Precision (Consolidated)
+
+**Consolidated from inbox:** Dallas, Hicks (2026-03-25)
+
+### Executive Summary
+
+Batch sheet panel search was returning false positives (e.g., searching `04013` returned `PANEL-00004`, `PANEL-00040`, `PANEL-00045`). The issue has been fixed by enforcing **exact contiguous normalized panel-id matching** instead of permitting scattered character matches. The implementation normalizes both query and panel IDs (lowercase, remove non-alphanumeric), then performs substring matching. Deferred rendering and click-to-select workflow preserved.
+
+### Decisions
+
+#### Dallas — Panel Search Precision Implementation
+
+- Normalize panel IDs and search query by:
+  1. Trimming whitespace
+  2. Converting to lowercase
+  3. Removing non-alphanumeric characters (`/[^a-z0-9]+/g`)
+- Match only when normalized query appears as **contiguous substring** in normalized panel ID
+- Preserve existing memoized placement index and deferred filtering path
+- Keep click-to-select functionality intact
+- Maintain deferred render performance (<100ms for 7500-row batch)
+
+**Result:** Search `04013` no longer matches `PANEL-00004#2` (normalized: `panel000042`); matches only panels containing exact contiguous `04013` sequence.
+
+#### Hicks — Acceptance Gate & Regression Strategy
+
+**Acceptance Criteria (8 gates):**
+1. Exact match: `04013` returns panels with full `04013` sequence only
+2. Contiguous fragment: `013` returns panels containing `013` as substring
+3. No loose partials: scattered digits are rejected
+4. Empty result state: zero results display correctly
+5. Case insensitive: `04013` and `04013` return identical results
+6. Real dataset stability: 7500-row import searchable and accurate
+7. Search UX: result/sheet counts reflect exact matches
+8. Performance: large batch search <100ms
+
+**Regression Risks (7 critical):**
+- Panel search index corruption
+- Deferred search state invalid
+- Sheet count aggregation incorrect
+- Batch nesting payload corrupted
+- Sheet selection broken
+- Import→nest→search→view chain broken
+- Empty batch crashes
+
+**Edge Cases (8 scenarios):**
+- Numeric IDs with no contiguous match
+- Valid partial at ID start
+- Valid fragment mid-sequence
+- Query with no matches
+- Case variants
+- Whitespace in query
+- Large batch responsiveness
+- Zero-placement batch stability
+
+#### Hicks — Implementation Review & Approval
+
+**Verdict: APPROVED ✅**
+
+**Gates Passed:**
+- Normalization logic correct
+- Bug scenario panels properly excluded
+- Deferred/memoized search intact
+- Click-to-select flow working
+- Test suite: 201 passed, 2 skipped
+- WebUI production build successful
+- ImportResultsRevisionGateSpecs passed
+- Phase05BridgeSpecs passed
+
+**No regressions detected.** Implementation correctly reuses existing state management patterns.
 - Application can now be launched with `.pnest` file paths from file explorer or command line
 - No duplicate file-load logic; reuses existing UI flow
 

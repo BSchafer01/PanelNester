@@ -45,6 +45,20 @@ Saves vertical space, maintains selection clarity, reduces visual noise.
 ### Table Scroll Limits
 Add max-height: 400px to .table-shell for contained scrolling. Large tables scroll inside workspace instead of pushing content down.
 
+### Shared Selection State
+When adding a new review tab (search/finder, grouped review, sheet audit), do not create a second viewer-selection model. Route picks back through the page's existing material/sheet/placement state so the live viewer, sheet table, and placement table stay synchronized.
+
+For PanelNester's Results page, that means new workspace affordances should update the same `activeMaterialKey`, `activeSheetId`, and `selectedPlacementId` flow already used by sheet detail, placement inspection, and group review.
+
+### Searchable Batch Review
+When operators need batch-wide lookup, keep the batch-review tab to two synchronized surfaces:
+- a search-results table for exact panel hits
+- one flat, scroll-contained all-sheets table for exhaustive coverage
+
+Build a memoized placement index once from `materialResults -> sheets + placements`, then filter it with `useDeferredValue` so search stays responsive on large runs without changing contracts or rescanning import rows. Panel-ID search should highlight matching sheets in the all-sheets table, then let a click reuse the shared selection state to move the pinned viewer immediately. If a grouped card/list repeats the same sheet inventory already present in the table, remove it—the duplicate surface costs vertical space and rerender time without improving review confidence.
+
+When the searched value is a structured operator ID (panel ID, part ID, ticket number), normalize both the indexed value and the query first—lowercase, strip separators—then require the normalized query to appear as one contiguous substring. That preserves forgiving input (`panel-04-013`, `04013`) without sliding into loose ordered-character matches that erode review trust.
+
 ## Example
 
 - src\PanelNester.WebUI\src\pages\ResultsPage.tsx
@@ -55,3 +69,5 @@ Add max-height: 400px to .table-shell for contained scrolling. Large tables scro
 - Rendering report fields, summary tables, sheet details, placement tables, unplaced reasons, and viewer as a long vertical stack that forces constant scrolling and repeats context below the active visual surface.
 - Using card grids for material/sheet selection when comboboxes are more space-efficient.
 - Letting large tables grow unbounded without scroll containers.
+- Adding a search or finder tab that keeps its own independent "active result" state and leaves the viewer pointed somewhere else.
+- Rendering a second grouped sheet card inventory beside an authoritative all-sheets table when both surfaces answer the same review question.
