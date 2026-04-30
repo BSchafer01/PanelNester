@@ -216,7 +216,25 @@ public struct ProjectMetadata : IFlatbufferObject
         }
     }
 
-    public static void StartProjectMetadata(FlatBufferBuilder builder) => builder.StartTable(10);
+    public long RequiredDateTicks
+    {
+        get
+        {
+            var o = __p.__offset(24);
+            return o != 0 ? __p.bb.GetLong(o + __p.bb_pos) : 0;
+        }
+    }
+
+    public bool HasRequiredDate
+    {
+        get
+        {
+            var o = __p.__offset(26);
+            return o != 0 && __p.bb.Get(o + __p.bb_pos) != 0;
+        }
+    }
+
+    public static void StartProjectMetadata(FlatBufferBuilder builder) => builder.StartTable(12);
     public static void AddProjectName(FlatBufferBuilder builder, StringOffset projectNameOffset) => builder.AddOffset(0, projectNameOffset.Value, 0);
     public static void AddProjectNumber(FlatBufferBuilder builder, StringOffset projectNumberOffset) => builder.AddOffset(1, projectNumberOffset.Value, 0);
     public static void AddCustomerName(FlatBufferBuilder builder, StringOffset customerNameOffset) => builder.AddOffset(2, customerNameOffset.Value, 0);
@@ -227,6 +245,8 @@ public struct ProjectMetadata : IFlatbufferObject
     public static void AddHasDate(FlatBufferBuilder builder, bool hasDate) => builder.AddBool(7, hasDate, false);
     public static void AddRevision(FlatBufferBuilder builder, StringOffset revisionOffset) => builder.AddOffset(8, revisionOffset.Value, 0);
     public static void AddNotes(FlatBufferBuilder builder, StringOffset notesOffset) => builder.AddOffset(9, notesOffset.Value, 0);
+    public static void AddRequiredDateTicks(FlatBufferBuilder builder, long requiredDateTicks) => builder.AddLong(10, requiredDateTicks, 0);
+    public static void AddHasRequiredDate(FlatBufferBuilder builder, bool hasRequiredDate) => builder.AddBool(11, hasRequiredDate, false);
 
     public static Offset<ProjectMetadata> EndProjectMetadata(FlatBufferBuilder builder)
     {
@@ -265,14 +285,175 @@ public struct ProjectSettings : IFlatbufferObject
         }
     }
 
-    public static void StartProjectSettings(FlatBufferBuilder builder) => builder.StartTable(2);
+    public StiffenerTakeoffSettings? StiffenerTakeoff
+    {
+        get
+        {
+            var o = __p.__offset(8);
+            return o != 0 ? new StiffenerTakeoffSettings().__assign(__p.__indirect(o + __p.bb_pos), __p.bb) : null;
+        }
+    }
+
+    public static void StartProjectSettings(FlatBufferBuilder builder) => builder.StartTable(3);
     public static void AddKerfWidth(FlatBufferBuilder builder, double kerfWidth) => builder.AddDouble(0, kerfWidth, 0);
     public static void AddReportSettings(FlatBufferBuilder builder, Offset<ReportSettings> reportSettingsOffset) => builder.AddOffset(1, reportSettingsOffset.Value, 0);
+    public static void AddStiffenerTakeoff(FlatBufferBuilder builder, Offset<StiffenerTakeoffSettings> stiffenerTakeoffOffset) => builder.AddOffset(2, stiffenerTakeoffOffset.Value, 0);
 
     public static Offset<ProjectSettings> EndProjectSettings(FlatBufferBuilder builder)
     {
         var o = builder.EndTable();
         return new Offset<ProjectSettings>(o);
+    }
+}
+
+public struct StiffenerTakeoffSettings : IFlatbufferObject
+{
+    private Table __p;
+    public ByteBuffer ByteBuffer => __p.bb;
+
+    public void __init(int _i, ByteBuffer _bb) => __p = new Table(_i, _bb);
+    public StiffenerTakeoffSettings __assign(int _i, ByteBuffer _bb)
+    {
+        __init(_i, _bb);
+        return this;
+    }
+
+    public bool Enabled
+    {
+        get
+        {
+            var o = __p.__offset(4);
+            return o != 0 && __p.bb.Get(o + __p.bb_pos) != 0;
+        }
+    }
+
+    public double MinimumLengthInches
+    {
+        get
+        {
+            var o = __p.__offset(6);
+            return o != 0 ? __p.bb.GetDouble(o + __p.bb_pos) : 32d;
+        }
+    }
+
+    public double MinimumWidthInches
+    {
+        get
+        {
+            var o = __p.__offset(8);
+            return o != 0 ? __p.bb.GetDouble(o + __p.bb_pos) : 32d;
+        }
+    }
+
+    public double WidthDeductionInches
+    {
+        get
+        {
+            var o = __p.__offset(10);
+            return o != 0 ? __p.bb.GetDouble(o + __p.bb_pos) : 4d;
+        }
+    }
+
+    public double StockLengthFeet
+    {
+        get
+        {
+            var o = __p.__offset(12);
+            return o != 0 ? __p.bb.GetDouble(o + __p.bb_pos) : 20d;
+        }
+    }
+
+    public string? Extrusion
+    {
+        get
+        {
+            var o = __p.__offset(16);
+            return o != 0 ? __p.__string(o + __p.bb_pos) : null;
+        }
+    }
+
+    public string? ReportTitle
+    {
+        get
+        {
+            var o = __p.__offset(14);
+            return o != 0 ? __p.__string(o + __p.bb_pos) : null;
+        }
+    }
+
+    public string? ReleaseId
+    {
+        get
+        {
+            var o = __p.__offset(18);
+            return o != 0 ? __p.__string(o + __p.bb_pos) : null;
+        }
+    }
+
+    public string? PoNumber
+    {
+        get
+        {
+            var o = __p.__offset(20);
+            return o != 0 ? __p.__string(o + __p.bb_pos) : null;
+        }
+    }
+
+    public string? Color
+    {
+        get
+        {
+            var o = __p.__offset(22);
+            return o != 0 ? __p.__string(o + __p.bb_pos) : null;
+        }
+    }
+
+    public string? ColorNumber
+    {
+        get
+        {
+            var o = __p.__offset(24);
+            return o != 0 ? __p.__string(o + __p.bb_pos) : null;
+        }
+    }
+
+    public string? Manufacturer
+    {
+        get
+        {
+            var o = __p.__offset(26);
+            return o != 0 ? __p.__string(o + __p.bb_pos) : null;
+        }
+    }
+
+    public string? Status
+    {
+        get
+        {
+            var o = __p.__offset(28);
+            return o != 0 ? __p.__string(o + __p.bb_pos) : null;
+        }
+    }
+
+    public static void StartStiffenerTakeoffSettings(FlatBufferBuilder builder) => builder.StartTable(13);
+    public static void AddEnabled(FlatBufferBuilder builder, bool enabled) => builder.AddBool(0, enabled, false);
+    public static void AddMinimumLengthInches(FlatBufferBuilder builder, double minimumLengthInches) => builder.AddDouble(1, minimumLengthInches, 32d);
+    public static void AddMinimumWidthInches(FlatBufferBuilder builder, double minimumWidthInches) => builder.AddDouble(2, minimumWidthInches, 32d);
+    public static void AddWidthDeductionInches(FlatBufferBuilder builder, double widthDeductionInches) => builder.AddDouble(3, widthDeductionInches, 4d);
+    public static void AddStockLengthFeet(FlatBufferBuilder builder, double stockLengthFeet) => builder.AddDouble(4, stockLengthFeet, 20d);
+    public static void AddReportTitle(FlatBufferBuilder builder, StringOffset reportTitleOffset) => builder.AddOffset(5, reportTitleOffset.Value, 0);
+    public static void AddExtrusion(FlatBufferBuilder builder, StringOffset extrusionOffset) => builder.AddOffset(6, extrusionOffset.Value, 0);
+    public static void AddReleaseId(FlatBufferBuilder builder, StringOffset releaseIdOffset) => builder.AddOffset(7, releaseIdOffset.Value, 0);
+    public static void AddPoNumber(FlatBufferBuilder builder, StringOffset poNumberOffset) => builder.AddOffset(8, poNumberOffset.Value, 0);
+    public static void AddColor(FlatBufferBuilder builder, StringOffset colorOffset) => builder.AddOffset(9, colorOffset.Value, 0);
+    public static void AddColorNumber(FlatBufferBuilder builder, StringOffset colorNumberOffset) => builder.AddOffset(10, colorNumberOffset.Value, 0);
+    public static void AddManufacturer(FlatBufferBuilder builder, StringOffset manufacturerOffset) => builder.AddOffset(11, manufacturerOffset.Value, 0);
+    public static void AddStatus(FlatBufferBuilder builder, StringOffset statusOffset) => builder.AddOffset(12, statusOffset.Value, 0);
+
+    public static Offset<StiffenerTakeoffSettings> EndStiffenerTakeoffSettings(FlatBufferBuilder builder)
+    {
+        var o = builder.EndTable();
+        return new Offset<StiffenerTakeoffSettings>(o);
     }
 }
 
@@ -324,11 +505,29 @@ public struct ReportSettings : IFlatbufferObject
         }
     }
 
-    public long ReportDateTicks
+    public string? ReleaseId
     {
         get
         {
             var o = __p.__offset(12);
+            return o != 0 ? __p.__string(o + __p.bb_pos) : null;
+        }
+    }
+
+    public string? Status
+    {
+        get
+        {
+            var o = __p.__offset(14);
+            return o != 0 ? __p.__string(o + __p.bb_pos) : null;
+        }
+    }
+
+    public long ReportDateTicks
+    {
+        get
+        {
+            var o = __p.__offset(16);
             return o != 0 ? __p.bb.GetLong(o + __p.bb_pos) : 0;
         }
     }
@@ -337,7 +536,7 @@ public struct ReportSettings : IFlatbufferObject
     {
         get
         {
-            var o = __p.__offset(14);
+            var o = __p.__offset(18);
             return o != 0 && __p.bb.Get(o + __p.bb_pos) != 0;
         }
     }
@@ -346,19 +545,21 @@ public struct ReportSettings : IFlatbufferObject
     {
         get
         {
-            var o = __p.__offset(16);
+            var o = __p.__offset(20);
             return o != 0 ? __p.__string(o + __p.bb_pos) : null;
         }
     }
 
-    public static void StartReportSettings(FlatBufferBuilder builder) => builder.StartTable(7);
+    public static void StartReportSettings(FlatBufferBuilder builder) => builder.StartTable(9);
     public static void AddCompanyName(FlatBufferBuilder builder, StringOffset companyNameOffset) => builder.AddOffset(0, companyNameOffset.Value, 0);
     public static void AddReportTitle(FlatBufferBuilder builder, StringOffset reportTitleOffset) => builder.AddOffset(1, reportTitleOffset.Value, 0);
     public static void AddProjectJobName(FlatBufferBuilder builder, StringOffset projectJobNameOffset) => builder.AddOffset(2, projectJobNameOffset.Value, 0);
     public static void AddProjectJobNumber(FlatBufferBuilder builder, StringOffset projectJobNumberOffset) => builder.AddOffset(3, projectJobNumberOffset.Value, 0);
-    public static void AddReportDateTicks(FlatBufferBuilder builder, long reportDateTicks) => builder.AddLong(4, reportDateTicks, 0);
-    public static void AddHasReportDate(FlatBufferBuilder builder, bool hasReportDate) => builder.AddBool(5, hasReportDate, false);
-    public static void AddNotes(FlatBufferBuilder builder, StringOffset notesOffset) => builder.AddOffset(6, notesOffset.Value, 0);
+    public static void AddReleaseId(FlatBufferBuilder builder, StringOffset releaseIdOffset) => builder.AddOffset(4, releaseIdOffset.Value, 0);
+    public static void AddStatus(FlatBufferBuilder builder, StringOffset statusOffset) => builder.AddOffset(5, statusOffset.Value, 0);
+    public static void AddReportDateTicks(FlatBufferBuilder builder, long reportDateTicks) => builder.AddLong(6, reportDateTicks, 0);
+    public static void AddHasReportDate(FlatBufferBuilder builder, bool hasReportDate) => builder.AddBool(7, hasReportDate, false);
+    public static void AddNotes(FlatBufferBuilder builder, StringOffset notesOffset) => builder.AddOffset(8, notesOffset.Value, 0);
 
     public static Offset<ReportSettings> EndReportSettings(FlatBufferBuilder builder)
     {
@@ -561,13 +762,24 @@ public struct ProjectState : IFlatbufferObject
         }
     }
 
-    public static void StartProjectState(FlatBufferBuilder builder) => builder.StartTable(5);
+    public string? ExtrusionLayoutJson
+    {
+        get
+        {
+            var o = __p.__offset(14);
+            return o != 0 ? __p.__string(o + __p.bb_pos) : null;
+        }
+    }
+
+    public static void StartProjectState(FlatBufferBuilder builder) => builder.StartTable(6);
     public static void AddSourceFilePath(FlatBufferBuilder builder, StringOffset sourceFilePathOffset) => builder.AddOffset(0, sourceFilePathOffset.Value, 0);
     public static void AddParts(FlatBufferBuilder builder, VectorOffset partsOffset) => builder.AddOffset(1, partsOffset.Value, 0);
     public static void AddSelectedMaterialId(FlatBufferBuilder builder, StringOffset selectedMaterialIdOffset) => builder.AddOffset(2, selectedMaterialIdOffset.Value, 0);
     public static void AddLastNestingResult(FlatBufferBuilder builder, Offset<NestResponse> lastNestingResultOffset) => builder.AddOffset(3, lastNestingResultOffset.Value, 0);
     public static void AddLastBatchNestingResult(FlatBufferBuilder builder, Offset<BatchNestResponse> lastBatchNestingResultOffset) =>
         builder.AddOffset(4, lastBatchNestingResultOffset.Value, 0);
+    public static void AddExtrusionLayoutJson(FlatBufferBuilder builder, StringOffset extrusionLayoutJsonOffset) =>
+        builder.AddOffset(5, extrusionLayoutJsonOffset.Value, 0);
 
     public static VectorOffset CreatePartsVector(FlatBufferBuilder builder, Offset<PartRow>[] data)
     {

@@ -15,6 +15,7 @@ public sealed class ReportDataServiceSpecs
             ProjectNumber = "PN-42",
             CustomerName = "Acme Millwork",
             Date = new DateTime(2026, 03, 14, 0, 0, 0, DateTimeKind.Utc),
+            RequiredDate = new DateTime(2026, 03, 28, 0, 0, 0, DateTimeKind.Utc),
             Notes = "Export notes"
         };
         var nestResponse = CreateNestResponse(material);
@@ -54,6 +55,7 @@ public sealed class ReportDataServiceSpecs
         Assert.Equal("PN-42", report.Settings.ProjectJobNumber);
         Assert.Equal(metadata.Date, report.Settings.ReportDate);
         Assert.Equal("Export notes", report.Settings.Notes);
+        Assert.Equal(metadata.RequiredDate, report.ProjectMetadata.RequiredDate);
         Assert.True(report.HasResults);
 
         var section = Assert.Single(report.Materials);
@@ -206,6 +208,246 @@ public sealed class ReportDataServiceSpecs
         Assert.False(report.HasResults);
     }
 
+    [Fact]
+    public async Task Report_data_preserves_grouped_and_ungrouped_placements_for_export_output()
+    {
+        var material = BuildMaterial("mat-groups", "Grouped Export");
+        var project = new Project
+        {
+            ProjectId = "project-groups",
+            Metadata = new ProjectMetadata { ProjectName = "Grouped Export" },
+            Settings = new ProjectSettings(),
+            MaterialSnapshots = [material]
+        };
+        var batch = new BatchNestResponse
+        {
+            Success = true,
+            MaterialResults =
+            [
+                new MaterialNestResult
+                {
+                    MaterialName = material.Name,
+                    MaterialId = material.MaterialId,
+                    Result = new NestResponse
+                    {
+                        Success = true,
+                        Sheets =
+                        [
+                            new NestSheet
+                            {
+                                SheetId = "sheet-001",
+                                SheetNumber = 1,
+                                MaterialName = material.Name,
+                                SheetLength = material.SheetLength,
+                                SheetWidth = material.SheetWidth,
+                                UtilizationPercent = 62m
+                            }
+                        ],
+                        Placements =
+                        [
+                            new NestPlacement
+                            {
+                                PlacementId = "placement-002",
+                                SheetId = "sheet-001",
+                                PartId = "Ungrouped-Panel",
+                                Group = null,
+                                X = 24m,
+                                Y = 0m,
+                                Width = 24m,
+                                Height = 12m
+                            },
+                            new NestPlacement
+                            {
+                                PlacementId = "placement-001",
+                                SheetId = "sheet-001",
+                                PartId = "Grouped-Panel",
+                                Group = "Casework",
+                                X = 0m,
+                                Y = 0m,
+                                Width = 24m,
+                                Height = 12m
+                            }
+                        ],
+                        Summary = new MaterialSummary
+                        {
+                            TotalSheets = 1,
+                            TotalPlaced = 2,
+                            TotalUnplaced = 0,
+                            OverallUtilization = 62m
+                        }
+                    }
+                }
+            ]
+        };
+
+        var service = new ReportDataService();
+
+        var report = await service.BuildReportDataAsync(new ReportDataRequest { Project = project, BatchResult = batch });
+
+        var section = Assert.Single(report.Materials);
+        var sheet = Assert.Single(section.Sheets);
+        Assert.Collection(
+            sheet.Placements,
+            placement =>
+            {
+                Assert.Equal("Grouped-Panel", placement.PartId);
+                Assert.Equal("Casework", GetPlacementGroup(placement));
+            },
+            placement =>
+            {
+                Assert.Equal("Ungrouped-Panel", placement.PartId);
+                Assert.Null(GetPlacementGroup(placement));
+            });
+    }
+
+    [Fact]
+    public async Task Report_data_builds_material_summary_tables_per_group_when_named_groups_exist()
+    {
+        var material = BuildMaterial("mat-summary-groups", "Grouped Summary");
+        var project = new Project
+        {
+            ProjectId = "project-summary-groups",
+            Metadata = new ProjectMetadata { ProjectName = "Grouped Summary" },
+            Settings = new ProjectSettings(),
+            MaterialSnapshots = [material],
+            State = new ProjectState
+            {
+                Parts =
+                [
+                    CreatePartRow("row-a", "A-001", 24m, 12m, material.Name, "Casework"),
+                    CreatePartRow("row-b", "B-001", 24m, 12m, material.Name, "Closet", quantity: 2),
+                    CreatePartRow("row-u", "U-001", 24m, 12m, material.Name, null)
+                ]
+            }
+        };
+        var batch = new BatchNestResponse
+        {
+            Success = true,
+            MaterialResults =
+            [
+                new MaterialNestResult
+                {
+                    MaterialName = material.Name,
+                    MaterialId = material.MaterialId,
+                    Result = new NestResponse
+                    {
+                        Success = true,
+                        Sheets =
+                        [
+                            new NestSheet
+                            {
+                                SheetId = "sheet-001",
+                                SheetNumber = 1,
+                                MaterialName = material.Name,
+                                SheetLength = material.SheetLength,
+                                SheetWidth = material.SheetWidth,
+                                UtilizationPercent = 20m
+                            },
+                            new NestSheet
+                            {
+                                SheetId = "sheet-002",
+                                SheetNumber = 2,
+                                MaterialName = material.Name,
+                                SheetLength = material.SheetLength,
+                                SheetWidth = material.SheetWidth,
+                                UtilizationPercent = 10m
+                            }
+                        ],
+                        Placements =
+                        [
+                            new NestPlacement
+                            {
+                                PlacementId = "placement-a-1",
+                                SheetId = "sheet-001",
+                                PartId = "A-001",
+                                Group = "Casework",
+                                X = 0m,
+                                Y = 0m,
+                                Width = 24m,
+                                Height = 12m
+                            },
+                            new NestPlacement
+                            {
+                                PlacementId = "placement-b-1",
+                                SheetId = "sheet-001",
+                                PartId = "B-001#1",
+                                Group = "Closet",
+                                X = 24m,
+                                Y = 0m,
+                                Width = 24m,
+                                Height = 12m
+                            },
+                            new NestPlacement
+                            {
+                                PlacementId = "placement-b-2",
+                                SheetId = "sheet-002",
+                                PartId = "B-001#2",
+                                Group = "Closet",
+                                X = 0m,
+                                Y = 0m,
+                                Width = 24m,
+                                Height = 12m
+                            }
+                        ],
+                        UnplacedItems =
+                        [
+                            new UnplacedItem
+                            {
+                                PartId = "U-001",
+                                ReasonCode = NestingFailureCodes.NoLayoutSpace,
+                                ReasonDescription = "No space."
+                            }
+                        ],
+                        Summary = new MaterialSummary
+                        {
+                            TotalSheets = 2,
+                            TotalPlaced = 3,
+                            TotalUnplaced = 1,
+                            OverallUtilization = 18.75m
+                        }
+                    }
+                }
+            ]
+        };
+
+        var service = new ReportDataService();
+
+        var report = await service.BuildReportDataAsync(new ReportDataRequest { Project = project, BatchResult = batch });
+
+        Assert.Collection(
+            report.MaterialSummaryGroups,
+            group =>
+            {
+                Assert.Equal("Casework", group.GroupName);
+                var materialSummary = Assert.Single(group.Materials);
+                Assert.Equal(material.Name, materialSummary.MaterialName);
+                Assert.Equal(1, materialSummary.Summary.TotalSheets);
+                Assert.Equal(1, materialSummary.Summary.TotalPlaced);
+                Assert.Equal(0, materialSummary.Summary.TotalUnplaced);
+                Assert.Equal(6.25m, materialSummary.Summary.OverallUtilization);
+            },
+            group =>
+            {
+                Assert.Equal("Closet", group.GroupName);
+                var materialSummary = Assert.Single(group.Materials);
+                Assert.Equal(material.Name, materialSummary.MaterialName);
+                Assert.Equal(2, materialSummary.Summary.TotalSheets);
+                Assert.Equal(2, materialSummary.Summary.TotalPlaced);
+                Assert.Equal(0, materialSummary.Summary.TotalUnplaced);
+                Assert.Equal(6.25m, materialSummary.Summary.OverallUtilization);
+            },
+            group =>
+            {
+                Assert.Equal(string.Empty, group.GroupName);
+                var materialSummary = Assert.Single(group.Materials);
+                Assert.Equal(material.Name, materialSummary.MaterialName);
+                Assert.Equal(0, materialSummary.Summary.TotalSheets);
+                Assert.Equal(0, materialSummary.Summary.TotalPlaced);
+                Assert.Equal(1, materialSummary.Summary.TotalUnplaced);
+                Assert.Equal(0m, materialSummary.Summary.OverallUtilization);
+            });
+    }
+
     private static NestResponse CreateNestResponse(Material material) =>
         new()
         {
@@ -264,6 +506,26 @@ public sealed class ReportDataServiceSpecs
             AllowRotation = true,
             DefaultSpacing = 0.125m,
             DefaultEdgeMargin = 0.5m
+        };
+
+    private static PartRow CreatePartRow(
+        string rowId,
+        string importedId,
+        decimal length,
+        decimal width,
+        string materialName,
+        string? group,
+        int quantity = 1) =>
+        new()
+        {
+            RowId = rowId,
+            ImportedId = importedId,
+            Length = length,
+            Width = width,
+            Quantity = quantity,
+            MaterialName = materialName,
+            Group = group,
+            ValidationStatus = ValidationStatuses.Valid
         };
 
     private static string? GetPlacementGroup(NestPlacement placement)

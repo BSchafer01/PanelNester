@@ -37,7 +37,7 @@ public sealed class NativeFileDialogServiceSpecs
 
         var response = await service.SaveAsync(
             new SaveFileDialogRequest(
-                "Export PanelNester PDF report",
+                "Export OptiFab PDF report",
                 "Workshop Cabinets Nesting Report.pdf",
                 [new FileDialogFilter("PDF files", ["pdf"])],
                 ".pdf"));
@@ -80,7 +80,7 @@ public sealed class NativeFileDialogServiceSpecs
             });
 
         var request = new SaveFileDialogRequest(
-            "Export PanelNester PDF report",
+            "Export OptiFab PDF report",
             "Retry Test.pdf",
             [new FileDialogFilter("PDF files", ["pdf"])],
             ".pdf");
@@ -164,7 +164,7 @@ public sealed class NativeFileDialogServiceSpecs
             },
             static (_, _) => throw new NotSupportedException());
 
-        var request = new OpenFileDialogRequest("Open PanelNester project", null);
+        var request = new OpenFileDialogRequest("Open OptiFab project", null);
 
         var cancelledTask = Task.Run(() => service.OpenAsync(request));
         await firstDialogEntered.Task;

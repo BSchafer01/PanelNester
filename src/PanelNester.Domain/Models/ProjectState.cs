@@ -11,4 +11,6 @@ public sealed record ProjectState
     public NestResponse? LastNestingResult { get; init; }
 
     public BatchNestResponse? LastBatchNestingResult { get; init; }
+
+    public ExtrusionLayoutState ExtrusionLayout { get; init; } = new();
 }

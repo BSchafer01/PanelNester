@@ -9,7 +9,15 @@ export const bridgeMessageTypes = {
   addPartRow: 'add-part-row',
   runNesting: 'run-nesting',
   runBatchNesting: 'run-batch-nesting',
+  getStiffenerTakeoff: 'get-stiffener-takeoff',
+  getExtrusionLayout: 'get-extrusion-layout',
+  updateExtrusionLayout: 'update-extrusion-layout',
+  getExtrusionReport: 'get-extrusion-report',
   exportPdfReport: 'export-pdf-report',
+  exportExcelReport: 'export-excel-report',
+  exportStiffenerPdfReport: 'export-stiffener-pdf-report',
+  exportExtrusionPdfReport: 'export-extrusion-pdf-report',
+  exportExtrusionExcelReport: 'export-extrusion-excel-report',
   updateReportSettings: 'update-report-settings',
   listMaterials: 'list-materials',
   chooseMaterialLibraryLocation: 'choose-material-library-location',
@@ -25,6 +33,8 @@ export const bridgeMessageTypes = {
   saveProjectAs: 'save-project-as',
   getProjectMetadata: 'get-project-metadata',
   updateProjectMetadata: 'update-project-metadata',
+  getDesktopAppSettings: 'get-desktop-app-settings',
+  updateDesktopAppSettings: 'update-desktop-app-settings',
 } as const;
 
 export const toBridgeResponseType = (type: string) => `${type}-response`;
@@ -45,7 +55,7 @@ export interface BridgeError {
 }
 
 export interface BridgeHandshakeRequest {
-  surface: 'PanelNester.WebUI';
+  surface: 'OptiFab.WebUI';
   version: string;
   requestedCapabilities: BridgeCapability[];
 }
@@ -271,6 +281,7 @@ export interface ProjectMetadata {
   drafter: string;
   projectManager: string;
   date: string;
+  requiredDate: string;
   revision: string;
   notes: string;
 }
@@ -283,6 +294,7 @@ export interface ProjectFileMetadata {
   drafter?: string | null;
   pm?: string | null;
   date?: string | null;
+  requiredDate?: string | null;
   revision?: string | null;
   notes?: string | null;
 }
@@ -292,13 +304,37 @@ export interface ReportSettings {
   reportTitle?: string | null;
   projectJobName?: string | null;
   projectJobNumber?: string | null;
+  releaseId?: string | null;
+  status?: string | null;
   reportDate?: string | null;
   notes?: string | null;
+}
+
+export interface StiffenerTakeoffSettings {
+  enabled: boolean;
+  minimumLengthInches: number;
+  minimumWidthInches: number;
+  widthDeductionInches: number;
+  stockLengthFeet: number;
+  reportTitle: string;
+  extrusion: string;
+  releaseId: string;
+  poNumber: string;
+  color: string;
+  colorNumber: string;
+  manufacturer: string;
+  status: string;
+}
+
+export interface DesktopAppSettings {
+  companyLogoPath?: string | null;
+  companyName?: string | null;
 }
 
 export interface ProjectSettings {
   kerfWidth: number;
   reportSettings: ReportSettings;
+  stiffenerTakeoff: StiffenerTakeoffSettings;
 }
 
 export interface ProjectMaterialSnapshot extends Material {}
@@ -309,6 +345,7 @@ export interface ProjectStateRecord {
   selectedMaterialId?: string | null;
   lastNestingResult?: NestResponse | null;
   lastBatchNestingResult?: BatchNestResponse | null;
+  extrusionLayout: ExtrusionLayoutState;
 }
 
 export interface ProjectRecord {
@@ -396,6 +433,151 @@ export interface SaveProjectAsRequest {
 
 export interface GetProjectMetadataRequest {
   project: ProjectRecord;
+}
+
+export interface GetDesktopAppSettingsRequest {}
+
+export interface GetDesktopAppSettingsResponse {
+  success: boolean;
+  settings: DesktopAppSettings | null;
+  error?: BridgeError | null;
+  message?: string;
+}
+
+export interface UpdateDesktopAppSettingsRequest {
+  settings: DesktopAppSettings;
+}
+
+export interface UpdateDesktopAppSettingsResponse {
+  success: boolean;
+  settings: DesktopAppSettings | null;
+  error?: BridgeError | null;
+  message?: string;
+}
+
+export interface GetStiffenerTakeoffRequest {
+  project: ProjectRecord;
+}
+
+export interface ExtrusionLayoutState {
+  panelToPanelExtrusionName: string;
+  edgeExtrusionName: string;
+  panelToPanelStickLengthFeet?: number;
+  edgeStickLengthFeet?: number;
+  groups: ExtrusionGroupLayout[];
+}
+
+export interface ExtrusionGroupLayout {
+  groupName: string;
+  rows: number;
+  columns: number;
+  cells: ExtrusionGridCell[];
+  edgeAssignments: ExtrusionEdgeAssignment[];
+  jointAssignments: ExtrusionJointAssignment[];
+}
+
+export interface ExtrusionPanelInstance {
+  instanceId: string;
+  sourceRowId: string;
+  importedId: string;
+  quantityIndex: number;
+  label: string;
+  materialName: string;
+  groupName: string;
+  length: number;
+  width: number;
+  isStale: boolean;
+}
+
+export interface ExtrusionGridCell {
+  instanceId: string;
+  row: number;
+  column: number;
+}
+
+export interface ExtrusionEdgeAssignment {
+  instanceId: string;
+  edge: 'top' | 'right' | 'bottom' | 'left';
+  extrusionName: string;
+}
+
+export interface ExtrusionJointAssignment {
+  jointId: string;
+  firstInstanceId: string;
+  secondInstanceId: string;
+  edge: string;
+  extrusionName: string;
+  isEnabled?: boolean;
+}
+
+export interface ExtrusionLengthSummary {
+  category: string;
+  extrusionName: string;
+  totalLengthInches: number;
+  segmentCount: number;
+  totalLinearFeet: number;
+  stickLengthFeet: number;
+  requiredStickCount: number;
+}
+
+export interface ExtrusionGroupSummary {
+  groupName: string;
+  lengths: ExtrusionLengthSummary[];
+}
+
+export interface ExtrusionSegmentDetail {
+  groupName: string;
+  category: string;
+  extrusionName: string;
+  location: string;
+  lengthInches: number;
+}
+
+export interface ExtrusionReportData {
+  companyLogoPath?: string | null;
+  projectMetadata: ProjectFileMetadata;
+  reportSettings: ReportSettings;
+  layout: ExtrusionLayoutState;
+  panels: ExtrusionPanelInstance[];
+  overallLengths: ExtrusionLengthSummary[];
+  groups: ExtrusionGroupSummary[];
+  segments: ExtrusionSegmentDetail[];
+  hasTakeoff: boolean;
+}
+
+export interface GetExtrusionLayoutRequest {
+  project: ProjectRecord;
+}
+
+export interface GetExtrusionLayoutResponse {
+  success: boolean;
+  layout: ExtrusionLayoutState | null;
+  error?: BridgeError | null;
+  message?: string;
+}
+
+export interface UpdateExtrusionLayoutRequest {
+  project: ProjectRecord;
+  layout: ExtrusionLayoutState;
+}
+
+export interface UpdateExtrusionLayoutResponse {
+  success: boolean;
+  project: ProjectRecord | null;
+  layout: ExtrusionLayoutState | null;
+  error?: BridgeError | null;
+  message?: string;
+}
+
+export interface GetExtrusionReportRequest {
+  project: ProjectRecord;
+}
+
+export interface GetExtrusionReportResponse {
+  success: boolean;
+  report: ExtrusionReportData | null;
+  error?: BridgeError | null;
+  message?: string;
 }
 
 export interface UpdateProjectMetadataRequest {
@@ -517,11 +699,43 @@ export interface ReportMaterialSection {
 }
 
 export interface ReportData {
+  companyLogoPath?: string | null;
   settings: ReportSettings;
   projectMetadata: ProjectFileMetadata;
   materials: ReportMaterialSection[];
   unplacedItems: UnplacedItem[];
   hasResults: boolean;
+}
+
+export interface StiffenerTakeoffLengthSummary {
+  label: string;
+  lengthInches: number;
+  pieceCount: number;
+}
+
+export interface StiffenerTakeoffSectionSummary {
+  eligiblePanelCount: number;
+  totalStiffenerCount: number;
+  totalLinearFeet: number;
+  stockLengthFeet: number;
+  requiredStockCount: number;
+}
+
+export interface StiffenerTakeoffMaterialSection {
+  materialName: string;
+  summary: StiffenerTakeoffSectionSummary;
+  lengths: StiffenerTakeoffLengthSummary[];
+}
+
+export interface StiffenerTakeoffReportData {
+  companyLogoPath?: string | null;
+  projectMetadata: ProjectFileMetadata;
+  reportSettings: ReportSettings;
+  settings: StiffenerTakeoffSettings;
+  overallSummary: StiffenerTakeoffSectionSummary;
+  overallLengths: StiffenerTakeoffLengthSummary[];
+  materials: StiffenerTakeoffMaterialSection[];
+  hasTakeoff: boolean;
 }
 
 export interface UpdateReportSettingsRequest {
@@ -542,9 +756,72 @@ export interface ExportPdfReportRequest {
   batchResult?: BatchNestResponse | null;
   filePath?: string | null;
   suggestedFileName?: string | null;
+  companyLogoPath?: string | null;
 }
 
 export interface ExportPdfReportResponse {
+  success: boolean;
+  filePath: string | null;
+  error?: BridgeError | null;
+  message?: string;
+}
+
+export interface ExportExcelReportRequest {
+  project: ProjectRecord;
+  batchResult?: BatchNestResponse | null;
+  filePath?: string | null;
+  suggestedFileName?: string | null;
+}
+
+export interface ExportExcelReportResponse {
+  success: boolean;
+  filePath: string | null;
+  error?: BridgeError | null;
+  message?: string;
+}
+
+export interface GetStiffenerTakeoffResponse {
+  success: boolean;
+  report: StiffenerTakeoffReportData | null;
+  error?: BridgeError | null;
+  message?: string;
+}
+
+export interface ExportStiffenerPdfReportRequest {
+  project: ProjectRecord;
+  filePath?: string | null;
+  suggestedFileName?: string | null;
+  companyLogoPath?: string | null;
+}
+
+export interface ExportStiffenerPdfReportResponse {
+  success: boolean;
+  filePath: string | null;
+  error?: BridgeError | null;
+  message?: string;
+}
+
+export interface ExportExtrusionPdfReportRequest {
+  project: ProjectRecord;
+  filePath?: string | null;
+  suggestedFileName?: string | null;
+  companyLogoPath?: string | null;
+}
+
+export interface ExportExtrusionPdfReportResponse {
+  success: boolean;
+  filePath: string | null;
+  error?: BridgeError | null;
+  message?: string;
+}
+
+export interface ExportExtrusionExcelReportRequest {
+  project: ProjectRecord;
+  filePath?: string | null;
+  suggestedFileName?: string | null;
+}
+
+export interface ExportExtrusionExcelReportResponse {
   success: boolean;
   filePath: string | null;
   error?: BridgeError | null;
@@ -569,7 +846,15 @@ export const requestedBridgeCapabilities: BridgeCapability[] = [
   bridgeMessageTypes.addPartRow,
   bridgeMessageTypes.runNesting,
   bridgeMessageTypes.runBatchNesting,
+  bridgeMessageTypes.getStiffenerTakeoff,
+  bridgeMessageTypes.getExtrusionLayout,
+  bridgeMessageTypes.updateExtrusionLayout,
+  bridgeMessageTypes.getExtrusionReport,
   bridgeMessageTypes.exportPdfReport,
+  bridgeMessageTypes.exportExcelReport,
+  bridgeMessageTypes.exportStiffenerPdfReport,
+  bridgeMessageTypes.exportExtrusionPdfReport,
+  bridgeMessageTypes.exportExtrusionExcelReport,
   bridgeMessageTypes.updateReportSettings,
   bridgeMessageTypes.listMaterials,
   bridgeMessageTypes.chooseMaterialLibraryLocation,
@@ -584,6 +869,8 @@ export const requestedBridgeCapabilities: BridgeCapability[] = [
   bridgeMessageTypes.saveProjectAs,
   bridgeMessageTypes.getProjectMetadata,
   bridgeMessageTypes.updateProjectMetadata,
+  bridgeMessageTypes.getDesktopAppSettings,
+  bridgeMessageTypes.updateDesktopAppSettings,
 ];
 
 export const demoMaterial: Material = {
@@ -606,8 +893,34 @@ export const emptyReportSettings: ReportSettings = {
   reportTitle: '',
   projectJobName: '',
   projectJobNumber: '',
+  releaseId: '',
+  status: '',
   reportDate: '',
   notes: '',
+};
+
+export const defaultStiffenerTakeoffSettings: StiffenerTakeoffSettings = {
+  enabled: false,
+  minimumLengthInches: 32,
+  minimumWidthInches: 32,
+  widthDeductionInches: 4,
+  stockLengthFeet: 20,
+  reportTitle: '',
+  extrusion: '',
+  releaseId: '',
+  poNumber: '',
+  color: '',
+  colorNumber: '',
+  manufacturer: '',
+  status: '',
+};
+
+export const defaultExtrusionLayoutState: ExtrusionLayoutState = {
+  panelToPanelExtrusionName: 'Panel Joint',
+  edgeExtrusionName: 'Perimeter Edge',
+  panelToPanelStickLengthFeet: 20,
+  edgeStickLengthFeet: 20,
+  groups: [],
 };
 
 export const emptyImportResponse: ImportResponse = {

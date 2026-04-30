@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text;
 
 namespace PanelNester.Desktop.Tests.Bridge;
 
@@ -30,7 +31,7 @@ public sealed class ImportResultsRevisionGateSpecs
         var fileDialogService = ReadRepositoryText("src", "PanelNester.Desktop", "Bridge", "NativeFileDialogService.cs");
 
         Assert.Contains("if (string.IsNullOrWhiteSpace(filePath))", desktopBridge);
-        Assert.Contains("new OpenFileDialogRequest(\"Import PanelNester parts\", ImportFileFilters)", desktopBridge);
+        Assert.Contains("new OpenFileDialogRequest(\"Import OptiFab parts\", ImportFileFilters)", desktopBridge);
         Assert.Contains("filePath = dialogResult.FilePath;", desktopBridge);
         Assert.Contains("FilePath = filePath,", desktopBridge);
         Assert.Contains("return ImportFileResponse.FromImportResponse(", desktopBridge);
@@ -41,6 +42,48 @@ public sealed class ImportResultsRevisionGateSpecs
         Assert.Contains("if (!_webView.Dispatcher.CheckAccess())", webViewBridge);
         Assert.Contains("_webView.Dispatcher.Invoke(() => Post(message));", webViewBridge);
         Assert.Contains("_webView.CoreWebView2.PostWebMessageAsJson(json);", webViewBridge);
+    }
+
+    [Fact]
+    public void Project_bridge_actions_keep_native_dialog_flows_on_the_long_running_timeout_budget()
+    {
+        var hostBridge = Normalize(ReadRepositoryText("src", "PanelNester.WebUI", "src", "bridge", "hostBridge.ts"));
+
+        AssertContains(
+            hostBridge,
+            """
+            openProject(request: OpenProjectRequest): Promise<ProjectOperationResponse> {
+                return this.invoke<ProjectOperationResponse>(
+                  bridgeMessageTypes.openProject,
+                  request,
+                  longRunningRequestTimeoutMs,
+                );
+              }
+            """);
+
+        AssertContains(
+            hostBridge,
+            """
+            saveProject(request: SaveProjectRequest): Promise<ProjectOperationResponse> {
+                return this.invoke<ProjectOperationResponse>(
+                  bridgeMessageTypes.saveProject,
+                  request,
+                  longRunningRequestTimeoutMs,
+                );
+              }
+            """);
+
+        AssertContains(
+            hostBridge,
+            """
+            saveProjectAs(request: SaveProjectAsRequest): Promise<ProjectOperationResponse> {
+                return this.invoke<ProjectOperationResponse>(
+                  bridgeMessageTypes.saveProjectAs,
+                  request,
+                  longRunningRequestTimeoutMs,
+                );
+              }
+            """);
     }
 
     [Fact]
@@ -435,7 +478,9 @@ public sealed class ImportResultsRevisionGateSpecs
               display: grid;
               grid-template-rows: auto 1fr;
               min-height: 0;
-              overflow: hidden;
+              overflow-x: hidden;
+              overflow-y: auto;
+              overscroll-behavior: contain;
             }
             """);
         AssertContains(
@@ -445,7 +490,8 @@ public sealed class ImportResultsRevisionGateSpecs
               display: grid;
               grid-template-rows: auto auto 1fr;
               min-height: 0;
-              overflow: hidden;
+              overflow-x: hidden;
+              overflow-y: auto;
               padding: 16px;
               background: var(--vsc-bg-editor);
             }
@@ -523,7 +569,142 @@ public sealed class ImportResultsRevisionGateSpecs
         Assert.Contains("<th>Group</th>", resultsPage);
         Assert.Contains("{selectedPlacement.displayGroup}", resultsPage);
         Assert.Contains("<td>{placement.displayGroup}</td>", resultsPage);
-        Assert.Contains("function decoratePlacements(placements: NestPlacement[]): ResultsPlacement[] {", resultsPage);
+        Assert.Contains("decoratePlacements(activeMaterialResult.response.placements)", resultsPage);
+    }
+
+    // Search precision acceptance gate:
+    // - normalize case and separators before evaluating a panel ID fragment
+    // - require one exact contiguous normalized fragment, not scattered partial characters
+    // - preserve deferred/memoized rendering for large batch review
+    // - keep click-to-select sheet review and batch-sheet highlighting intact
+    //
+    // Regression risks:
+    // - reintroducing fuzzy or tokenized matching that brings back false positives like the
+    //   "04013" screenshot hits on unrelated panel IDs such as "0408" and "0407"
+    // - removing useDeferredValue/useMemo and making large batch searches stall the UI
+    // - breaking row click wiring so search hits stop driving viewer selection or sheet focus
+    // - widening search scope beyond placed panels and batch-sheet review state
+    [Fact]
+    public void Results_page_batch_sheet_search_requires_exact_contiguous_normalized_panel_id_fragments()
+    {
+        var searchHelpers = ReadRepositoryText(
+            "src",
+            "PanelNester.WebUI",
+            "src",
+            "pages",
+            "resultsBatchSheetSearch.ts");
+        var resultsPage = ReadRepositoryText("src", "PanelNester.WebUI", "src", "pages", "ResultsPage.tsx");
+
+        Assert.Contains("function normalizePanelSearchValue(value: string): string {", searchHelpers);
+        Assert.Contains("return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '');", searchHelpers);
+        Assert.Contains(
+            "function panelIdMatchesNormalizedQuery(", searchHelpers);
+        Assert.Contains(
+            "return normalizedQuery.length > 0 && normalizedPanelId.includes(normalizedQuery);",
+            searchHelpers);
+        Assert.Contains("function panelIdMatchesQuery(panelId: string, query: string): boolean {", searchHelpers);
+        Assert.Contains("normalizePanelSearchValue(panelId),", searchHelpers);
+        Assert.Contains("normalizePanelSearchValue(query),", searchHelpers);
+        Assert.Contains("normalizedPanelSearchValue: string;", searchHelpers);
+        Assert.Contains(
+            "normalizedPanelSearchValue: normalizePanelSearchValue(placement.partId),",
+            searchHelpers);
+        Assert.Contains("const normalizedQuery = normalizePanelSearchValue(query);", searchHelpers);
+        Assert.Contains(
+            "panelIdMatchesNormalizedQuery(entry.normalizedPanelSearchValue, normalizedQuery)",
+            searchHelpers);
+        Assert.DoesNotContain("function splitNormalizedPanelSearchFragments", searchHelpers);
+        Assert.DoesNotContain("function buildNormalizedPanelSearchValues", searchHelpers);
+        Assert.Contains(
+            "only exact panel ID fragments or contiguous fragment sequences count",
+            resultsPage);
+        Assert.Contains(
+            "Try an exact panel ID fragment or contiguous fragment sequence. Search",
+            resultsPage);
+    }
+
+    [Fact]
+    public void Results_page_batch_sheet_search_rejects_the_reported_false_positive_examples()
+    {
+        const string query = "04013";
+        string[] samplePanelIds =
+        [
+            "PANEL-0408#2",
+            "PANEL-0407#3",
+            "PANEL-00004#2",
+            "PANEL-00040#1",
+            "PANEL-00040#2",
+            "PANEL-00045#1",
+            "PANEL-00045#2",
+            "PANEL-00045#3",
+            "PANEL-04013#1",
+            "panel-04-013"
+        ];
+
+        var matches = samplePanelIds
+            .Where(panelId => PanelIdMatchesQuery(panelId, query))
+            .ToArray();
+
+        Assert.Equal(["PANEL-04013#1", "panel-04-013"], matches);
+        Assert.DoesNotContain("PANEL-0408#2", matches);
+        Assert.DoesNotContain("PANEL-0407#3", matches);
+        Assert.DoesNotContain("PANEL-00004#2", matches);
+        Assert.DoesNotContain("PANEL-00040#1", matches);
+        Assert.DoesNotContain("PANEL-00040#2", matches);
+        Assert.DoesNotContain("PANEL-00045#1", matches);
+        Assert.DoesNotContain("PANEL-00045#2", matches);
+        Assert.DoesNotContain("PANEL-00045#3", matches);
+        Assert.True(PanelIdMatchesQuery("PANEL-04013#1", "013"));
+        Assert.False(PanelIdMatchesQuery("PANEL-00045#1", "013"));
+    }
+
+    [Fact]
+    public void Results_page_batch_sheet_search_keeps_deferred_and_memoized_rendering_for_large_batches()
+    {
+        var resultsPage = ReadRepositoryText("src", "PanelNester.WebUI", "src", "pages", "ResultsPage.tsx");
+
+        Assert.Contains("const batchSheets = useMemo(", resultsPage);
+        Assert.Contains("() => buildBatchSheets(materialResults),", resultsPage);
+        Assert.Contains("const panelSearchIndex = useMemo(", resultsPage);
+        Assert.Contains("() => buildPanelSearchIndex(batchSheets),", resultsPage);
+        Assert.Contains("const deferredPanelSearchQueryLabel = useDeferredValue(panelSearchQueryLabel);", resultsPage);
+        Assert.Contains("const panelSearchResults = useMemo(", resultsPage);
+        Assert.Contains(
+            "() => buildPanelSearchResults(panelSearchIndex, deferredPanelSearchQueryLabel),",
+            resultsPage);
+        Assert.Contains("Updating search results for “{panelSearchQueryLabel}”…", resultsPage);
+    }
+
+    [Fact]
+    public void Results_page_batch_sheet_search_rows_still_drive_sheet_review_and_sheet_highlighting()
+    {
+        var resultsPage = ReadRepositoryText("src", "PanelNester.WebUI", "src", "pages", "ResultsPage.tsx");
+
+        Assert.Contains("const reviewBatchSheet = (", resultsPage);
+        Assert.Contains("setActiveMaterialKey(materialKey);", resultsPage);
+        Assert.Contains("setActiveSheetId(sheetId);", resultsPage);
+        Assert.Contains("setSelectedPlacementId(placementId);", resultsPage);
+        Assert.Contains("const reviewPanelMatch = (match: PanelSearchMatch) => {", resultsPage);
+        Assert.Contains("reviewBatchSheet(match.materialKey, match.sheetId, match.placementId);", resultsPage);
+        Assert.Contains("onClick={() => reviewPanelMatch(match)}", resultsPage);
+        Assert.Contains("function panelSearchMatchRowKey(match: PanelSearchMatch): string {", resultsPage);
+        Assert.Contains("return `${match.materialKey}:${match.sheetId}:${match.placementId}:${match.partId}`;", resultsPage);
+        Assert.DoesNotContain("key={`${match.placementId}:${match.sheetId}`}", resultsPage);
+        Assert.Contains("key={panelSearchMatchRowKey(match)}", resultsPage);
+        Assert.Contains("Search hits stay highlighted here without duplicating the sheet inventory", resultsPage);
+        Assert.Contains("const filteredPanelSearchResults = useMemo(() => {", resultsPage);
+        Assert.Contains("const batchSheetsByKey = new Map(", resultsPage);
+        Assert.Contains("const panelSearchMatchCount = filteredPanelSearchResults.matches.length;", resultsPage);
+        Assert.Contains("const panelSearchSheetCount = filteredPanelSearchResults.sheets.length;", resultsPage);
+        Assert.Contains("const panelSearchResults = useMemo(", resultsPage);
+        Assert.Contains("{panelSearchMatchCount} panel match(es) across {panelSearchSheetCount}", resultsPage);
+        Assert.Contains("filteredPanelSearchResults.matches.map((match) => (", resultsPage);
+        Assert.Contains("const filteredSearchSheet =", resultsPage);
+        Assert.Contains("filteredPanelSearchResults.bySheetKey.get(sheetKey);", resultsPage);
+        Assert.Contains("const searchHitCount = filteredSearchSheet?.matches.length ?? 0;", resultsPage);
+        Assert.Contains("searchHitCount > 0 && 'table-row--search-hit'", resultsPage);
+        Assert.Contains("const firstMatch = filteredSearchSheet?.firstMatch;", resultsPage);
+        Assert.Contains("firstMatch?.placementId,", resultsPage);
     }
 
     [Fact]
@@ -561,6 +742,27 @@ public sealed class ImportResultsRevisionGateSpecs
     }
 
     private static string Normalize(string value) => value.Replace("\r\n", "\n");
+
+    private static string NormalizePanelSearchValue(string value)
+    {
+        var builder = new StringBuilder(value.Length);
+        foreach (var character in value.Trim().ToLowerInvariant())
+        {
+            if (char.IsLetterOrDigit(character))
+            {
+                builder.Append(character);
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private static bool PanelIdMatchesQuery(string panelId, string query)
+    {
+        var normalizedQuery = NormalizePanelSearchValue(query);
+        return normalizedQuery.Length > 0 &&
+               NormalizePanelSearchValue(panelId).Contains(normalizedQuery, StringComparison.Ordinal);
+    }
 
     private static void AssertContains(string actual, string expectedFragment) =>
         Assert.Contains(Normalize(expectedFragment), actual);

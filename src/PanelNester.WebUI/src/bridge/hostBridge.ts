@@ -15,8 +15,24 @@ import {
   type BatchNestResponse,
   type ExportPdfReportRequest,
   type ExportPdfReportResponse,
+  type ExportExcelReportRequest,
+  type ExportExcelReportResponse,
+  type ExportStiffenerPdfReportRequest,
+  type ExportStiffenerPdfReportResponse,
+  type ExportExtrusionPdfReportRequest,
+  type ExportExtrusionPdfReportResponse,
+  type ExportExtrusionExcelReportRequest,
+  type ExportExtrusionExcelReportResponse,
+  type GetDesktopAppSettingsRequest,
+  type GetDesktopAppSettingsResponse,
   type GetProjectMetadataRequest,
   type ProjectMetadataResponse,
+  type GetStiffenerTakeoffRequest,
+  type GetStiffenerTakeoffResponse,
+  type GetExtrusionLayoutRequest,
+  type GetExtrusionLayoutResponse,
+  type GetExtrusionReportRequest,
+  type GetExtrusionReportResponse,
   type GetMaterialRequest,
   type HostBridgeSnapshot,
   type ImportFileRequest,
@@ -39,8 +55,12 @@ import {
   type UpdatePartRowRequest,
   type UpdateMaterialRequest,
   type UpdateProjectMetadataRequest,
+  type UpdateDesktopAppSettingsRequest,
+  type UpdateDesktopAppSettingsResponse,
   type UpdateReportSettingsRequest,
   type UpdateReportSettingsResponse,
+  type UpdateExtrusionLayoutRequest,
+  type UpdateExtrusionLayoutResponse,
   bridgeMessageTypes,
   requestedBridgeCapabilities,
   toBridgeResponseType,
@@ -50,6 +70,7 @@ const uiVersion = '0.1.0';
 const handshakeType = bridgeMessageTypes.handshake;
 const handshakeResponseType = toBridgeResponseType(handshakeType);
 const requestTimeoutMs = 5000;
+const longRunningRequestTimeoutMs = 300000;
 
 type BridgeDirection = 'inbound' | 'outbound';
 
@@ -151,7 +172,7 @@ class HostBridgeClient {
       const response = await this.invoke<BridgeHandshakeResponse>(
         handshakeType,
         {
-          surface: 'PanelNester.WebUI',
+          surface: 'OptiFab.WebUI',
           version: uiVersion,
           requestedCapabilities: requestedBridgeCapabilities,
         } satisfies BridgeHandshakeRequest,
@@ -237,6 +258,7 @@ class HostBridgeClient {
     return this.invoke<OpenFileDialogResponse>(
       bridgeMessageTypes.openFileDialog,
       request,
+      longRunningRequestTimeoutMs,
     );
   }
 
@@ -257,7 +279,51 @@ class HostBridgeClient {
   }
 
   runBatchNesting(request: BatchNestRequest): Promise<BatchNestResponse> {
-    return this.invoke<BatchNestResponse>(bridgeMessageTypes.runBatchNesting, request);
+    return this.invoke<BatchNestResponse>(
+      bridgeMessageTypes.runBatchNesting,
+      request,
+      longRunningRequestTimeoutMs,
+    );
+  }
+
+  getStiffenerTakeoff(
+    request: GetStiffenerTakeoffRequest,
+  ): Promise<GetStiffenerTakeoffResponse> {
+    return this.invoke<GetStiffenerTakeoffResponse>(
+      bridgeMessageTypes.getStiffenerTakeoff,
+      request,
+      longRunningRequestTimeoutMs,
+    );
+  }
+
+  getExtrusionLayout(
+    request: GetExtrusionLayoutRequest,
+  ): Promise<GetExtrusionLayoutResponse> {
+    return this.invoke<GetExtrusionLayoutResponse>(
+      bridgeMessageTypes.getExtrusionLayout,
+      request,
+      longRunningRequestTimeoutMs,
+    );
+  }
+
+  updateExtrusionLayout(
+    request: UpdateExtrusionLayoutRequest,
+  ): Promise<UpdateExtrusionLayoutResponse> {
+    return this.invoke<UpdateExtrusionLayoutResponse>(
+      bridgeMessageTypes.updateExtrusionLayout,
+      request,
+      longRunningRequestTimeoutMs,
+    );
+  }
+
+  getExtrusionReport(
+    request: GetExtrusionReportRequest,
+  ): Promise<GetExtrusionReportResponse> {
+    return this.invoke<GetExtrusionReportResponse>(
+      bridgeMessageTypes.getExtrusionReport,
+      request,
+      longRunningRequestTimeoutMs,
+    );
   }
 
   getMaterial(request: GetMaterialRequest): Promise<MaterialRecordResponse> {
@@ -303,6 +369,7 @@ class HostBridgeClient {
     return this.invoke<ProjectOperationResponse>(
       bridgeMessageTypes.openProject,
       request,
+      longRunningRequestTimeoutMs,
     );
   }
 
@@ -317,6 +384,7 @@ class HostBridgeClient {
     return this.invoke<ProjectOperationResponse>(
       bridgeMessageTypes.saveProject,
       request,
+      longRunningRequestTimeoutMs,
     );
   }
 
@@ -324,6 +392,7 @@ class HostBridgeClient {
     return this.invoke<ProjectOperationResponse>(
       bridgeMessageTypes.saveProjectAs,
       request,
+      longRunningRequestTimeoutMs,
     );
   }
 
@@ -361,6 +430,62 @@ class HostBridgeClient {
       bridgeMessageTypes.exportPdfReport,
       request,
       15000,
+    );
+  }
+
+  exportExcelReport(
+    request: ExportExcelReportRequest,
+  ): Promise<ExportExcelReportResponse> {
+    return this.invoke<ExportExcelReportResponse>(
+      bridgeMessageTypes.exportExcelReport,
+      request,
+      15000,
+    );
+  }
+
+  exportStiffenerPdfReport(
+    request: ExportStiffenerPdfReportRequest,
+  ): Promise<ExportStiffenerPdfReportResponse> {
+    return this.invoke<ExportStiffenerPdfReportResponse>(
+      bridgeMessageTypes.exportStiffenerPdfReport,
+      request,
+      longRunningRequestTimeoutMs,
+    );
+  }
+
+  exportExtrusionPdfReport(
+    request: ExportExtrusionPdfReportRequest,
+  ): Promise<ExportExtrusionPdfReportResponse> {
+    return this.invoke<ExportExtrusionPdfReportResponse>(
+      bridgeMessageTypes.exportExtrusionPdfReport,
+      request,
+      longRunningRequestTimeoutMs,
+    );
+  }
+
+  exportExtrusionExcelReport(
+    request: ExportExtrusionExcelReportRequest,
+  ): Promise<ExportExtrusionExcelReportResponse> {
+    return this.invoke<ExportExtrusionExcelReportResponse>(
+      bridgeMessageTypes.exportExtrusionExcelReport,
+      request,
+      longRunningRequestTimeoutMs,
+    );
+  }
+
+  getDesktopAppSettings(): Promise<GetDesktopAppSettingsResponse> {
+    return this.invoke<GetDesktopAppSettingsResponse>(
+      bridgeMessageTypes.getDesktopAppSettings,
+      {} satisfies GetDesktopAppSettingsRequest,
+    );
+  }
+
+  updateDesktopAppSettings(
+    request: UpdateDesktopAppSettingsRequest,
+  ): Promise<UpdateDesktopAppSettingsResponse> {
+    return this.invoke<UpdateDesktopAppSettingsResponse>(
+      bridgeMessageTypes.updateDesktopAppSettings,
+      request,
     );
   }
 
@@ -488,7 +613,7 @@ class HostBridgeClient {
   private createStandaloneHandshake(message: string): BridgeHandshakeResponse {
     return {
       success: false,
-      hostName: 'PanelNester desktop host pending',
+      hostName: 'OptiFab desktop host pending',
       bridgeMode: 'standalone',
       capabilities: [],
       message,

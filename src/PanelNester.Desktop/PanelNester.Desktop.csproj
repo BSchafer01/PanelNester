@@ -6,8 +6,10 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
-    <AssemblyName>PanelNester.Desktop</AssemblyName>
+    <AssemblyName>OptiFab.Desktop</AssemblyName>
     <RootNamespace>PanelNester.Desktop</RootNamespace>
+    <Product>OptiFab</Product>
+    <Company>OptiFab</Company>
     <ApplicationIcon>Assets\PanelNester.ico</ApplicationIcon>
   </PropertyGroup>
 

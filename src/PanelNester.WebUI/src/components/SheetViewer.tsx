@@ -28,7 +28,6 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { NestPlacement, NestSheet } from '../types/contracts';
 
 interface SheetViewerPlacement extends NestPlacement {
-  group?: string | null;
   displayGroup?: string;
 }
 
@@ -40,6 +39,7 @@ interface SheetViewerProps {
   placements: SheetViewerPlacement[];
   resetViewToken?: string;
   selectedPlacementId?: string;
+  showChrome?: boolean;
   onSelectPlacement?: (placementId?: string) => void;
 }
 
@@ -379,6 +379,7 @@ export function SheetViewer({
   placements,
   resetViewToken,
   selectedPlacementId,
+  showChrome = true,
   onSelectPlacement,
 }: SheetViewerProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -917,6 +918,17 @@ export function SheetViewer({
   }, [applyPlacementStyles, clearViewerScene, placementsBySheet, updateCameraLayout]);
 
   if (!sheet) {
+    const emptyContent = (
+      <div className="empty-state">
+        <strong>No sheet selected</strong>
+        <span>Choose a material result and sheet to inspect the layout.</span>
+      </div>
+    );
+
+    if (!showChrome) {
+      return <div className="sheet-viewer sheet-viewer--bare-empty">{emptyContent}</div>;
+    }
+
     return (
       <section className="panel sheet-viewer-panel">
         <div className="section-header">
@@ -925,16 +937,13 @@ export function SheetViewer({
             <h3>Sheet layout viewer</h3>
           </div>
         </div>
-        <div className="empty-state">
-          <strong>No sheet selected</strong>
-          <span>Choose a material result and sheet to inspect the layout.</span>
-        </div>
+        {emptyContent}
       </section>
     );
   }
 
-  return (
-    <section aria-label="Current sheet viewer panel" className="panel sheet-viewer-panel">
+  const viewerSurface = (
+    <>
       <div className="section-header">
         <div>
           <p className="eyebrow">Viewer</p>
@@ -1049,6 +1058,57 @@ export function SheetViewer({
           </div>
         ) : null}
       </div>
+    </>
+  );
+
+  if (!showChrome) {
+    return (
+      <div aria-label="Current sheet viewer panel" className="sheet-viewer-sheet">
+        <div
+          aria-label={`Plan view for ${materialName} sheet ${sheet.sheetNumber}`}
+          className={`sheet-viewer sheet-viewer--bare${isDragging ? ' sheet-viewer--dragging' : ''}`}
+          data-current-sheet-id={sheet.sheetId}
+          data-view-mode="plan"
+        >
+          <div className="sheet-viewer__viewport" ref={viewportRef} />
+          {placementsBySheet.length === 0 ? (
+            <div className="sheet-viewer__overlay">
+              <div className="sheet-viewer__overlay-badge">
+                <strong>No placements on this sheet</strong>
+                <span>The full sheet outline is still shown so camera fit and sizing stay clear.</span>
+              </div>
+            </div>
+          ) : null}
+          {tooltip ? (
+            <div
+              aria-label="Hovered panel details"
+              aria-live="polite"
+              className="sheet-viewer__tooltip"
+              role="status"
+              style={{
+                left: `${tooltip.x}px`,
+                top: `${tooltip.y}px`,
+              }}
+            >
+              <strong>{tooltip.placement.partId}</strong>
+              <span>Group: {getDisplayGroup(tooltip.placement.group, tooltip.placement.displayGroup)}</span>
+              <span>
+                {tooltip.placement.width}" × {tooltip.placement.height}"
+              </span>
+              <span>
+                ({tooltip.placement.x}", {tooltip.placement.y}")
+              </span>
+              <span>{tooltip.placement.rotated90 ? 'Rotated 90°' : 'Not rotated'}</span>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <section aria-label="Current sheet viewer panel" className="panel sheet-viewer-panel">
+      {viewerSurface}
     </section>
   );
 }

@@ -3,6 +3,7 @@ using PanelNester.Domain.Models;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using System.Globalization;
+using System.IO;
 using System.Text;
 using QuestPDF.Infrastructure;
 
@@ -14,6 +15,16 @@ public sealed class QuestPdfReportExporter : IPdfReportExporter
     private const float MinimumLabelFontSize = 6f;
     private const float MaximumLabelFontSize = 14f;
     private const float CalloutFontSize = 6f;
+    private const string TotalMaterialSummaryTitle = "Total Material Summary";
+    private const string MaterialSummaryByLocationTitle = "Material Summary by Location";
+    private static readonly string[] TotalMaterialSummaryColumnLabels =
+    [
+        "Material",
+        "Sheets",
+        "Placed",
+        "Utilization",
+        "Sheet Size"
+    ];
     private static readonly object LicenseSync = new();
     private static bool _licenseConfigured;
 
@@ -63,6 +74,11 @@ public sealed class QuestPdfReportExporter : IPdfReportExporter
     private static void ComposeDocument(IDocumentContainer container, ReportData report)
     {
         var hasRenderableLayouts = HasRenderableLayouts(report);
+        var placementColors = BuildPlacementColorLookup(report);
+        var logoBytes = TryLoadLogoBytes(report.CompanyLogoPath);
+        var totalSheets = report.Materials.Sum(material => material.Summary.TotalSheets);
+        var totalPlaced = report.Materials.Sum(material => material.Summary.TotalPlaced);
+        var totalUnplaced = report.Materials.Sum(material => material.Summary.TotalUnplaced);
 
         container.Page(page =>
         {
@@ -70,61 +86,50 @@ public sealed class QuestPdfReportExporter : IPdfReportExporter
             page.Margin(32);
             page.DefaultTextStyle(style => style.FontSize(10));
 
-            page.Header().Column(column =>
-            {
-                column.Spacing(4);
-                column.Item().Text(Display(report.Settings.ReportTitle, "Nesting Report")).FontSize(20).SemiBold();
-                column.Item().Text(Display(report.Settings.CompanyName, "PanelNester"));
-                column.Item().Text(text =>
-                {
-                    text.Span("Project: ").SemiBold();
-                    text.Span(Display(report.Settings.ProjectJobName, report.ProjectMetadata.ProjectName, "Untitled Project"));
-                });
-                column.Item().Text(text =>
-                {
-                    text.Span("Job #: ").SemiBold();
-                    text.Span(Display(report.Settings.ProjectJobNumber, report.ProjectMetadata.ProjectNumber, "Not specified"));
-                });
-                column.Item().Text(text =>
-                {
-                    text.Span("Report Date: ").SemiBold();
-                    text.Span(FormatDate(report.Settings.ReportDate));
-                });
-            });
+            page.Header().Element(header =>
+                ComposeHeader(header, report, logoBytes));
 
             page.Content().PaddingVertical(12).Column(column =>
             {
-                column.Spacing(12);
-                column.Item().Element(SectionCard).Column(section =>
+                column.Spacing(16);
+                column.Item().ShowEntire().Element(section =>
+                    ComposeOverview(
+                        section,
+                        report,
+                        hasRenderableLayouts,
+                        totalSheets,
+                        totalPlaced,
+                        totalUnplaced));
+
+                if (report.Materials.Count > 0)
                 {
-                    section.Spacing(6);
-                    section.Item().Text("Project Summary").FontSize(14).SemiBold();
-                    section.Item().Text(BuildProjectSummary(report, hasRenderableLayouts));
-                    if (!string.IsNullOrWhiteSpace(report.Settings.Notes))
+                    column.Item().Element(section =>
+                        ComposeTotalMaterialSummaryTable(section, report.Materials));
+
+                    if (report.MaterialSummaryGroups.Count > 0)
                     {
-                        section.Item().Text(text =>
-                        {
-                            text.Span("Notes: ").SemiBold();
-                            text.Span(report.Settings.Notes!.Trim());
-                        });
+                        column.Item().Element(section =>
+                            ComposeMaterialSummaryByLocationTable(section, report.MaterialSummaryGroups));
                     }
-                });
+
+                    column.Item().PageBreak();
+                }
 
                 if (!hasRenderableLayouts)
                 {
-                    column.Item().Element(SectionCard).Text("No nesting results are available for this report.");
+                    column.Item().Text("No nesting results are available for this report.");
                 }
 
                 foreach (var material in report.Materials)
                 {
-                    column.Item().Element(SectionCard).Column(section =>
+                    column.Item().PaddingBottom(14).Column(section =>
                     {
                         section.Spacing(8);
                         section.Item().Text(material.MaterialName).FontSize(14).SemiBold();
                         section.Item().Text(
                             $"Sheets: {material.Summary.TotalSheets}  •  Placed: {material.Summary.TotalPlaced}  •  Unplaced: {material.Summary.TotalUnplaced}  •  Utilization: {FormatPercent(material.Summary.OverallUtilization)}");
                         section.Item().Text(
-                            $"Sheet Size: {FormatDimension(material.SheetLength)} × {FormatDimension(material.SheetWidth)}{FormatCost(material.CostPerSheet)}");
+                            $"Sheet Size: {FormatDimension(material.SheetLength)} × {FormatDimension(material.SheetWidth)}");
 
                         if (material.Sheets.Count > 0)
                         {
@@ -134,8 +139,9 @@ public sealed class QuestPdfReportExporter : IPdfReportExporter
                             {
                                 section.Item().PaddingBottom(8).Row(row =>
                                 {
-                                    row.RelativeItem(3).Element(container => SheetDiagram(container, sheet));
-                                    row.RelativeItem(2).Column(details =>
+                                    row.Spacing(16);
+                                    row.RelativeItem(3).Element(container => SheetDiagram(container, sheet, placementColors));
+                                    row.RelativeItem(2).PaddingLeft(12).Column(details =>
                                     {
                                         details.Spacing(4);
                                         details.Item().Text($"Sheet #{sheet.SheetNumber}").SemiBold();
@@ -181,12 +187,12 @@ public sealed class QuestPdfReportExporter : IPdfReportExporter
                 }
             });
 
-            page.Footer().AlignCenter().Text(text =>
+            page.Footer().PaddingTop(10).AlignRight().Text(text =>
             {
-                text.Span("PanelNester report");
-                text.Span(" • ");
+                text.DefaultTextStyle(style => style.FontSize(9).SemiBold());
+                text.Span("Page ");
                 text.CurrentPageNumber();
-                text.Span(" / ");
+                text.Span(" of ");
                 text.TotalPages();
             });
         });
@@ -194,17 +200,351 @@ public sealed class QuestPdfReportExporter : IPdfReportExporter
 
     private static string BuildProjectSummary(ReportData report, bool hasRenderableLayouts)
     {
-        var customerName = Display(report.ProjectMetadata.CustomerName, "Not specified");
-        var estimator = Display(report.ProjectMetadata.Estimator, "Not specified");
-        var drafter = Display(report.ProjectMetadata.Drafter, "Not specified");
-        var projectManager = Display(report.ProjectMetadata.Pm, "Not specified");
-        var revision = Display(report.ProjectMetadata.Revision, "Not specified");
+        var customerName = DisplayOrEmpty(report.ProjectMetadata.CustomerName);
+        var drafter = DisplayOrEmpty(report.ProjectMetadata.Drafter);
+        var projectManager = DisplayOrEmpty(report.ProjectMetadata.Pm);
+        var requiredDate = FormatOptionalDate(report.ProjectMetadata.RequiredDate);
+        var reportDate = FormatDate(report.Settings.ReportDate);
+        var revision = DisplayOrEmpty(report.ProjectMetadata.Revision);
+        var releaseId = DisplayOrEmpty(report.Settings.ReleaseId);
+        var status = DisplayOrEmpty(report.Settings.Status);
         var materialCount = report.Materials.Count;
         var totalSheets = report.Materials.Sum(material => material.Summary.TotalSheets);
 
         return
-            $"Customer: {customerName}  •  Estimator: {estimator}  •  Drafter: {drafter}  •  PM: {projectManager}  •  Revision: {revision}{Environment.NewLine}" +
-            $"Materials: {materialCount}  •  Total Sheets: {totalSheets}  •  Overall Status: {(hasRenderableLayouts ? "Results available" : "No results")}";
+            $"Customer: {customerName}  •  Drafter: {drafter}  •  PM: {projectManager}  •  Required Date: {requiredDate}  •  Report Date: {reportDate}  •  Revision: {revision}{Environment.NewLine}" +
+            $"Release: {releaseId}  •  Status: {status}{Environment.NewLine}" +
+            $"Materials: {materialCount}  •  Total Sheets: {totalSheets}";
+    }
+
+    private static void ComposeOverview(
+        IContainer container,
+        ReportData report,
+        bool hasRenderableLayouts,
+        int totalSheets,
+        int totalPlaced,
+        int totalUnplaced)
+    {
+        container.Column(column =>
+        {
+            column.Spacing(16);
+            column.Item().Text("Project Summary").FontSize(14).SemiBold();
+            column.Item().Element(SummaryBlock).Table(table =>
+            {
+                table.ColumnsDefinition(columns =>
+                {
+                    columns.RelativeColumn();
+                    columns.RelativeColumn();
+                    columns.RelativeColumn();
+                    columns.RelativeColumn();
+                });
+
+                AddSummaryItem(
+                    table,
+                    "Job name",
+                    DisplayOrEmpty(
+                        report.Settings.ProjectJobName,
+                        report.ProjectMetadata.ProjectName));
+                AddSummaryItem(
+                    table,
+                    "Project #",
+                    DisplayOrEmpty(
+                        report.Settings.ProjectJobNumber,
+                        report.ProjectMetadata.ProjectNumber));
+                AddSummaryItem(
+                    table,
+                    "Required Date",
+                    FormatOptionalDate(report.ProjectMetadata.RequiredDate));
+                AddSummaryItem(
+                    table,
+                    "Report Date",
+                    FormatDate(report.Settings.ReportDate));
+                AddSummaryItem(table, "Release #", DisplayOrEmpty(report.Settings.ReleaseId));
+                AddSummaryItem(table, "PM/FM", DisplayOrEmpty(report.ProjectMetadata.Pm));
+                AddSummaryItem(table, "Detailer", DisplayOrEmpty(report.ProjectMetadata.Drafter));
+                AddSummaryItem(table, "Status", DisplayOrEmpty(report.Settings.Status));
+                AddSummaryItem(table, "Customer", DisplayOrEmpty(report.ProjectMetadata.CustomerName));
+                AddSummaryItem(table, "Revision", DisplayOrEmpty(report.ProjectMetadata.Revision));
+            });
+
+            column.Item().Row(row =>
+            {
+                row.Spacing(12);
+                row.RelativeItem().Element(metric =>
+                    ComposeSummaryMetricCard(
+                        metric,
+                        "Materials",
+                        report.Materials.Count.ToString("N0", CultureInfo.InvariantCulture),
+                        null));
+                row.RelativeItem().Element(metric =>
+                    ComposeSummaryMetricCard(
+                        metric,
+                        "Total Sheets",
+                        totalSheets.ToString("N0", CultureInfo.InvariantCulture),
+                        null));
+                row.RelativeItem().Element(metric =>
+                    ComposeSummaryMetricCard(
+                        metric,
+                        "Placed Panels",
+                        totalPlaced.ToString("N0", CultureInfo.InvariantCulture),
+                        null));
+                row.RelativeItem().Element(metric =>
+                    ComposeSummaryMetricCard(
+                        metric,
+                        "Unplaced Panels",
+                        totalUnplaced.ToString("N0", CultureInfo.InvariantCulture),
+                        null));
+            });
+
+            if (!string.IsNullOrWhiteSpace(report.Settings.Notes))
+            {
+                column.Item().Element(SummaryBlock).Column(notes =>
+                {
+                    notes.Spacing(6);
+                    notes.Item().Text("Notes").FontSize(12).SemiBold();
+                    notes.Item().Text(report.Settings.Notes!.Trim());
+                });
+            }
+        });
+    }
+
+    private static void ComposeHeader(IContainer container, ReportData report, byte[]? logoBytes)
+    {
+        container.BorderBottom(1).BorderColor(Colors.Grey.Lighten1).PaddingBottom(10).Row(row =>
+        {
+            row.RelativeItem(1.4f).MinHeight(54).AlignLeft().Element(logoContainer =>
+            {
+                if (logoBytes is { Length: > 0 })
+                {
+                    logoContainer
+                        .MaxHeight(48)
+                        .MaxWidth(150)
+                        .Image(logoBytes)
+                        .FitArea();
+                }
+                else
+                {
+                    logoContainer.AlignLeft();
+                }
+            });
+
+            row.RelativeItem(2.2f).AlignRight().Column(column =>
+            {
+                column.Spacing(4);
+                column.Item()
+                    .AlignRight()
+                    .Text(DisplayOrEmpty(report.Settings.ReportTitle))
+                    .FontSize(18)
+                    .SemiBold();
+                column.Item().AlignRight().Text(text =>
+                {
+                    text.Span(DisplayOrEmpty(
+                        report.Settings.ProjectJobName,
+                        report.ProjectMetadata.ProjectName));
+                    text.Span("  •  ");
+                    text.Span(DisplayOrEmpty(
+                        report.Settings.ProjectJobNumber,
+                        report.ProjectMetadata.ProjectNumber));
+                    text.Span("  •  ");
+                    text.Span(DisplayOrEmpty(report.Settings.ReleaseId));
+                    text.Span("  •  ");
+                    text.Span(DisplayOrEmpty(report.Settings.Status));
+                    text.Span("  •  ");
+                    text.Span(FormatDate(report.Settings.ReportDate));
+                });
+            });
+        });
+    }
+
+    private static string BuildMaterialSummary(ReportData report)
+    {
+        if (report.Materials.Count == 0)
+        {
+            return "No materials were included in this batch.";
+        }
+
+        if (report.MaterialSummaryGroups.Count > 0)
+        {
+            return string.Join(
+                $"{Environment.NewLine}{Environment.NewLine}",
+                report.MaterialSummaryGroups.Select(group =>
+                    $"{Display(group.GroupName, "Ungrouped")}{Environment.NewLine}" +
+                    string.Join(Environment.NewLine, group.Materials.Select(BuildMaterialSummaryLine))));
+        }
+
+        return string.Join(
+            Environment.NewLine,
+            report.Materials.Select(BuildMaterialSummaryLine));
+    }
+
+    private static string BuildMaterialSummaryLine(ReportMaterialSection material) =>
+        $"{Display(material.MaterialName, "Unnamed material")}  •  " +
+        $"Sheets: {material.Summary.TotalSheets}  •  " +
+        $"Placed: {material.Summary.TotalPlaced}  •  " +
+        $"Unplaced: {material.Summary.TotalUnplaced}  •  " +
+        $"Utilization: {FormatPercent(material.Summary.OverallUtilization)}  •  " +
+        $"Sheet Size: {FormatDimension(material.SheetLength)} × {FormatDimension(material.SheetWidth)}";
+
+    private static string BuildMaterialSummaryLine(ReportMaterialSummaryRow material) =>
+        $"{Display(material.MaterialName, "Unnamed material")}  •  " +
+        $"Sheets: {material.Summary.TotalSheets}  •  " +
+        $"Placed: {material.Summary.TotalPlaced}  •  " +
+        $"Unplaced: {material.Summary.TotalUnplaced}  •  " +
+        $"Utilization: {FormatPercent(material.Summary.OverallUtilization)}  •  " +
+        $"Sheet Size: {FormatDimension(material.SheetLength)} × {FormatDimension(material.SheetWidth)}";
+
+    private static void ComposeTotalMaterialSummaryTable(
+        IContainer container,
+        IReadOnlyList<ReportMaterialSection> materials)
+    {
+        container.Column(column =>
+        {
+            column.Spacing(10);
+            column.Item().Text(TotalMaterialSummaryTitle).FontSize(14).SemiBold();
+            column.Item().Table(table =>
+            {
+                ComposeTotalMaterialSummaryColumns(table);
+                ComposeTotalMaterialSummaryHeader(table);
+
+                foreach (var material in materials)
+                {
+                    AppendTotalMaterialSummaryRow(table, material);
+                }
+            });
+        });
+    }
+
+    private static void ComposeMaterialSummaryByLocationTable(
+        IContainer container,
+        IReadOnlyList<ReportMaterialSummaryGroup> groups)
+    {
+        container.Column(column =>
+        {
+            column.Spacing(10);
+            column.Item().Text(MaterialSummaryByLocationTitle).FontSize(14).SemiBold();
+
+            foreach (var group in groups)
+            {
+                column.Item().Element(section =>
+                    ComposeGroupedMaterialSummary(section, group));
+            }
+        });
+    }
+
+    private static void ComposeTotalMaterialSummaryColumns(TableDescriptor table)
+    {
+        table.ColumnsDefinition(columns =>
+        {
+            columns.RelativeColumn(2.2f);
+            columns.RelativeColumn(0.8f);
+            columns.RelativeColumn(0.8f);
+            columns.RelativeColumn(1f);
+            columns.RelativeColumn(1.3f);
+        });
+    }
+
+    private static void ComposeTotalMaterialSummaryHeader(TableDescriptor table)
+    {
+        table.Header(header =>
+        {
+            header.Cell().Element(TableHeaderCell).Text(TotalMaterialSummaryColumnLabels[0]);
+            foreach (var label in TotalMaterialSummaryColumnLabels.Skip(1))
+            {
+                header.Cell().Element(TableHeaderCell).AlignRight().Text(label);
+            }
+        });
+    }
+
+    private static void AppendTotalMaterialSummaryRow(TableDescriptor table, ReportMaterialSection material)
+    {
+        table.Cell().Element(TableBodyCell).Text(Display(material.MaterialName, "Unnamed material"));
+        table.Cell().Element(TableBodyCell).AlignRight()
+            .Text(material.Summary.TotalSheets.ToString("N0", CultureInfo.InvariantCulture));
+        table.Cell().Element(TableBodyCell).AlignRight()
+            .Text(material.Summary.TotalPlaced.ToString("N0", CultureInfo.InvariantCulture));
+        table.Cell().Element(TableBodyCell).AlignRight()
+            .Text(FormatPercent(material.Summary.OverallUtilization));
+        table.Cell().Element(TableBodyCell).AlignRight()
+            .Text($"{FormatDimension(material.SheetLength)} × {FormatDimension(material.SheetWidth)}");
+    }
+
+    private static void ComposeGroupedMaterialSummary(
+        IContainer container,
+        ReportMaterialSummaryGroup group)
+    {
+        container
+            .EnsureSpace(48)
+            .Column(column =>
+            {
+                column.Spacing(4);
+                column.Item().Text(Display(group.GroupName, "Ungrouped")).FontSize(12).SemiBold();
+                column.Item().Table(table =>
+                {
+                    ComposeMaterialSummaryColumns(table);
+                    ComposeMaterialSummaryHeader(table);
+
+                    foreach (var material in group.Materials)
+                    {
+                        AppendMaterialSummaryRow(table, material);
+                    }
+                });
+            });
+    }
+
+    private static void ComposeMaterialSummaryColumns(TableDescriptor table)
+    {
+        table.ColumnsDefinition(columns =>
+        {
+            columns.RelativeColumn(2.2f);
+            columns.RelativeColumn(0.8f);
+            columns.RelativeColumn(0.8f);
+            columns.RelativeColumn(0.9f);
+            columns.RelativeColumn(1f);
+            columns.RelativeColumn(1.3f);
+        });
+    }
+
+    private static void ComposeMaterialSummaryHeader(TableDescriptor table)
+    {
+        table.Header(header =>
+        {
+            header.Cell().Element(TableHeaderCell).Text("Material");
+            header.Cell().Element(TableHeaderCell).AlignRight().Text("Sheets");
+            header.Cell().Element(TableHeaderCell).AlignRight().Text("Placed");
+            header.Cell().Element(TableHeaderCell).AlignRight().Text("Unplaced");
+            header.Cell().Element(TableHeaderCell).AlignRight().Text("Utilization");
+            header.Cell().Element(TableHeaderCell).AlignRight().Text("Sheet Size");
+        });
+    }
+
+    private static void AppendMaterialSummaryRow(TableDescriptor table, ReportMaterialSection material)
+    {
+        table.Cell().Element(TableBodyCell).Text(Display(material.MaterialName, "Unnamed material"));
+        table.Cell().Element(TableBodyCell).AlignRight()
+            .Text(material.Summary.TotalSheets.ToString("N0", CultureInfo.InvariantCulture));
+        table.Cell().Element(TableBodyCell).AlignRight()
+            .Text(material.Summary.TotalPlaced.ToString("N0", CultureInfo.InvariantCulture));
+        table.Cell().Element(TableBodyCell).AlignRight()
+            .Text(material.Summary.TotalUnplaced.ToString("N0", CultureInfo.InvariantCulture));
+        table.Cell().Element(TableBodyCell).AlignRight()
+            .Text(FormatPercent(material.Summary.OverallUtilization));
+        table.Cell().Element(TableBodyCell).AlignRight()
+            .Text($"{FormatDimension(material.SheetLength)} × {FormatDimension(material.SheetWidth)}");
+    }
+
+    private static void AppendMaterialSummaryRow(TableDescriptor table, ReportMaterialSummaryRow material)
+    {
+        table.Cell().Element(TableBodyCell).Text(Display(material.MaterialName, "Unnamed material"));
+        table.Cell().Element(TableBodyCell).AlignRight()
+            .Text(material.Summary.TotalSheets.ToString("N0", CultureInfo.InvariantCulture));
+        table.Cell().Element(TableBodyCell).AlignRight()
+            .Text(material.Summary.TotalPlaced.ToString("N0", CultureInfo.InvariantCulture));
+        table.Cell().Element(TableBodyCell).AlignRight()
+            .Text(material.Summary.TotalUnplaced.ToString("N0", CultureInfo.InvariantCulture));
+        table.Cell().Element(TableBodyCell).AlignRight()
+            .Text(FormatPercent(material.Summary.OverallUtilization));
+        table.Cell().Element(TableBodyCell).AlignRight()
+            .Text($"{FormatDimension(material.SheetLength)} × {FormatDimension(material.SheetWidth)}");
     }
 
     private static string BuildPlacementSummary(ReportSheetDiagram sheet)
@@ -223,34 +563,43 @@ public sealed class QuestPdfReportExporter : IPdfReportExporter
         return string.Join(
             Environment.NewLine,
             orderedPlacements.Select((placement, index) =>
-                $"{index + 1}. {Display(placement.PartId, "(unnamed part)")}: {FormatDimension(placement.Width)} × {FormatDimension(placement.Height)} at ({FormatDimension(placement.X)}, {FormatDimension(placement.Y)}){(placement.Rotated90 ? " rotated" : string.Empty)}"));
+                $"{index + 1}. {FormatPlacementLabel(placement)}: {FormatDimension(placement.Width)} × {FormatDimension(placement.Height)} at ({FormatDimension(placement.X)}, {FormatDimension(placement.Y)}){(placement.Rotated90 ? " rotated" : string.Empty)}"));
     }
 
-    private static readonly Color[] PlacementPalette =
-    [
-        Colors.Blue.Lighten3,
-        Colors.Green.Lighten3,
-        Colors.Orange.Lighten3,
-        Colors.Red.Lighten3,
-        Colors.Purple.Lighten3
-    ];
+    private static string FormatPlacementLabel(NestPlacement placement)
+    {
+        var partLabel = Display(placement.PartId, "(unnamed part)");
+        if (string.IsNullOrWhiteSpace(placement.Group))
+        {
+            return partLabel;
+        }
 
-    private static IContainer SheetDiagram(IContainer container, ReportSheetDiagram sheet) =>
-        BuildSheetDiagram(container, sheet);
+        return $"[{placement.Group.Trim()}] {partLabel}";
+    }
 
-    private static IContainer BuildSheetDiagram(IContainer container, ReportSheetDiagram sheet)
+    private static IContainer SheetDiagram(
+        IContainer container,
+        ReportSheetDiagram sheet,
+        IReadOnlyDictionary<string, string> placementColors) =>
+        BuildSheetDiagram(container, sheet, placementColors);
+
+    private static IContainer BuildSheetDiagram(
+        IContainer container,
+        ReportSheetDiagram sheet,
+        IReadOnlyDictionary<string, string> placementColors)
     {
         container
             .Height(160)
-            .Border(1)
-            .BorderColor(Colors.Grey.Lighten1)
-            .Background(Colors.Grey.Lighten4)
-            .Svg(size => BuildSheetSvg(sheet, size));
+            .Background(Colors.White)
+            .Svg(size => BuildSheetSvg(sheet, size, placementColors));
 
         return container;
     }
 
-    private static string BuildSheetSvg(ReportSheetDiagram sheet, Size size)
+    private static string BuildSheetSvg(
+        ReportSheetDiagram sheet,
+        Size size,
+        IReadOnlyDictionary<string, string>? placementColors = null)
     {
         var width = size.Width;
         var height = size.Height;
@@ -305,8 +654,7 @@ public sealed class QuestPdfReportExporter : IPdfReportExporter
 
             var placementX = offsetX + (float)placement.X * scale;
             var placementY = offsetY + (float)placement.Y * scale;
-            var placementColor = ResolvePlacementColor(placement.PartId);
-            var colorHex = ToSvgColor(placementColor);
+            var colorHex = ResolvePlacementColor(placement, placementColors);
 
             svg.Append(
                 $"<rect class=\"placement-panel\" x=\"{FormatSvgNumber(placementX)}\" y=\"{FormatSvgNumber(placementY)}\" width=\"{FormatSvgNumber(placementWidth)}\" height=\"{FormatSvgNumber(placementHeight)}\" fill=\"{colorHex}\" fill-opacity=\"0.6\" stroke=\"{colorHex}\" stroke-width=\"{FormatSvgNumber(MinimumPlacementStrokeWidth)}\"/>");
@@ -408,20 +756,76 @@ public sealed class QuestPdfReportExporter : IPdfReportExporter
             $"<text class=\"placement-callout-label\" x=\"{FormatSvgNumber(textX)}\" y=\"{FormatSvgNumber(textY)}\" fill=\"#111111\" font-family=\"Arial, sans-serif\" font-size=\"{FormatSvgNumber(CalloutFontSize)}\" font-weight=\"700\" text-anchor=\"middle\" dominant-baseline=\"middle\">{EscapeSvgText(calloutText)}</text>");
     }
 
-    private static Color ResolvePlacementColor(string? partId)
+    private static IReadOnlyDictionary<string, string> BuildPlacementColorLookup(ReportData report)
     {
-        if (string.IsNullOrWhiteSpace(partId))
+        var sizeKeys = report.Materials
+            .SelectMany(material => material.Sheets)
+            .SelectMany(sheet => sheet.Placements)
+            .Select(GetPlacementSizeKey)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(key => key, StringComparer.Ordinal)
+            .ToArray();
+
+        var colors = new Dictionary<string, string>(StringComparer.Ordinal);
+        for (var index = 0; index < sizeKeys.Length; index++)
         {
-            return PlacementPalette[0];
+            colors[sizeKeys[index]] = CreatePaletteColor(index);
         }
 
-        var hash = StringComparer.Ordinal.GetHashCode(partId);
-        var index = (hash & 0x7FFFFFFF) % PlacementPalette.Length;
-        return PlacementPalette[index];
+        return colors;
     }
 
-    private static string ToSvgColor(Color color) =>
-        $"#{color.Red:X2}{color.Green:X2}{color.Blue:X2}";
+    private static string ResolvePlacementColor(
+        NestPlacement placement,
+        IReadOnlyDictionary<string, string>? placementColors)
+    {
+        var sizeKey = GetPlacementSizeKey(placement);
+        if (placementColors is not null &&
+            placementColors.TryGetValue(sizeKey, out var colorHex))
+        {
+            return colorHex;
+        }
+
+        return CreatePaletteColor(0);
+    }
+
+    private static string GetPlacementSizeKey(NestPlacement placement)
+    {
+        var normalizedWidth = Math.Min(placement.Width, placement.Height);
+        var normalizedHeight = Math.Max(placement.Width, placement.Height);
+        return $"{FormatCanonicalDimension(normalizedWidth)}x{FormatCanonicalDimension(normalizedHeight)}";
+    }
+
+    private static string CreatePaletteColor(int index)
+    {
+        var hue = (index * 137.508f) % 360f;
+        var saturation = 0.55f + ((index % 3) * 0.08f);
+        var lightness = 0.72f - ((index % 2) * 0.08f);
+        return HslToHex(hue, Math.Min(saturation, 0.82f), Math.Max(lightness, 0.52f));
+    }
+
+    private static string HslToHex(float hue, float saturation, float lightness)
+    {
+        var chroma = (1f - Math.Abs((2f * lightness) - 1f)) * saturation;
+        var scaledHue = hue / 60f;
+        var secondary = chroma * (1f - Math.Abs((scaledHue % 2f) - 1f));
+        var match = lightness - (chroma / 2f);
+
+        var (red, green, blue) = scaledHue switch
+        {
+            >= 0f and < 1f => (chroma, secondary, 0f),
+            >= 1f and < 2f => (secondary, chroma, 0f),
+            >= 2f and < 3f => (0f, chroma, secondary),
+            >= 3f and < 4f => (0f, secondary, chroma),
+            >= 4f and < 5f => (secondary, 0f, chroma),
+            _ => (chroma, 0f, secondary)
+        };
+
+        return $"#{ToByte(red + match):X2}{ToByte(green + match):X2}{ToByte(blue + match):X2}";
+    }
+
+    private static byte ToByte(float value) =>
+        (byte)Math.Clamp((int)Math.Round(value * 255f, MidpointRounding.AwayFromZero), 0, 255);
 
     private static string EscapeSvgText(string value) =>
         value
@@ -432,11 +836,41 @@ public sealed class QuestPdfReportExporter : IPdfReportExporter
     private static string FormatSvgNumber(float value) =>
         value.ToString("0.###", CultureInfo.InvariantCulture);
 
-    private static IContainer SectionCard(IContainer container) =>
+    private static string FormatCanonicalDimension(decimal value) =>
+        value.ToString("G29", CultureInfo.InvariantCulture);
+
+    private static void AddSummaryItem(TableDescriptor table, string label, string value)
+    {
+        table.Cell().PaddingRight(18).PaddingBottom(12).Column(column =>
+        {
+            column.Spacing(2);
+            column.Item().Text(label).FontSize(9).SemiBold().FontColor(Colors.Grey.Darken1);
+            column.Item().Text(value).FontSize(11).SemiBold().FontColor(Colors.Black);
+        });
+    }
+
+    private static void ComposeSummaryMetricCard(
+        IContainer container,
+        string label,
+        string value,
+        string? note)
+    {
+        container.Element(SummaryBlock).Column(column =>
+        {
+            column.Spacing(4);
+            column.Item().Text(label).FontSize(9).SemiBold().FontColor(Colors.Grey.Darken1);
+            column.Item().Text(value).FontSize(18).SemiBold().FontColor(Colors.Black);
+
+            if (!string.IsNullOrWhiteSpace(note))
+            {
+                column.Item().Text(note).FontSize(9).Italic().FontColor(Colors.Grey.Darken1);
+            }
+        });
+    }
+
+    private static IContainer SummaryBlock(IContainer container) =>
         container
-            .Border(1)
-            .BorderColor(Colors.Grey.Lighten1)
-            .Padding(12);
+            .Padding(0);
 
     private static IContainer TableHeaderCell(IContainer container) =>
         container
@@ -464,8 +898,21 @@ public sealed class QuestPdfReportExporter : IPdfReportExporter
                 ? secondary.Trim()
                 : fallback;
 
+    private static string DisplayOrEmpty(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
+
+    private static string DisplayOrEmpty(string? primary, string? secondary) =>
+        !string.IsNullOrWhiteSpace(primary)
+            ? primary.Trim()
+            : !string.IsNullOrWhiteSpace(secondary)
+                ? secondary.Trim()
+                : string.Empty;
+
     private static string FormatDate(DateTime? value) =>
         value?.ToString("yyyy-MM-dd") ?? DateTime.Today.ToString("yyyy-MM-dd");
+
+    private static string FormatOptionalDate(DateTime? value) =>
+        value?.ToString("yyyy-MM-dd") ?? string.Empty;
 
     private static string FormatDimension(decimal value) =>
         $"{value:0.###}\"";
@@ -475,6 +922,27 @@ public sealed class QuestPdfReportExporter : IPdfReportExporter
 
     private static string FormatCost(decimal? value) =>
         value.HasValue ? $"  •  Cost/Sheet: {value.Value:C}" : string.Empty;
+
+    private static byte[]? TryLoadLogoBytes(string? filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
+        {
+            return null;
+        }
+
+        try
+        {
+            return File.ReadAllBytes(filePath);
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
 
     private static bool HasRenderableLayouts(ReportData report) =>
         report.Materials.Any(material => material.Sheets.Any(sheet => sheet.Placements.Count > 0));

@@ -16,7 +16,7 @@ public sealed class BridgeHostReadinessGateSpecs
             Guid.NewGuid().ToString("N"),
             JsonSerializer.SerializeToElement(
                 new BridgeHandshakeRequest(
-                    "PanelNester.WebUI",
+                    "OptiFab.WebUI",
                     "0.1.0",
                     Array.Empty<string>()),
                 new JsonSerializerOptions(JsonSerializerDefaults.Web)));

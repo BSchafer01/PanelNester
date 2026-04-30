@@ -81,6 +81,39 @@ public sealed class CsvImportServiceSpecs
     }
 
     [Fact]
+    public async Task Locked_csv_files_return_a_file_in_use_error_instead_of_throwing()
+    {
+        var workspacePath = Path.Combine(Path.GetTempPath(), $"PanelNester.CsvImportServiceSpecs.{Guid.NewGuid():N}");
+
+        try
+        {
+            Directory.CreateDirectory(workspacePath);
+            var csvPath = Path.Combine(workspacePath, "locked.csv");
+            await File.WriteAllTextAsync(
+                csvPath,
+                """
+                Id,Length,Width,Quantity,Material
+                P-001,12.5,48,2,Demo Material
+                """);
+
+            using var lockStream = new FileStream(csvPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            var response = await new CsvImportService().ImportAsync(new ImportRequest { FilePath = csvPath });
+
+            Assert.False(response.Success);
+            var error = Assert.Single(response.Errors);
+            Assert.Equal("file-in-use", error.Code);
+            Assert.Contains("Close the file and try importing again.", error.Message);
+        }
+        finally
+        {
+            if (Directory.Exists(workspacePath))
+            {
+                Directory.Delete(workspacePath, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task Unicode_part_ids_round_trip_without_being_dropped_or_normalized_when_materials_are_loaded_from_the_repository()
     {
         var workspacePath = Path.Combine(Path.GetTempPath(), $"PanelNester.CsvImportServiceSpecs.{Guid.NewGuid():N}");
@@ -270,5 +303,69 @@ public sealed class CsvImportServiceSpecs
         Assert.Null(response.Parts[0].Group);
         Assert.Null(response.Parts[1].Group);
         Assert.Equal("Casework", response.Parts[2].Group);
+    }
+
+    [Fact]
+    public async Task Like_rows_are_merged_and_quantities_are_summed_when_no_group_column_is_present()
+    {
+        var service = new CsvImportService();
+        var response = await service.ImportAsync(
+            new StringReader(
+                """
+                Id,Length,Width,Quantity,Material
+                P-001,24.00,96.00,2,Demo Material
+                P-001,24,96,3,Demo Material
+                P-002,24,96,1,Demo Material
+                """));
+
+        Assert.True(response.Success);
+        Assert.Equal(2, response.Parts.Count);
+
+        var mergedRow = response.Parts[0];
+        Assert.Equal("row-1", mergedRow.RowId);
+        Assert.Equal("P-001", mergedRow.ImportedId);
+        Assert.Equal(5, mergedRow.Quantity);
+        Assert.Equal("5", mergedRow.QuantityText);
+
+        var distinctRow = response.Parts[1];
+        Assert.Equal("P-002", distinctRow.ImportedId);
+        Assert.Equal(1, distinctRow.Quantity);
+    }
+
+    [Fact]
+    public async Task Like_rows_are_only_merged_with_matching_groups_when_group_column_is_present()
+    {
+        var service = new CsvImportService();
+        var response = await service.ImportAsync(
+            new StringReader(
+                """
+                Id,Length,Width,Quantity,Material,Group
+                P-001,24,96,2,Demo Material,A
+                P-001,24,96,3,Demo Material,A
+                P-001,24,96,4,Demo Material,B
+                P-001,24,96,5,Demo Material,
+                P-001,24,96,6,Demo Material,
+                """));
+
+        Assert.True(response.Success);
+        Assert.Equal(3, response.Parts.Count);
+
+        Assert.Collection(
+            response.Parts,
+            row =>
+            {
+                Assert.Equal("A", row.Group);
+                Assert.Equal(5, row.Quantity);
+            },
+            row =>
+            {
+                Assert.Equal("B", row.Group);
+                Assert.Equal(4, row.Quantity);
+            },
+            row =>
+            {
+                Assert.Null(row.Group);
+                Assert.Equal(11, row.Quantity);
+            });
     }
 }

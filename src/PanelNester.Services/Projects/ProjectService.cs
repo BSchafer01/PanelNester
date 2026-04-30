@@ -238,11 +238,13 @@ public sealed class ProjectService : IProjectService
     {
         settings ??= new ProjectSettings { KerfWidth = DefaultKerfWidth };
         var reportSettings = NormalizeReportSettings(metadata, settings.ReportSettings);
+        var stiffenerTakeoff = NormalizeStiffenerTakeoffSettings(settings.StiffenerTakeoff);
 
         return settings with
         {
             KerfWidth = settings.KerfWidth < 0 ? DefaultKerfWidth : settings.KerfWidth,
-            ReportSettings = reportSettings
+            ReportSettings = reportSettings,
+            StiffenerTakeoff = stiffenerTakeoff
         };
     }
 
@@ -257,6 +259,8 @@ public sealed class ProjectService : IProjectService
             ReportTitle = settings.ReportTitle ?? BuildDefaultReportTitle(metadata),
             ProjectJobName = settings.ProjectJobName ?? metadata.ProjectName,
             ProjectJobNumber = settings.ProjectJobNumber ?? metadata.ProjectNumber,
+            ReleaseId = NormalizeOptional(settings.ReleaseId),
+            Status = NormalizeOptional(settings.Status),
             ReportDate = settings.ReportDate ?? metadata.Date,
             Notes = settings.Notes ?? metadata.Notes
         };
@@ -270,6 +274,27 @@ public sealed class ProjectService : IProjectService
             : $"{projectName} Nesting Report";
     }
 
+    private static StiffenerTakeoffSettings NormalizeStiffenerTakeoffSettings(StiffenerTakeoffSettings? settings)
+    {
+        settings ??= new StiffenerTakeoffSettings();
+
+        return settings with
+        {
+            MinimumLengthInches = settings.MinimumLengthInches < 0 ? 32m : settings.MinimumLengthInches,
+            MinimumWidthInches = settings.MinimumWidthInches < 0 ? 32m : settings.MinimumWidthInches,
+            WidthDeductionInches = settings.WidthDeductionInches < 0 ? 4m : settings.WidthDeductionInches,
+            StockLengthFeet = settings.StockLengthFeet <= 0 ? 20m : settings.StockLengthFeet,
+            ReportTitle = NormalizeOptional(settings.ReportTitle),
+            Extrusion = NormalizeOptional(settings.Extrusion),
+            ReleaseId = NormalizeOptional(settings.ReleaseId),
+            PoNumber = NormalizeOptional(settings.PoNumber),
+            Color = NormalizeOptional(settings.Color),
+            ColorNumber = NormalizeOptional(settings.ColorNumber),
+            Manufacturer = NormalizeOptional(settings.Manufacturer),
+            Status = NormalizeOptional(settings.Status)
+        };
+    }
+
     private static ProjectState NormalizeState(ProjectState? state)
     {
         state ??= new ProjectState();
@@ -278,7 +303,31 @@ public sealed class ProjectService : IProjectService
         {
             SourceFilePath = NormalizeOptional(state.SourceFilePath),
             SelectedMaterialId = NormalizeOptional(state.SelectedMaterialId),
-            Parts = (state.Parts ?? Array.Empty<PartRow>()).ToArray()
+            Parts = (state.Parts ?? Array.Empty<PartRow>()).ToArray(),
+            ExtrusionLayout = NormalizeExtrusionLayout(state.ExtrusionLayout)
+        };
+    }
+
+    private static ExtrusionLayoutState NormalizeExtrusionLayout(ExtrusionLayoutState? layout)
+    {
+        layout ??= new ExtrusionLayoutState();
+
+        return layout with
+        {
+            PanelToPanelExtrusionName = NormalizeOptional(layout.PanelToPanelExtrusionName) ?? "Panel Joint",
+            EdgeExtrusionName = NormalizeOptional(layout.EdgeExtrusionName) ?? "Perimeter Edge",
+            Groups = (layout.Groups ?? Array.Empty<ExtrusionGroupLayout>())
+                .Where(group => group is not null)
+                .Select(group => group with
+                {
+                    GroupName = NormalizeOptional(group.GroupName) ?? "Ungrouped",
+                    Rows = Math.Max(1, group.Rows),
+                    Columns = Math.Max(1, group.Columns),
+                    Cells = (group.Cells ?? Array.Empty<ExtrusionGridCell>()).ToArray(),
+                    EdgeAssignments = (group.EdgeAssignments ?? Array.Empty<ExtrusionEdgeAssignment>()).ToArray(),
+                    JointAssignments = (group.JointAssignments ?? Array.Empty<ExtrusionJointAssignment>()).ToArray()
+                })
+                .ToArray()
         };
     }
 

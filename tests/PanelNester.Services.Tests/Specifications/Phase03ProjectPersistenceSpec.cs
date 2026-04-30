@@ -84,6 +84,7 @@ internal static class Phase03ProjectPersistenceSpec
                 Drafter = "Morgan",
                 Pm = "Riley",
                 Date = new DateTime(2026, 03, 14, 0, 0, 0, DateTimeKind.Utc),
+                RequiredDate = new DateTime(2026, 04, 1, 0, 0, 0, DateTimeKind.Utc),
                 Revision = "B",
                 Notes = "Phase 3 sample project."
             },

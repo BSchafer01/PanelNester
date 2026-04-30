@@ -42,7 +42,7 @@ public sealed class MaterialBridgeContractSpecs
             new PartEditorService(DemoMaterialCatalog.All),
             new StubNestingService(),
             () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true),
-            new StubMaterialLibraryLocationService());
+            materialLibraryLocationService: new StubMaterialLibraryLocationService());
 
         foreach (var messageType in Phase02BridgeExpectations.MaterialMessageTypes)
         {

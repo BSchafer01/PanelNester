@@ -14,13 +14,13 @@ internal static class MaterialLibraryLocationSpec
     internal static string GetCanonicalDefaultLibraryPath(string workspacePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workspacePath);
-        return Path.GetFullPath(Path.Combine(workspacePath, "PanelNester", "materials.json"));
+        return Path.GetFullPath(Path.Combine(workspacePath, "OptiFab", "materials.json"));
     }
 
     internal static string GetLocationStoreFilePath(string workspacePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workspacePath);
-        return Path.GetFullPath(Path.Combine(workspacePath, "PanelNester", "material-library-location.json"));
+        return Path.GetFullPath(Path.Combine(workspacePath, "OptiFab", "material-library-location.json"));
     }
 
     internal static JsonMaterialRepositoryOptions CreateOptions(string workspacePath) =>

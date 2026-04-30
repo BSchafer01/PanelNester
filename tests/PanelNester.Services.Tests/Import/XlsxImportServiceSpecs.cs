@@ -83,6 +83,39 @@ public sealed class XlsxImportServiceSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Locked_xlsx_files_return_a_file_in_use_error_instead_of_throwing()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var xlsxPath = Path.Combine(_workspacePath, "locked.xlsx");
+
+        using (var workbook = new XLWorkbook())
+        {
+            var sheet = workbook.AddWorksheet("Parts");
+            string[] headers = ["Id", "Length", "Width", "Quantity", "Material"];
+
+            for (var column = 0; column < headers.Length; column++)
+            {
+                sheet.Cell(1, column + 1).Value = headers[column];
+            }
+
+            sheet.Cell(2, 1).Value = "P-001";
+            sheet.Cell(2, 2).Value = 12.5m;
+            sheet.Cell(2, 3).Value = 48m;
+            sheet.Cell(2, 4).Value = 2;
+            sheet.Cell(2, 5).Value = "Demo Material";
+            workbook.SaveAs(xlsxPath);
+        }
+
+        using var lockStream = new FileStream(xlsxPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        var response = await new XlsxImportService().ImportAsync(new ImportRequest { FilePath = xlsxPath });
+
+        Assert.False(response.Success);
+        var error = Assert.Single(response.Errors);
+        Assert.Equal("file-in-use", error.Code);
+        Assert.Contains("Close the file and try importing again.", error.Message);
+    }
+
+    [Fact]
     public async Task Xlsx_group_mapping_matches_csv_group_mapping_output()
     {
         Directory.CreateDirectory(_workspacePath);
@@ -130,6 +163,84 @@ public sealed class XlsxImportServiceSpecs : IDisposable
         var xlsxResponse = await xlsxService.ImportAsync(new ImportRequest { FilePath = xlsxPath });
 
         Assert.Equivalent(csvResponse, xlsxResponse, strict: true);
+    }
+
+    [Fact]
+    public async Task Xlsx_import_merges_like_rows_using_group_when_available()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var csvPath = Path.Combine(_workspacePath, "merged-parts.csv");
+        var xlsxPath = Path.Combine(_workspacePath, "merged-parts.xlsx");
+        var csvService = new CsvImportService();
+        var xlsxService = new XlsxImportService();
+
+        await File.WriteAllTextAsync(
+            csvPath,
+            """
+            Id,Length,Width,Quantity,Material,Group
+            P-001,24,96,2,Demo Material,A
+            P-001,24.00,96.00,3,Demo Material,A
+            P-001,24,96,4,Demo Material,B
+            P-002,12,24,1,Demo Material,
+            P-002,12,24,2,Demo Material,
+            """);
+
+        using (var workbook = new XLWorkbook())
+        {
+            var sheet = workbook.AddWorksheet("Parts");
+            string[] headers = ["Id", "Length", "Width", "Quantity", "Material", "Group"];
+
+            for (var column = 0; column < headers.Length; column++)
+            {
+                sheet.Cell(1, column + 1).Value = headers[column];
+            }
+
+            sheet.Cell(2, 1).Value = "P-001";
+            sheet.Cell(2, 2).Value = 24m;
+            sheet.Cell(2, 3).Value = 96m;
+            sheet.Cell(2, 4).Value = 2;
+            sheet.Cell(2, 5).Value = "Demo Material";
+            sheet.Cell(2, 6).Value = "A";
+
+            sheet.Cell(3, 1).Value = "P-001";
+            sheet.Cell(3, 2).Value = 24m;
+            sheet.Cell(3, 3).Value = 96m;
+            sheet.Cell(3, 4).Value = 3;
+            sheet.Cell(3, 5).Value = "Demo Material";
+            sheet.Cell(3, 6).Value = "A";
+
+            sheet.Cell(4, 1).Value = "P-001";
+            sheet.Cell(4, 2).Value = 24m;
+            sheet.Cell(4, 3).Value = 96m;
+            sheet.Cell(4, 4).Value = 4;
+            sheet.Cell(4, 5).Value = "Demo Material";
+            sheet.Cell(4, 6).Value = "B";
+
+            sheet.Cell(5, 1).Value = "P-002";
+            sheet.Cell(5, 2).Value = 12m;
+            sheet.Cell(5, 3).Value = 24m;
+            sheet.Cell(5, 4).Value = 1;
+            sheet.Cell(5, 5).Value = "Demo Material";
+            sheet.Cell(5, 6).Value = string.Empty;
+
+            sheet.Cell(6, 1).Value = "P-002";
+            sheet.Cell(6, 2).Value = 12m;
+            sheet.Cell(6, 3).Value = 24m;
+            sheet.Cell(6, 4).Value = 2;
+            sheet.Cell(6, 5).Value = "Demo Material";
+            sheet.Cell(6, 6).Value = string.Empty;
+
+            workbook.SaveAs(xlsxPath);
+        }
+
+        var csvResponse = await csvService.ImportAsync(new ImportRequest { FilePath = csvPath });
+        var xlsxResponse = await xlsxService.ImportAsync(new ImportRequest { FilePath = xlsxPath });
+
+        Assert.Equivalent(csvResponse, xlsxResponse, strict: true);
+        Assert.Equal(3, xlsxResponse.Parts.Count);
+        Assert.Equal(5, xlsxResponse.Parts[0].Quantity);
+        Assert.Equal(4, xlsxResponse.Parts[1].Quantity);
+        Assert.Equal(3, xlsxResponse.Parts[2].Quantity);
     }
 
     public void Dispose()

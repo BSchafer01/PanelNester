@@ -1,12 +1,12 @@
-# PanelNester
+# OptiFab
 
-PanelNester is a Windows desktop application for importing rectangular part lists, grouping them by material, running sheet-nesting layouts, reviewing the results visually, and exporting job documentation.
+OptiFab is a Windows desktop application for importing rectangular part lists, grouping them by material, running sheet-nesting layouts, reviewing the results visually, and exporting job documentation.
 
 The project is built as a **WPF desktop host** with a **WebView2-embedded React/TypeScript UI** and a **Three.js-based results viewer**, backed by .NET services for import, nesting, persistence, and reporting.
 
 ## What it does
 
-PanelNester currently supports these core workflows:
+OptiFab currently supports these core workflows:
 
 - **Import part data** from CSV and XLSX files
 - **Validate imported rows** and surface row-level errors and warnings
@@ -19,7 +19,7 @@ PanelNester currently supports these core workflows:
 
 ## Current architecture
 
-PanelNester is intentionally split by responsibility:
+OptiFab is intentionally split by responsibility:
 
 ```text
 WPF desktop host (.NET 8, Windows only)
@@ -66,7 +66,7 @@ Pure domain layer
 
 ### Materials and projects
 
-- Local material library persisted to `%LOCALAPPDATA%\PanelNester\materials.json`
+- Local material library persisted to `%LOCALAPPDATA%\OptiFab\materials.json`
 - Project metadata editing
 - Saved project material snapshots so reopened work does not silently drift with later library edits
 - `.pnest` save/open support
@@ -139,7 +139,7 @@ dotnet build .\installer\PanelNester.Installer\PanelNester.Installer.wixproj -c 
 Output:
 
 ```text
-installer\PanelNester.Installer\bin\Release\PanelNester-PerUser.msi
+installer\PanelNester.Installer\bin\Release\OptiFab-PerUser.msi
 ```
 
 ### What the installer build does
@@ -155,7 +155,7 @@ The WiX project is wired to do more than package existing binaries:
 The installer is configured to install under:
 
 ```text
-%LOCALAPPDATA%\Programs\PanelNester
+%LOCALAPPDATA%\Programs\OptiFab
 ```
 
 ## Repository highlights
@@ -191,7 +191,7 @@ If you are browsing the codebase for the first time, these are good entry points
 
 ## Current status
 
-PanelNester is an **active in-repo product under ongoing hardening**, not a polished general-release package.
+OptiFab is an **active in-repo product under ongoing hardening**, not a polished general-release package.
 
 Current signals from the repository:
 

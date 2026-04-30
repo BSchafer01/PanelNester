@@ -16,6 +16,14 @@ public static class BridgeMessageTypes
     public const string RunNesting = "run-nesting";
     public const string RunBatchNesting = "run-batch-nesting";
     public const string ListMaterials = "list-materials";
+    public const string GetStiffenerTakeoff = "get-stiffener-takeoff";
+    public const string GetExtrusionLayout = "get-extrusion-layout";
+    public const string UpdateExtrusionLayout = "update-extrusion-layout";
+    public const string GetExtrusionReport = "get-extrusion-report";
+    public const string ExportExcelReport = "export-excel-report";
+    public const string ExportStiffenerPdfReport = "export-stiffener-pdf-report";
+    public const string ExportExtrusionPdfReport = "export-extrusion-pdf-report";
+    public const string ExportExtrusionExcelReport = "export-extrusion-excel-report";
     public const string GetMaterial = "get-material";
     public const string CreateMaterial = "create-material";
     public const string UpdateMaterial = "update-material";
@@ -28,6 +36,8 @@ public static class BridgeMessageTypes
     public const string SaveProjectAs = "save-project-as";
     public const string GetProjectMetadata = "get-project-metadata";
     public const string UpdateProjectMetadata = "update-project-metadata";
+    public const string GetDesktopAppSettings = "get-desktop-app-settings";
+    public const string UpdateDesktopAppSettings = "update-desktop-app-settings";
     public const string UpdateReportSettings = "update-report-settings";
     public const string ExportPdfReport = "export-pdf-report";
 
@@ -77,7 +87,7 @@ public sealed record BridgeError(string Code, string Message, string? UserMessag
             "project-corrupt" =>
                 "The selected project file could not be opened.",
             "project-unsupported-version" =>
-                "This project file was created by a newer version of PanelNester.",
+                "This project file was created by a newer version of OptiFab.",
             "project-create-failed" =>
                 "The project could not be created.",
             "project-save-failed" =>
@@ -86,8 +96,24 @@ public sealed record BridgeError(string Code, string Message, string? UserMessag
                 "The project details could not be updated.",
             "report-settings-update-failed" =>
                 "The report settings could not be updated.",
+            "desktop-settings-update-failed" =>
+                "The application settings could not be updated.",
             "report-export-failed" =>
                 "The PDF report could not be exported. Please try again.",
+            "report-excel-export-failed" =>
+                "The Excel report could not be exported. Please try again.",
+            "stiffener-takeoff-failed" =>
+                "The stiffener takeoff could not be calculated.",
+            "stiffener-report-disabled" =>
+                "Enable stiffener takeoff in the project settings first.",
+            "stiffener-report-export-failed" =>
+                "The stiffener PDF report could not be exported. Please try again.",
+            "extrusion-layout-failed" =>
+                "The extrusion layout could not be prepared.",
+            "extrusion-report-failed" =>
+                "The extrusion report could not be calculated.",
+            "extrusion-report-export-failed" =>
+                "The extrusion report could not be exported. Please try again.",
             "material-library-location-update-failed" =>
                 "The material library location could not be changed.",
             "material-library-restore-failed" =>
@@ -410,6 +436,99 @@ public sealed record SaveProjectAsResponse(bool Success, Project? Project, strin
 
 public sealed record GetProjectMetadataRequest(Project Project);
 
+public sealed record DesktopAppSettingsPayload(string? CompanyLogoPath, string? CompanyName);
+
+public sealed record GetDesktopAppSettingsRequest();
+
+public sealed record GetDesktopAppSettingsResponse(
+    bool Success,
+    DesktopAppSettingsPayload? Settings,
+    BridgeError? Error,
+    string? Message)
+{
+    public static GetDesktopAppSettingsResponse Failure(string code, string message, string? userMessage = null)
+    {
+        var failure = BridgeFailure.Create(code, message, userMessage);
+        return new(false, null, failure.Error, failure.ResponseMessage);
+    }
+}
+
+public sealed record UpdateDesktopAppSettingsRequest(DesktopAppSettingsPayload Settings);
+
+public sealed record UpdateDesktopAppSettingsResponse(
+    bool Success,
+    DesktopAppSettingsPayload? Settings,
+    BridgeError? Error,
+    string? Message)
+{
+    public static UpdateDesktopAppSettingsResponse Failure(string code, string message, string? userMessage = null)
+    {
+        var failure = BridgeFailure.Create(code, message, userMessage);
+        return new(false, null, failure.Error, failure.ResponseMessage);
+    }
+}
+
+public sealed record GetStiffenerTakeoffRequest(Project Project);
+
+public sealed record GetStiffenerTakeoffResponse(
+    bool Success,
+    StiffenerTakeoffReportData? Report,
+    BridgeError? Error,
+    string? Message)
+{
+    public static GetStiffenerTakeoffResponse Failure(string code, string message, string? userMessage = null)
+    {
+        var failure = BridgeFailure.Create(code, message, userMessage);
+        return new(false, null, failure.Error, failure.ResponseMessage);
+    }
+}
+
+public sealed record GetExtrusionLayoutRequest(Project Project);
+
+public sealed record GetExtrusionLayoutResponse(
+    bool Success,
+    ExtrusionLayoutState? Layout,
+    BridgeError? Error,
+    string? Message)
+{
+    public static GetExtrusionLayoutResponse Failure(string code, string message, string? userMessage = null)
+    {
+        var failure = BridgeFailure.Create(code, message, userMessage);
+        return new(false, null, failure.Error, failure.ResponseMessage);
+    }
+}
+
+public sealed record UpdateExtrusionLayoutRequest(Project Project, ExtrusionLayoutState Layout);
+
+public sealed record UpdateExtrusionLayoutResponse(
+    bool Success,
+    Project? Project,
+    ExtrusionLayoutState? Layout,
+    BridgeError? Error,
+    string? Message)
+{
+    public static UpdateExtrusionLayoutResponse Failure(string code, string message, string? userMessage = null)
+    {
+        var failure = BridgeFailure.Create(code, message, userMessage);
+        return new(false, null, null, failure.Error, failure.ResponseMessage);
+    }
+}
+
+public sealed record GetExtrusionReportRequest(Project Project);
+
+public sealed record GetExtrusionReportResponse(
+    bool Success,
+    ExtrusionReportData? Report,
+    BridgeError? Error,
+    string? Message)
+{
+    public static GetExtrusionReportResponse Failure(string code, string message, string? userMessage = null)
+    {
+        var failure = BridgeFailure.Create(code, message, userMessage);
+        return new(false, null, failure.Error, failure.ResponseMessage);
+    }
+}
+
 public sealed record GetProjectMetadataResponse(
     bool Success,
     ProjectMetadata? Metadata,
@@ -461,7 +580,8 @@ public sealed record ExportPdfReportRequest(
     Project Project,
     BatchNestResponse? BatchResult = null,
     string? FilePath = null,
-    string? SuggestedFileName = null);
+    string? SuggestedFileName = null,
+    string? CompanyLogoPath = null);
 
 public sealed record ExportPdfReportResponse(bool Success, string? FilePath, BridgeError? Error, string? Message)
 {
@@ -473,4 +593,75 @@ public sealed record ExportPdfReportResponse(bool Success, string? FilePath, Bri
 
     public static ExportPdfReportResponse Cancelled() =>
         Failure(null, "cancelled", "PDF export was cancelled.");
+}
+
+public sealed record ExportExcelReportRequest(
+    Project Project,
+    BatchNestResponse? BatchResult = null,
+    string? FilePath = null,
+    string? SuggestedFileName = null);
+
+public sealed record ExportExcelReportResponse(bool Success, string? FilePath, BridgeError? Error, string? Message)
+{
+    public static ExportExcelReportResponse Failure(string? filePath, string code, string message, string? userMessage = null)
+    {
+        var failure = BridgeFailure.Create(code, message, userMessage);
+        return new(false, filePath, failure.Error, failure.ResponseMessage);
+    }
+
+    public static ExportExcelReportResponse Cancelled() =>
+        Failure(null, "cancelled", "Excel export was cancelled.");
+}
+
+public sealed record ExportStiffenerPdfReportRequest(
+    Project Project,
+    string? FilePath = null,
+    string? SuggestedFileName = null,
+    string? CompanyLogoPath = null);
+
+public sealed record ExportStiffenerPdfReportResponse(bool Success, string? FilePath, BridgeError? Error, string? Message)
+{
+    public static ExportStiffenerPdfReportResponse Failure(string? filePath, string code, string message, string? userMessage = null)
+    {
+        var failure = BridgeFailure.Create(code, message, userMessage);
+        return new(false, filePath, failure.Error, failure.ResponseMessage);
+    }
+
+    public static ExportStiffenerPdfReportResponse Cancelled() =>
+        Failure(null, "cancelled", "PDF export was cancelled.");
+}
+
+public sealed record ExportExtrusionPdfReportRequest(
+    Project Project,
+    string? FilePath = null,
+    string? SuggestedFileName = null,
+    string? CompanyLogoPath = null);
+
+public sealed record ExportExtrusionPdfReportResponse(bool Success, string? FilePath, BridgeError? Error, string? Message)
+{
+    public static ExportExtrusionPdfReportResponse Failure(string? filePath, string code, string message, string? userMessage = null)
+    {
+        var failure = BridgeFailure.Create(code, message, userMessage);
+        return new(false, filePath, failure.Error, failure.ResponseMessage);
+    }
+
+    public static ExportExtrusionPdfReportResponse Cancelled() =>
+        Failure(null, "cancelled", "PDF export was cancelled.");
+}
+
+public sealed record ExportExtrusionExcelReportRequest(
+    Project Project,
+    string? FilePath = null,
+    string? SuggestedFileName = null);
+
+public sealed record ExportExtrusionExcelReportResponse(bool Success, string? FilePath, BridgeError? Error, string? Message)
+{
+    public static ExportExtrusionExcelReportResponse Failure(string? filePath, string code, string message, string? userMessage = null)
+    {
+        var failure = BridgeFailure.Create(code, message, userMessage);
+        return new(false, filePath, failure.Error, failure.ResponseMessage);
+    }
+
+    public static ExportExtrusionExcelReportResponse Cancelled() =>
+        Failure(null, "cancelled", "Excel export was cancelled.");
 }

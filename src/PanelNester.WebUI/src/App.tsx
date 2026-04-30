@@ -1,19 +1,25 @@
-import { useEffect, useReducer, useRef } from 'react';
+import { useEffect, useReducer, useRef, useState } from 'react';
 import { AppShell } from './components/AppShell';
 import { hostBridge } from './bridge/hostBridge';
 import { ImportPage } from './pages/ImportPage';
 import { MaterialsPage } from './pages/MaterialsPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { ResultsPage } from './pages/ResultsPage';
+import { ExtrusionsPage } from './pages/ExtrusionsPage';
 import {
   type BatchNestResponse,
   type BridgeError,
   bridgeMessageTypes,
+  type DesktopAppSettings,
+  defaultExtrusionLayoutState,
+  defaultStiffenerTakeoffSettings,
   demoKerfWidth,
   demoMaterial,
   emptyBatchNestResponse,
   emptyImportResponse,
   emptyNestResponse,
+  type ExtrusionLayoutState,
+  type ExtrusionReportData,
   type BridgeCapability,
   type HostBridgeSnapshot,
   type ImportFileResponse,
@@ -39,20 +45,35 @@ import {
   type ProjectRecord,
   type ProjectSettings,
   type ReportSettings,
+  type StiffenerTakeoffReportData,
+  type StiffenerTakeoffSettings,
 } from './types/contracts';
 
-type AppRoute = 'overview' | 'import' | 'materials' | 'results';
+type AppRoute = 'overview' | 'import' | 'materials' | 'extrusions' | 'results';
+type ProjectSaveStatus = 'saved' | 'cancelled' | 'failed';
+
+interface DesktopCloseSaveResult {
+  status: ProjectSaveStatus;
+  message?: string;
+}
+
+type UnsavedPromptChoice = 'save' | 'discard' | 'cancel';
 
 declare global {
   interface Window {
     panelNesterDesktopHost?: {
+      createNewProject: () => void | Promise<void>;
       openProject: (request: OpenProjectRequest) => void | Promise<void>;
+      saveProject: () => void | Promise<void>;
+      saveProjectAs: () => void | Promise<void>;
+      saveProjectBeforeClose: () => Promise<DesktopCloseSaveResult>;
     };
   }
 }
 
 const importFileDialogTimeoutMs = 300000;
 const importBridgeTimeoutMs = 120000;
+const nestingBridgeTimeoutMs = 300000;
 
 interface AppState {
   activeRoute: AppRoute;
@@ -70,12 +91,19 @@ interface AppState {
   nestingMessage: string;
   materialsMessage: string;
   reportMessage: string;
+  stiffenerMessage: string;
+  extrusionMessage: string;
   importBusy: boolean;
   nestingBusy: boolean;
   materialsBusy: boolean;
   reportBusy: boolean;
+  stiffenerBusy: boolean;
+  extrusionBusy: boolean;
   projectMetadata: ProjectMetadata;
   projectSettings: ProjectSettings;
+  stiffenerTakeoffReport: StiffenerTakeoffReportData | null;
+  extrusionLayout: ExtrusionLayoutState;
+  extrusionReport: ExtrusionReportData | null;
   projectId: string;
   projectFilePath?: string;
   projectMaterialSnapshots: ProjectMaterialSnapshot[];
@@ -84,6 +112,17 @@ interface AppState {
   projectDirty: boolean;
   partMutationBusy: boolean;
   lastSavedAt?: string;
+}
+
+interface StiffenerExportOverrides {
+  companyLogoPath?: string | null;
+  reportSettings?: ReportSettings;
+  stiffenerTakeoff?: StiffenerTakeoffSettings;
+}
+
+interface ReportExportOverrides {
+  companyLogoPath?: string | null;
+  reportSettings?: ReportSettings;
 }
 
 type AppAction =
@@ -148,6 +187,7 @@ type AppAction =
       type: 'project-opened';
       filePath: string;
       project: ProjectRecord;
+      settings?: ProjectSettings;
       selectedMaterialId?: string;
       lastNestMaterial?: Material;
       message: string;
@@ -156,6 +196,7 @@ type AppAction =
       type: 'project-saved';
       filePath: string;
       project: ProjectRecord;
+      settings?: ProjectSettings;
       message: string;
     }
   | { type: 'project-operation-started'; message: string }
@@ -168,9 +209,27 @@ type AppAction =
       message: string;
     }
   | { type: 'project-settings-changed'; settings: ProjectSettings; message: string }
+  | { type: 'project-settings-synced'; settings: ProjectSettings }
   | { type: 'report-operation-started'; message: string }
   | { type: 'report-operation-finished'; message: string }
-  | { type: 'report-operation-failed'; message: string };
+  | { type: 'report-operation-failed'; message: string }
+  | { type: 'stiffener-operation-started'; message: string }
+  | {
+      type: 'stiffener-operation-finished';
+      report: StiffenerTakeoffReportData | null;
+      message: string;
+    }
+  | { type: 'stiffener-operation-failed'; message: string }
+  | { type: 'stiffener-operation-cleared'; message: string }
+  | { type: 'extrusion-layout-changed'; layout: ExtrusionLayoutState; message: string }
+  | { type: 'extrusion-operation-started'; message: string }
+  | {
+      type: 'extrusion-operation-finished';
+      layout?: ExtrusionLayoutState;
+      report?: ExtrusionReportData | null;
+      message: string;
+    }
+  | { type: 'extrusion-operation-failed'; message: string };
 
 const defaultImportMessage =
   'Choose a CSV or XLSX file, review column/material mappings, then finalize the import before nesting.';
@@ -182,6 +241,15 @@ const defaultProjectMessage =
   'Use this page to manage metadata, file state, and the material snapshots that travel with a saved project.';
 const defaultReportMessage =
   'Edit report fields here, then export once the desktop host exposes the Phase 5 PDF bridge.';
+const defaultStiffenerMessage =
+  'Enable stiffener takeoff in Project settings to preview the takeoff and export its standalone PDF.';
+const defaultExtrusionMessage =
+  'Lay out imported panels by group, assign edge extrusions, then export extrusion summaries.';
+
+const emptyDesktopAppSettings: DesktopAppSettings = {
+  companyLogoPath: null,
+  companyName: null,
+};
 
 function createDefaultProjectMetadata(): ProjectMetadata {
   return {
@@ -192,6 +260,7 @@ function createDefaultProjectMetadata(): ProjectMetadata {
     drafter: '',
     projectManager: '',
     date: new Date().toISOString().slice(0, 10),
+    requiredDate: '',
     revision: '',
     notes: '',
   };
@@ -205,19 +274,45 @@ function buildDefaultReportTitle(projectName: string): string {
 function buildWindowTitle(projectName: string, isDirty: boolean): string {
   const normalized = projectName.trim();
   const displayName = normalized.length > 0 ? normalized : 'Untitled Project';
-  return `${displayName}${isDirty ? ' *' : ''} — PanelNester`;
+  return `${displayName}${isDirty ? ' *' : ''} — OptiFab`;
 }
 
 function normalizeReportDate(value?: string | null): string {
   return value?.slice(0, 10) ?? '';
 }
 
-function createDefaultReportSettings(metadata: ProjectMetadata): ReportSettings {
+function applyReportSettingsToMetadata(
+  metadata: ProjectMetadata,
+  reportSettings: ReportSettings,
+): ProjectMetadata {
+  const normalizedReportDate = normalizeReportDate(reportSettings.reportDate);
+
   return {
-    companyName: metadata.customerName,
+    ...metadata,
+    projectName: reportSettings.projectJobName?.trim() || metadata.projectName,
+    projectNumber: reportSettings.projectJobNumber?.trim() || metadata.projectNumber,
+    customerName: reportSettings.companyName?.trim() || metadata.customerName,
+    date: normalizedReportDate || metadata.date,
+    notes: reportSettings.notes ?? metadata.notes,
+  };
+}
+
+function createDefaultReportSettings(
+  metadata: ProjectMetadata,
+  companyNameDefault?: string | null,
+): ReportSettings {
+  const normalizedCompanyName = companyNameDefault?.trim();
+
+  return {
+    companyName:
+      normalizedCompanyName && normalizedCompanyName.length > 0
+        ? normalizedCompanyName
+        : metadata.customerName,
     reportTitle: buildDefaultReportTitle(metadata.projectName),
     projectJobName: metadata.projectName,
     projectJobNumber: metadata.projectNumber,
+    releaseId: '',
+    status: '',
     reportDate: normalizeReportDate(metadata.date),
     notes: metadata.notes,
   };
@@ -226,37 +321,97 @@ function createDefaultReportSettings(metadata: ProjectMetadata): ReportSettings 
 function normalizeReportSettings(
   reportSettings: ReportSettings | null | undefined,
   metadata: ProjectMetadata,
+  companyNameDefault?: string | null,
 ): ReportSettings {
-  const defaults = createDefaultReportSettings(metadata);
+  const defaults = createDefaultReportSettings(metadata, companyNameDefault);
+  const normalizedCompanyName = reportSettings?.companyName?.trim();
 
   return {
-    companyName: reportSettings?.companyName?.trim() ?? defaults.companyName,
+    companyName:
+      normalizedCompanyName && normalizedCompanyName.length > 0
+        ? normalizedCompanyName
+        : defaults.companyName,
     reportTitle: reportSettings?.reportTitle?.trim() ?? defaults.reportTitle,
     projectJobName: reportSettings?.projectJobName?.trim() ?? defaults.projectJobName,
     projectJobNumber:
       reportSettings?.projectJobNumber?.trim() ?? defaults.projectJobNumber,
+    releaseId: reportSettings?.releaseId?.trim() ?? defaults.releaseId,
+    status: reportSettings?.status?.trim() ?? defaults.status,
     reportDate: normalizeReportDate(reportSettings?.reportDate ?? defaults.reportDate),
     notes: reportSettings?.notes ?? defaults.notes,
   };
 }
 
-function createProjectSettings(metadata: ProjectMetadata): ProjectSettings {
+function createProjectSettings(
+  metadata: ProjectMetadata,
+  companyNameDefault?: string | null,
+): ProjectSettings {
   return {
     kerfWidth: demoKerfWidth,
-    reportSettings: createDefaultReportSettings(metadata),
+    reportSettings: createDefaultReportSettings(metadata, companyNameDefault),
+    stiffenerTakeoff: { ...defaultStiffenerTakeoffSettings },
+  };
+}
+
+function normalizeStiffenerTakeoffSettings(
+  settings: StiffenerTakeoffSettings | null | undefined,
+): StiffenerTakeoffSettings {
+  return {
+    enabled: settings?.enabled ?? defaultStiffenerTakeoffSettings.enabled,
+    minimumLengthInches:
+      typeof settings?.minimumLengthInches === 'number' &&
+      settings.minimumLengthInches >= 0
+        ? settings.minimumLengthInches
+        : defaultStiffenerTakeoffSettings.minimumLengthInches,
+    minimumWidthInches:
+      typeof settings?.minimumWidthInches === 'number' &&
+      settings.minimumWidthInches >= 0
+        ? settings.minimumWidthInches
+        : defaultStiffenerTakeoffSettings.minimumWidthInches,
+    widthDeductionInches:
+      typeof settings?.widthDeductionInches === 'number' &&
+      settings.widthDeductionInches >= 0
+        ? settings.widthDeductionInches
+        : defaultStiffenerTakeoffSettings.widthDeductionInches,
+    stockLengthFeet:
+      typeof settings?.stockLengthFeet === 'number' && settings.stockLengthFeet > 0
+        ? settings.stockLengthFeet
+        : defaultStiffenerTakeoffSettings.stockLengthFeet,
+    reportTitle:
+      settings?.reportTitle?.trim() ?? defaultStiffenerTakeoffSettings.reportTitle,
+    extrusion: settings?.extrusion?.trim() ?? defaultStiffenerTakeoffSettings.extrusion,
+    releaseId:
+      settings?.releaseId?.trim() ?? defaultStiffenerTakeoffSettings.releaseId,
+    poNumber:
+      settings?.poNumber?.trim() ?? defaultStiffenerTakeoffSettings.poNumber,
+    color: settings?.color?.trim() ?? defaultStiffenerTakeoffSettings.color,
+    colorNumber:
+      settings?.colorNumber?.trim() ?? defaultStiffenerTakeoffSettings.colorNumber,
+    manufacturer:
+      settings?.manufacturer?.trim() ??
+      defaultStiffenerTakeoffSettings.manufacturer,
+    status: settings?.status?.trim() ?? defaultStiffenerTakeoffSettings.status,
   };
 }
 
 function normalizeProjectSettings(
   settings: ProjectSettings | null | undefined,
   metadata: ProjectMetadata,
+  companyNameDefault?: string | null,
 ): ProjectSettings {
   return {
     kerfWidth:
       typeof settings?.kerfWidth === 'number' && settings.kerfWidth >= 0
         ? settings.kerfWidth
         : demoKerfWidth,
-    reportSettings: normalizeReportSettings(settings?.reportSettings, metadata),
+    reportSettings: normalizeReportSettings(
+      settings?.reportSettings,
+      metadata,
+      companyNameDefault,
+    ),
+    stiffenerTakeoff: normalizeStiffenerTakeoffSettings(
+      settings?.stiffenerTakeoff,
+    ),
   };
 }
 
@@ -264,9 +419,13 @@ function syncReportSettingsWithMetadata(
   previousMetadata: ProjectMetadata,
   nextMetadata: ProjectMetadata,
   reportSettings: ReportSettings,
+  companyNameDefault?: string | null,
 ): ReportSettings {
-  const previousDefaults = createDefaultReportSettings(previousMetadata);
-  const nextDefaults = createDefaultReportSettings(nextMetadata);
+  const previousDefaults = createDefaultReportSettings(
+    previousMetadata,
+    companyNameDefault,
+  );
+  const nextDefaults = createDefaultReportSettings(nextMetadata, companyNameDefault);
 
   const pickValue = <TKey extends keyof ReportSettings>(key: TKey) => {
     const currentValue = reportSettings[key];
@@ -280,6 +439,8 @@ function syncReportSettingsWithMetadata(
     reportTitle: pickValue('reportTitle'),
     projectJobName: pickValue('projectJobName'),
     projectJobNumber: pickValue('projectJobNumber'),
+    releaseId: pickValue('releaseId'),
+    status: pickValue('status'),
     reportDate: pickValue('reportDate'),
     notes: pickValue('notes'),
   };
@@ -301,12 +462,19 @@ const initialState: AppState = {
   nestingMessage: defaultNestingMessage,
   materialsMessage: defaultMaterialsMessage,
   reportMessage: defaultReportMessage,
+  stiffenerMessage: defaultStiffenerMessage,
+  extrusionMessage: defaultExtrusionMessage,
   importBusy: false,
   nestingBusy: false,
   materialsBusy: false,
   reportBusy: false,
+  stiffenerBusy: false,
+  extrusionBusy: false,
   projectMetadata: createDefaultProjectMetadata(),
   projectSettings: createProjectSettings(createDefaultProjectMetadata()),
+  stiffenerTakeoffReport: null,
+  extrusionLayout: defaultExtrusionLayoutState,
+  extrusionReport: null,
   projectId: '',
   projectFilePath: undefined,
   projectMaterialSnapshots: [],
@@ -387,6 +555,7 @@ function mapMetadataToBridge(metadata: ProjectMetadata): ProjectFileMetadata {
     drafter: metadata.drafter.trim() || null,
     pm: metadata.projectManager.trim() || null,
     date: metadata.date.trim().length > 0 ? metadata.date : null,
+    requiredDate: metadata.requiredDate.trim().length > 0 ? metadata.requiredDate : null,
     revision: metadata.revision.trim() || null,
     notes: metadata.notes.trim() || null,
   };
@@ -401,6 +570,7 @@ function mapMetadataFromBridge(metadata?: ProjectFileMetadata | null): ProjectMe
     drafter: metadata?.drafter?.trim() || '',
     projectManager: metadata?.pm?.trim() || '',
     date: metadata?.date?.slice(0, 10) || '',
+    requiredDate: metadata?.requiredDate?.slice(0, 10) || '',
     revision: metadata?.revision?.trim() || '',
     notes: metadata?.notes?.trim() || '',
   };
@@ -568,13 +738,28 @@ function toImportResponse(response: ImportFileResponse): ImportResponse {
 }
 
 function buildImportOptionsFromResponse(response: ImportFileResponse): ImportOptions {
+  const usedSourceColumns = new Set<string>();
+
   return {
-    columnMappings: response.columnMappings
-      .filter((mapping) => Boolean(mapping.sourceColumn))
-      .map((mapping) => ({
-        sourceColumn: mapping.sourceColumn ?? '',
-        targetField: mapping.targetField as ImportFieldName,
-      })),
+    columnMappings: response.columnMappings.flatMap((mapping) => {
+      const sourceColumn = (
+        mapping.sourceColumn ??
+        mapping.suggestedSourceColumn ??
+        ''
+      ).trim();
+
+      if (sourceColumn.length === 0 || usedSourceColumns.has(sourceColumn)) {
+        return [];
+      }
+
+      usedSourceColumns.add(sourceColumn);
+      return [
+        {
+          sourceColumn,
+          targetField: mapping.targetField as ImportFieldName,
+        },
+      ];
+    }),
     materialMappings: response.materialResolutions
       .filter((resolution) => Boolean(resolution.resolvedMaterialId))
       .map((resolution) => ({
@@ -822,7 +1007,10 @@ function collectProjectMaterialSnapshots(
   return sortByName(Array.from(snapshots.values()));
 }
 
-function buildProjectRecord(state: AppState): ProjectRecord {
+function buildProjectRecord(
+  state: AppState,
+  settingsOverride?: ProjectSettings,
+): ProjectRecord {
   const materialSnapshots = collectProjectMaterialSnapshots(
     state.materials,
     state.importResponse,
@@ -830,6 +1018,7 @@ function buildProjectRecord(state: AppState): ProjectRecord {
     state.lastNestMaterial,
     state.projectMaterialSnapshots,
   );
+  const projectSettings = settingsOverride ?? state.projectSettings;
   const batchNestResponse =
     state.batchNestResponse.materialResults.length > 0
       ? state.batchNestResponse
@@ -844,7 +1033,7 @@ function buildProjectRecord(state: AppState): ProjectRecord {
     version: 1,
     projectId: state.projectId,
     metadata: mapMetadataToBridge(state.projectMetadata),
-    settings: state.projectSettings,
+    settings: projectSettings,
     materialSnapshots,
     state: {
       sourceFilePath: state.selectedFilePath ?? null,
@@ -857,6 +1046,36 @@ function buildProjectRecord(state: AppState): ProjectRecord {
           : null,
       lastBatchNestingResult:
         batchNestResponse.materialResults.length > 0 ? batchNestResponse : null,
+      extrusionLayout: state.extrusionLayout,
+    },
+  };
+}
+
+function buildStiffenerProjectRecord(
+  state: AppState,
+  settingsOverride?: ProjectSettings,
+): ProjectRecord {
+  const materialSnapshots = collectProjectMaterialSnapshots(
+    state.materials,
+    state.importResponse,
+    state.selectedMaterialId,
+    state.lastNestMaterial,
+    state.projectMaterialSnapshots,
+  );
+
+  return {
+    version: 1,
+    projectId: state.projectId,
+    metadata: mapMetadataToBridge(state.projectMetadata),
+    settings: settingsOverride ?? state.projectSettings,
+    materialSnapshots,
+    state: {
+      sourceFilePath: state.selectedFilePath ?? null,
+      parts: state.importResponse.parts,
+      selectedMaterialId: state.selectedMaterialId ?? null,
+      lastNestingResult: null,
+      lastBatchNestingResult: null,
+      extrusionLayout: state.extrusionLayout,
     },
   };
 }
@@ -1133,8 +1352,15 @@ function reducer(state: AppState, action: AppAction): AppState {
         nestingMessage: defaultNestingMessage,
         reportMessage: defaultReportMessage,
         reportBusy: false,
+        stiffenerMessage: defaultStiffenerMessage,
+        stiffenerBusy: false,
+        extrusionMessage: defaultExtrusionMessage,
+        extrusionBusy: false,
         projectMetadata: action.metadata,
         projectSettings: action.settings,
+        stiffenerTakeoffReport: null,
+        extrusionLayout: defaultExtrusionLayoutState,
+        extrusionReport: null,
         projectId: action.projectId ?? '',
         projectFilePath: undefined,
         projectMaterialSnapshots: [],
@@ -1148,10 +1374,12 @@ function reducer(state: AppState, action: AppAction): AppState {
       const importResponse = getProjectImportResponse(action.project);
       const nestResponse = action.project.state.lastNestingResult ?? emptyNestResponse;
       const projectMetadata = mapMetadataFromBridge(action.project.metadata);
-      const projectSettings = normalizeProjectSettings(
-        action.project.settings,
-        projectMetadata,
-      );
+      const projectSettings =
+        action.settings ??
+        normalizeProjectSettings(
+          action.project.settings,
+          projectMetadata,
+        );
       const batchNestResponse = getProjectBatchNestResponse(
         action.project,
         action.lastNestMaterial,
@@ -1177,8 +1405,15 @@ function reducer(state: AppState, action: AppAction): AppState {
         lastNestMaterial: action.lastNestMaterial,
         partMutationBusy: false,
         reportBusy: false,
+        stiffenerBusy: false,
+        extrusionBusy: false,
+        extrusionLayout:
+          action.project.state.extrusionLayout ?? defaultExtrusionLayoutState,
+        extrusionReport: null,
+        stiffenerTakeoffReport: null,
         projectMessage: action.message,
         reportMessage: defaultReportMessage,
+        stiffenerMessage: defaultStiffenerMessage,
         importMessage:
           importResponse.parts.length > 0
             ? describeImportResult(
@@ -1204,10 +1439,16 @@ function reducer(state: AppState, action: AppAction): AppState {
         projectDirty: false,
         projectId: action.project.projectId,
         projectFilePath: action.filePath,
-        projectSettings: normalizeProjectSettings(
-          action.project.settings,
-          mapMetadataFromBridge(action.project.metadata),
-        ),
+        projectSettings:
+          action.settings ??
+          normalizeProjectSettings(
+            action.project.settings,
+            mapMetadataFromBridge(action.project.metadata),
+          ),
+        stiffenerTakeoffReport: null,
+        extrusionLayout:
+          action.project.state.extrusionLayout ?? state.extrusionLayout,
+        extrusionReport: null,
         projectMaterialSnapshots: sortByName(action.project.materialSnapshots),
         projectMessage: action.message,
         lastSavedAt: new Date().toISOString(),
@@ -1247,6 +1488,11 @@ function reducer(state: AppState, action: AppAction): AppState {
         },
         action.message,
       );
+    case 'project-settings-synced':
+      return {
+        ...state,
+        projectSettings: action.settings,
+      };
     case 'report-operation-started':
       return {
         ...state,
@@ -1265,6 +1511,62 @@ function reducer(state: AppState, action: AppAction): AppState {
         reportBusy: false,
         reportMessage: action.message,
       };
+    case 'stiffener-operation-started':
+      return {
+        ...state,
+        stiffenerBusy: true,
+        stiffenerMessage: action.message,
+      };
+    case 'stiffener-operation-finished':
+      return {
+        ...state,
+        stiffenerBusy: false,
+        stiffenerTakeoffReport: action.report,
+        stiffenerMessage: action.message,
+      };
+    case 'stiffener-operation-failed':
+      return {
+        ...state,
+        stiffenerBusy: false,
+        stiffenerMessage: action.message,
+      };
+    case 'stiffener-operation-cleared':
+      return {
+        ...state,
+        stiffenerBusy: false,
+        stiffenerTakeoffReport: null,
+        stiffenerMessage: action.message,
+      };
+    case 'extrusion-layout-changed':
+      return markProjectDirty(
+        {
+          ...state,
+          extrusionLayout: action.layout,
+          extrusionReport: null,
+          extrusionMessage: action.message,
+        },
+        action.message,
+      );
+    case 'extrusion-operation-started':
+      return {
+        ...state,
+        extrusionBusy: true,
+        extrusionMessage: action.message,
+      };
+    case 'extrusion-operation-finished':
+      return {
+        ...state,
+        extrusionBusy: false,
+        extrusionLayout: action.layout ?? state.extrusionLayout,
+        extrusionReport: action.report ?? state.extrusionReport,
+        extrusionMessage: action.message,
+      };
+    case 'extrusion-operation-failed':
+      return {
+        ...state,
+        extrusionBusy: false,
+        extrusionMessage: action.message,
+      };
     default:
       return state;
   }
@@ -1272,13 +1574,31 @@ function reducer(state: AppState, action: AppAction): AppState {
 
 export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const [desktopAppSettings, setDesktopAppSettings] =
+    useState<DesktopAppSettings>(emptyDesktopAppSettings);
+  const [desktopAppSettingsLoaded, setDesktopAppSettingsLoaded] = useState(false);
+  const [unsavedPromptActionLabel, setUnsavedPromptActionLabel] = useState<string | null>(
+    null,
+  );
   const materialSelectionRef = useRef({
     importResponse: state.importResponse,
     selectedMaterialId: state.selectedMaterialId,
   });
   const hostReadyNotifiedRef = useRef(false);
+  const createNewProjectRef = useRef<() => void | Promise<void>>(() => undefined);
   const startupProjectOpenRef = useRef<(request: OpenProjectRequest) => void | Promise<void>>(
     () => undefined,
+  );
+  const saveProjectRef = useRef<() => Promise<void>>(async () => undefined);
+  const saveProjectAsRef = useRef<() => Promise<void>>(async () => undefined);
+  const saveProjectBeforeCloseRef = useRef<() => Promise<DesktopCloseSaveResult>>(
+    async () => ({
+      status: 'failed',
+      message: 'Project save is not ready yet.',
+    }),
+  );
+  const unsavedPromptResolverRef = useRef<((choice: UnsavedPromptChoice) => void) | null>(
+    null,
   );
 
   const applyMaterialLibraryResponse = (
@@ -1358,6 +1678,167 @@ export default function App() {
     }
   };
 
+  const loadDesktopAppSettings = async (): Promise<void> => {
+    const bridgeSnapshot = hostBridge.getSnapshot();
+    if (
+      !bridgeSnapshot.connected ||
+      !bridgeSnapshot.handshake.capabilities.includes(
+        bridgeMessageTypes.getDesktopAppSettings,
+      )
+    ) {
+      setDesktopAppSettings(emptyDesktopAppSettings);
+      setDesktopAppSettingsLoaded(true);
+      return;
+    }
+
+    try {
+      const response = await hostBridge.getDesktopAppSettings();
+      if (!response.success) {
+        throw new Error(
+          getBridgeErrorMessage(
+            response.error,
+            response.message ?? 'The desktop host could not load the application settings.',
+          ),
+        );
+      }
+
+      setDesktopAppSettings({
+        companyLogoPath: response.settings?.companyLogoPath ?? null,
+        companyName: response.settings?.companyName ?? null,
+      });
+      setDesktopAppSettingsLoaded(true);
+    } catch (error) {
+      dispatch({
+        type: 'report-operation-failed',
+        message: getErrorMessage(
+          error,
+          'The desktop host could not load the application settings.',
+        ),
+      });
+    }
+  };
+
+  const saveDesktopAppSettings = async (
+    nextSettings: DesktopAppSettings,
+  ): Promise<boolean> => {
+    if (!hasCapability(bridgeMessageTypes.updateDesktopAppSettings)) {
+      dispatch({
+        type: 'report-operation-failed',
+        message:
+          'The connected desktop host has not exposed application settings updates yet.',
+      });
+      return false;
+    }
+
+    try {
+      let baseSettings = desktopAppSettings;
+      if (!desktopAppSettingsLoaded && hasCapability(bridgeMessageTypes.getDesktopAppSettings)) {
+        const response = await hostBridge.getDesktopAppSettings();
+        if (response.success) {
+          baseSettings = {
+            companyLogoPath: response.settings?.companyLogoPath ?? null,
+            companyName: response.settings?.companyName ?? null,
+          };
+          setDesktopAppSettings(baseSettings);
+          setDesktopAppSettingsLoaded(true);
+        }
+      }
+
+      const requestSettings: DesktopAppSettings = {
+        companyLogoPath:
+          typeof nextSettings.companyLogoPath !== 'undefined'
+            ? nextSettings.companyLogoPath ?? null
+            : baseSettings.companyLogoPath ?? null,
+        companyName:
+          typeof nextSettings.companyName !== 'undefined'
+            ? nextSettings.companyName?.trim() || null
+            : baseSettings.companyName ?? null,
+      };
+
+      const response = await hostBridge.updateDesktopAppSettings({
+        settings: requestSettings,
+      });
+      if (!response.success) {
+        throw new Error(
+          getBridgeErrorMessage(
+            response.error,
+            response.message ??
+              'The desktop host could not update the application settings.',
+          ),
+        );
+      }
+
+      const resolvedCompanyLogoPath =
+        response.settings?.companyLogoPath ??
+        (typeof requestSettings.companyLogoPath !== 'undefined'
+          ? requestSettings.companyLogoPath ?? null
+          : baseSettings.companyLogoPath ?? null);
+      const resolvedCompanyName =
+        response.settings?.companyName ??
+        (typeof requestSettings.companyName !== 'undefined'
+          ? requestSettings.companyName?.trim() || null
+          : baseSettings.companyName ?? null);
+
+      setDesktopAppSettings({
+        companyLogoPath: resolvedCompanyLogoPath,
+        companyName: resolvedCompanyName,
+      });
+      setDesktopAppSettingsLoaded(true);
+      return true;
+    } catch (error) {
+      dispatch({
+        type: 'report-operation-failed',
+        message: getErrorMessage(
+          error,
+          'The desktop host could not update the application settings.',
+        ),
+      });
+      return false;
+    }
+  };
+
+  const pickCompanyLogoPath = async (): Promise<string | undefined> => {
+    if (!hasCapability(bridgeMessageTypes.openFileDialog)) {
+      dispatch({
+        type: 'report-operation-failed',
+        message:
+          'The connected desktop host has not exposed file selection for the company logo yet.',
+      });
+      return undefined;
+    }
+
+    try {
+      const response = await hostBridge.openFileDialog({
+        title: 'Choose company logo',
+        filters: [
+          {
+            name: 'Image files',
+            extensions: ['png', 'jpg', 'jpeg', 'bmp', 'gif', 'webp'],
+          },
+          {
+            name: 'All files',
+            extensions: ['*.*'],
+          },
+        ],
+      });
+
+      if (!response.success || !response.filePath) {
+        return undefined;
+      }
+
+      return response.filePath;
+    } catch (error) {
+      dispatch({
+        type: 'report-operation-failed',
+        message: getErrorMessage(
+          error,
+          'The desktop host could not open the company logo picker.',
+        ),
+      });
+      return undefined;
+    }
+  };
+
   useEffect(() => {
     materialSelectionRef.current = {
       importResponse: state.importResponse,
@@ -1367,9 +1848,19 @@ export default function App() {
 
   useEffect(() => {
     const desktopHost = {
+      createNewProject: () => {
+        void createNewProjectRef.current();
+      },
       openProject: (request: OpenProjectRequest) => {
         void startupProjectOpenRef.current(request);
       },
+      saveProject: () => {
+        void saveProjectRef.current();
+      },
+      saveProjectAs: () => {
+        void saveProjectAsRef.current();
+      },
+      saveProjectBeforeClose: () => saveProjectBeforeCloseRef.current(),
     };
 
     window.panelNesterDesktopHost = desktopHost;
@@ -1396,6 +1887,7 @@ export default function App() {
 
       if (handshake.success) {
         void loadMaterials().catch(() => undefined);
+        void loadDesktopAppSettings().catch(() => undefined);
       }
     });
 
@@ -1412,6 +1904,51 @@ export default function App() {
   }, [state.bridge.connected]);
 
   useEffect(() => {
+    if (
+      !state.bridge.connected ||
+      !state.bridge.handshake.capabilities.includes(
+        bridgeMessageTypes.getDesktopAppSettings,
+      ) ||
+      desktopAppSettingsLoaded
+    ) {
+      return;
+    }
+
+    void loadDesktopAppSettings().catch(() => undefined);
+  }, [
+    desktopAppSettingsLoaded,
+    state.bridge.connected,
+    state.bridge.handshake.capabilities,
+  ]);
+
+  useEffect(() => {
+    const preferredCompanyName = desktopAppSettings.companyName?.trim() ?? '';
+    const currentCompanyName =
+      state.projectSettings.reportSettings.companyName?.trim() ?? '';
+    const metadataCompanyName = state.projectMetadata.customerName.trim();
+
+    if (preferredCompanyName.length === 0 || currentCompanyName === preferredCompanyName) {
+      return;
+    }
+
+    if (currentCompanyName.length > 0 && currentCompanyName !== metadataCompanyName) {
+      return;
+    }
+
+    dispatch({
+      type: 'project-settings-synced',
+      settings: {
+        ...state.projectSettings,
+        reportSettings: normalizeReportSettings(
+          state.projectSettings.reportSettings,
+          state.projectMetadata,
+          preferredCompanyName,
+        ),
+      },
+    });
+  }, [desktopAppSettings.companyName, state.projectMetadata, state.projectSettings]);
+
+  useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       if (!state.projectDirty) {
         return;
@@ -1424,6 +1961,102 @@ export default function App() {
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [state.projectDirty]);
+
+  useEffect(() => {
+    const canPreviewStiffenerTakeoff =
+      state.bridge.connected &&
+      state.bridge.handshake.capabilities.includes(
+        bridgeMessageTypes.getStiffenerTakeoff,
+      );
+
+    if (!state.projectSettings.stiffenerTakeoff.enabled) {
+      dispatch({
+        type: 'stiffener-operation-cleared',
+        message: defaultStiffenerMessage,
+      });
+      return;
+    }
+
+    if (!canPreviewStiffenerTakeoff) {
+      dispatch({
+        type: 'stiffener-operation-failed',
+        message: state.bridge.connected
+          ? 'The connected desktop host has not exposed stiffener takeoff preview yet.'
+          : 'Connect to the desktop host to preview the stiffener takeoff.',
+      });
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadStiffenerTakeoff = async () => {
+      dispatch({
+        type: 'stiffener-operation-started',
+        message: 'Calculating stiffener takeoff…',
+      });
+
+      try {
+        const response = await hostBridge.getStiffenerTakeoff({
+          project: buildStiffenerProjectRecord(state),
+        });
+
+        if (cancelled) {
+          return;
+        }
+
+        if (!response.success || !response.report) {
+          throw new Error(
+            getBridgeErrorMessage(
+              response.error,
+              response.message ?? 'The stiffener takeoff could not be calculated.',
+            ),
+          );
+        }
+
+        dispatch({
+          type: 'stiffener-operation-finished',
+          report: response.report,
+          message:
+            response.message ??
+            (response.report.hasTakeoff
+              ? 'Calculated stiffener takeoff.'
+              : 'No stiffeners were required for the current ready rows and settings.'),
+        });
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        dispatch({
+          type: 'stiffener-operation-failed',
+          message: getErrorMessage(
+            error,
+            'The desktop host could not calculate the stiffener takeoff.',
+          ),
+        });
+      }
+    };
+
+    void loadStiffenerTakeoff();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    state.importResponse.parts,
+    state.projectId,
+    state.projectMetadata,
+    state.projectSettings.stiffenerTakeoff,
+    state.selectedFilePath,
+    state.selectedMaterialId,
+    state.materials,
+    state.lastNestMaterial,
+    state.projectMaterialSnapshots,
+    state.bridge.connected,
+    state.bridge.handshake.capabilities.includes(
+      bridgeMessageTypes.getStiffenerTakeoff,
+    ),
+  ]);
 
   useEffect(() => {
     document.title = buildWindowTitle(state.projectMetadata.projectName, state.projectDirty);
@@ -1443,6 +2076,7 @@ export default function App() {
       await loadMaterials({
         message: 'Material library synced with the desktop host.',
       }).catch(() => undefined);
+      await loadDesktopAppSettings().catch(() => undefined);
     }
   };
 
@@ -1535,27 +2169,37 @@ export default function App() {
     }
   };
 
-  const saveProject = async (options?: { saveAs?: boolean }): Promise<boolean> => {
+  const saveProject = async (
+    options?: { saveAs?: boolean },
+  ): Promise<DesktopCloseSaveResult> => {
     const canSaveProject = hasCapability(bridgeMessageTypes.saveProject);
     const canSaveProjectAs = hasCapability(bridgeMessageTypes.saveProjectAs);
     const useSaveAs = options?.saveAs || !state.projectFilePath || !canSaveProject;
 
     if (useSaveAs && !canSaveProjectAs) {
+      const message =
+        'The connected desktop host has not exposed Save As yet. Metadata and dirty tracking stay active in the shell.';
       dispatch({
         type: 'project-operation-failed',
-        message:
-          'The connected desktop host has not exposed Save As yet. Metadata and dirty tracking stay active in the shell.',
+        message,
       });
-      return false;
+      return {
+        status: 'failed',
+        message,
+      };
     }
 
     if (!useSaveAs && !canSaveProject) {
+      const message =
+        'The connected desktop host has not exposed Save yet. Use Save As when the capability appears.';
       dispatch({
         type: 'project-operation-failed',
-        message:
-          'The connected desktop host has not exposed Save yet. Use Save As when the capability appears.',
+        message,
       });
-      return false;
+      return {
+        status: 'failed',
+        message,
+      };
     }
 
     const project = buildProjectRecord(state);
@@ -1568,12 +2212,12 @@ export default function App() {
     try {
       const response = useSaveAs
         ? await hostBridge.saveProjectAs({
-            filePath: state.projectFilePath ?? null,
+            filePath: null,
             suggestedFileName: `${state.projectMetadata.projectName
               .trim()
               .toLowerCase()
               .replace(/[^a-z0-9]+/g, '-')
-              .replace(/^-+|-+$/g, '') || 'panelnester-project'}.pnest`,
+              .replace(/^-+|-+$/g, '') || 'optifab-project'}.pnest`,
             project,
           })
         : await hostBridge.saveProject({
@@ -1583,11 +2227,15 @@ export default function App() {
 
       if (!response.success) {
         if (response.error?.code === 'cancelled') {
+          const message = response.message ?? 'Project save was cancelled.';
           dispatch({
             type: 'project-operation-finished',
-            message: response.message ?? 'Project save was cancelled.',
+            message,
           });
-          return false;
+          return {
+            status: 'cancelled',
+            message,
+          };
         }
 
         throw new Error(
@@ -1603,107 +2251,132 @@ export default function App() {
         throw new Error('The desktop host did not return a project file path.');
       }
 
+      const savedProject = response.project ?? project;
+      const savedMetadata = mapMetadataFromBridge(savedProject.metadata);
+      const savedSettings = normalizeProjectSettings(
+        savedProject.settings,
+        savedMetadata,
+        desktopAppSettings.companyName,
+      );
+
       dispatch({
         type: 'project-saved',
         filePath,
-        project: response.project ?? project,
+        project: savedProject,
+        settings: savedSettings,
         message: response.message ?? `Saved ${fileNameFromPath(filePath)}.`,
       });
-      return true;
+      return {
+        status: 'saved',
+        message: response.message ?? `Saved ${fileNameFromPath(filePath)}.`,
+      };
     } catch (error) {
+      const message = getErrorMessage(
+        error,
+        'The desktop host could not save the project.',
+      );
       dispatch({
         type: 'project-operation-failed',
-        message: getErrorMessage(
-          error,
-          'The desktop host could not save the project.',
-        ),
+        message,
       });
-      return false;
+      return {
+        status: 'failed',
+        message,
+      };
     }
   };
 
-  const confirmProjectTransition = async (actionLabel: string): Promise<boolean> => {
-    if (!state.projectDirty) {
-      return true;
-    }
-
-    const saveFirst = window.confirm(
-      `Save changes to "${state.projectMetadata.projectName}" before ${actionLabel}? Press OK to save first, or Cancel for discard options.`,
-    );
-
-    if (saveFirst) {
-      return saveProject();
-    }
-
-    return window.confirm(
-      `Discard unsaved changes and continue ${actionLabel}?`,
-    );
-  };
-
-  const createNewProject = async () => {
-    const canProceed = await confirmProjectTransition('starting a new project');
-    if (!canProceed) {
-      return;
-    }
-
-    const metadata = createDefaultProjectMetadata();
-    const settings = createProjectSettings(metadata);
-
-    if (hasCapability(bridgeMessageTypes.newProject)) {
-      dispatch({
-        type: 'project-operation-started',
-        message: 'Starting a new project…',
+  const runProjectTransition = async (
+    actionLabel: string,
+    action: () => Promise<void>,
+  ): Promise<void> => {
+    if (state.projectDirty) {
+      const choice = await new Promise<UnsavedPromptChoice>((resolve) => {
+        unsavedPromptResolverRef.current = resolve;
+        setUnsavedPromptActionLabel(actionLabel);
       });
 
-      try {
-        const response = await hostBridge.newProject({
-          metadata: mapMetadataToBridge(metadata),
-          settings,
-        });
-        if (!response.success) {
-          throw new Error(
-            getBridgeErrorMessage(
-              response.error,
-              response.message ?? 'The desktop host could not create a new project.',
-            ),
-          );
+      if (choice === 'cancel') {
+        return;
+      }
+
+      if (choice === 'save') {
+        const saveResult = await saveProject();
+        if (saveResult.status !== 'saved') {
+          return;
         }
 
-        dispatch({
-          type: 'project-created',
-          metadata: response.project
-            ? mapMetadataFromBridge(response.project.metadata)
-            : metadata,
-          settings: response.project
-            ? normalizeProjectSettings(
-                response.project.settings,
-                mapMetadataFromBridge(response.project.metadata),
-              )
-            : settings,
-          projectId: response.project?.projectId,
-          message:
-            response.message ??
-            'Started a new project. Add metadata, import rows, and save when ready.',
+        await new Promise<void>((resolve) => {
+          window.setTimeout(resolve, 0);
         });
-        return;
-      } catch (error) {
-        dispatch({
-          type: 'project-operation-failed',
-          message: getErrorMessage(
-            error,
-            'The desktop host could not create a new project.',
-          ),
-        });
-        return;
       }
     }
 
-    dispatch({
-      type: 'project-created',
-      metadata,
-      settings,
-      message:
-        'Started a new project in the UI. Save and Open stay ready to light up when the desktop host exposes the Phase 3 file commands.',
+    await action();
+  };
+
+  const createNewProject = async () => {
+    await runProjectTransition('starting a new project', async () => {
+      const metadata = createDefaultProjectMetadata();
+      const settings = createProjectSettings(metadata, desktopAppSettings.companyName);
+
+      if (hasCapability(bridgeMessageTypes.newProject)) {
+        dispatch({
+          type: 'project-operation-started',
+          message: 'Starting a new project…',
+        });
+
+        try {
+          const response = await hostBridge.newProject({
+            metadata: mapMetadataToBridge(metadata),
+            settings,
+          });
+          if (!response.success) {
+            throw new Error(
+              getBridgeErrorMessage(
+                response.error,
+                response.message ?? 'The desktop host could not create a new project.',
+              ),
+            );
+          }
+
+          dispatch({
+            type: 'project-created',
+            metadata: response.project
+              ? mapMetadataFromBridge(response.project.metadata)
+              : metadata,
+            settings: response.project
+              ? normalizeProjectSettings(
+                  response.project.settings,
+                  mapMetadataFromBridge(response.project.metadata),
+                  desktopAppSettings.companyName,
+                )
+              : settings,
+            projectId: response.project?.projectId,
+            message:
+              response.message ??
+              'Started a new project. Add metadata, import rows, and save when ready.',
+          });
+          return;
+        } catch (error) {
+          dispatch({
+            type: 'project-operation-failed',
+            message: getErrorMessage(
+              error,
+              'The desktop host could not create a new project.',
+            ),
+          });
+          return;
+        }
+      }
+
+      dispatch({
+        type: 'project-created',
+        metadata,
+        settings,
+        message:
+          'Started a new project in the UI. Save and Open stay ready to light up when the desktop host exposes the Phase 3 file commands.',
+      });
     });
   };
 
@@ -1720,87 +2393,100 @@ export default function App() {
     const actionLabel = request.filePath
       ? `opening ${fileNameFromPath(request.filePath)}`
       : 'opening another project';
-    const canProceed = await confirmProjectTransition(actionLabel);
-    if (!canProceed) {
-      return;
-    }
 
-    dispatch({
-      type: 'project-operation-started',
-      message: 'Opening project…',
-    });
+    await runProjectTransition(actionLabel, async () => {
+      dispatch({
+        type: 'project-operation-started',
+        message: 'Opening project…',
+      });
 
-    try {
-      const response = await hostBridge.openProject(request);
-      if (!response.success) {
-        if (response.error?.code === 'cancelled') {
-          dispatch({
-            type: 'project-operation-finished',
-            message: response.message ?? 'Project selection was cancelled.',
-          });
-          return;
+      try {
+        const response = await hostBridge.openProject(request);
+        if (!response.success) {
+          if (response.error?.code === 'cancelled') {
+            dispatch({
+              type: 'project-operation-finished',
+              message: response.message ?? 'Project selection was cancelled.',
+            });
+            return;
+          }
+
+          throw new Error(
+            getBridgeErrorMessage(
+              response.error,
+              response.message ?? 'The desktop host could not open the project.',
+            ),
+          );
         }
 
-        throw new Error(
-          getBridgeErrorMessage(
-            response.error,
-            response.message ?? 'The desktop host could not open the project.',
-          ),
+        if (!response.project || !response.filePath) {
+          throw new Error(
+            getBridgeErrorMessage(
+              response.error,
+              response.message ?? 'The desktop host could not open the project.',
+            ),
+          );
+        }
+
+        const project = response.project;
+        const selectedMaterialId = pickOpenedProjectMaterialId(state.materials, project);
+        const lastNestMaterial =
+          state.materials.find(
+            (material) =>
+              material.materialId ===
+              (project.state.selectedMaterialId ?? selectedMaterialId),
+          ) ??
+          findSnapshotMaterial(
+            project.materialSnapshots,
+            project.state.selectedMaterialId,
+          ) ??
+          findSnapshotMaterial(
+            project.materialSnapshots,
+            undefined,
+            project.state.parts[0]?.materialName,
+          ) ??
+          project.materialSnapshots[0];
+
+        const missingLiveSelection =
+          Boolean(project.state.selectedMaterialId) && !selectedMaterialId;
+        const openedMetadata = mapMetadataFromBridge(project.metadata);
+        const openedSettings = normalizeProjectSettings(
+          project.settings,
+          openedMetadata,
+          desktopAppSettings.companyName,
         );
-      }
 
-      if (!response.project || !response.filePath) {
-        throw new Error(
-          getBridgeErrorMessage(
-            response.error,
-            response.message ?? 'The desktop host could not open the project.',
+        dispatch({
+          type: 'project-opened',
+          filePath: response.filePath,
+          project,
+          settings: openedSettings,
+          selectedMaterialId,
+          lastNestMaterial,
+          message: missingLiveSelection
+            ? `${response.message ?? `Opened ${fileNameFromPath(response.filePath)}.`} Saved material snapshots remain visible here; choose a live library material before rerunning nesting.`
+            : response.message ?? `Opened ${fileNameFromPath(response.filePath)}.`,
+        });
+      } catch (error) {
+        dispatch({
+          type: 'project-operation-failed',
+          message: getErrorMessage(
+            error,
+            'The desktop host could not open the project.',
           ),
-        );
+        });
       }
-
-      const project = response.project;
-      const selectedMaterialId = pickOpenedProjectMaterialId(state.materials, project);
-      const lastNestMaterial =
-        state.materials.find(
-          (material) =>
-            material.materialId ===
-            (project.state.selectedMaterialId ?? selectedMaterialId),
-        ) ??
-        findSnapshotMaterial(
-          project.materialSnapshots,
-          project.state.selectedMaterialId,
-        ) ??
-        findSnapshotMaterial(
-          project.materialSnapshots,
-          undefined,
-          project.state.parts[0]?.materialName,
-        ) ??
-        project.materialSnapshots[0];
-
-      const missingLiveSelection =
-        Boolean(project.state.selectedMaterialId) && !selectedMaterialId;
-
-      dispatch({
-        type: 'project-opened',
-        filePath: response.filePath,
-        project,
-        selectedMaterialId,
-        lastNestMaterial,
-        message: missingLiveSelection
-          ? `${response.message ?? `Opened ${fileNameFromPath(response.filePath)}.`} Saved material snapshots remain visible here; choose a live library material before rerunning nesting.`
-          : response.message ?? `Opened ${fileNameFromPath(response.filePath)}.`,
-      });
-    } catch (error) {
-      dispatch({
-        type: 'project-operation-failed',
-        message: getErrorMessage(
-          error,
-          'The desktop host could not open the project.',
-        ),
-      });
-    }
+    });
   };
+  createNewProjectRef.current = createNewProject;
+  saveProjectBeforeCloseRef.current = async () => saveProject();
   startupProjectOpenRef.current = openProject;
+  saveProjectRef.current = async () => {
+    await saveProject();
+  };
+  saveProjectAsRef.current = async () => {
+    await saveProject({ saveAs: true });
+  };
 
   const importFile = async () => {
     dispatch({
@@ -1867,6 +2553,17 @@ export default function App() {
             message:
               response.message ??
               getBridgeErrorMessage(response.error, 'File selection was cancelled.'),
+          });
+          return;
+        }
+
+        if (responseLooksLikeImportPreparationFailure(response)) {
+          dispatch({
+            type: 'import-failed',
+            message: getBridgeErrorMessage(
+              response.error,
+              response.message ?? 'The desktop host could not complete the file import.',
+            ),
           });
           return;
         }
@@ -1979,6 +2676,18 @@ export default function App() {
         importBridgeTimeoutMs,
       );
       const filePath = pickImportFilePath(response, session.filePath) ?? session.filePath;
+
+      if (responseLooksLikeImportPreparationFailure(response)) {
+        dispatch({
+          type: 'import-failed',
+          message: getBridgeErrorMessage(
+            response.error,
+            response.message ?? 'The desktop host could not refresh the import preview.',
+          ),
+        });
+        return;
+      }
+
       const nextSession = createImportMappingSession(filePath, response, {
         ...session,
         hasPendingChanges: false,
@@ -2408,6 +3117,7 @@ export default function App() {
           material: selectedMaterial,
           kerfWidth: state.projectSettings.kerfWidth,
         },
+        nestingBridgeTimeoutMs,
       );
 
       dispatch({
@@ -2469,68 +3179,8 @@ export default function App() {
     });
   };
 
-  const syncReportSettings = async () => {
-    if (!hasCapability(bridgeMessageTypes.updateReportSettings)) {
-      dispatch({
-        type: 'report-operation-failed',
-        message:
-          'The connected desktop host has not exposed report-settings sync yet. Save the project to preserve the current report fields.',
-      });
-      return;
-    }
-
-    dispatch({
-      type: 'report-operation-started',
-      message: 'Applying report settings through the desktop bridge…',
-    });
-
-    try {
-      const project = buildProjectRecord(state);
-      const response = await hostBridge.updateReportSettings({
-        project,
-        reportSettings: state.projectSettings.reportSettings,
-      });
-
-      if (!response.success) {
-        throw new Error(
-          getBridgeErrorMessage(
-            response.error,
-            response.message ?? 'Report settings could not be applied.',
-          ),
-        );
-      }
-
-      if (response.reportSettings) {
-        dispatch({
-          type: 'project-settings-changed',
-          settings: {
-            ...state.projectSettings,
-            reportSettings: normalizeReportSettings(
-              response.reportSettings,
-              state.projectMetadata,
-            ),
-          },
-          message:
-            'Report settings changed. Save the project to keep these export fields with the job.',
-        });
-      }
-
-      dispatch({
-        type: 'report-operation-finished',
-        message: response.message ?? 'Report settings synced to the desktop host.',
-      });
-    } catch (error) {
-      dispatch({
-        type: 'report-operation-failed',
-        message: getErrorMessage(
-          error,
-          'The desktop host could not apply the report settings.',
-        ),
-      });
-    }
-  };
-
-  const exportReport = async () => {
+  const exportReport = async (overrides?: ReportExportOverrides) => {
+    const reportSettingsOverride = overrides?.reportSettings;
     const hasResult =
       state.batchNestResponse.materialResults.length > 0 ||
       state.nestResponse.sheets.length > 0 ||
@@ -2559,11 +3209,20 @@ export default function App() {
     });
 
     try {
-      const project = buildProjectRecord(state);
+      const project = buildProjectRecord(
+        state,
+        reportSettingsOverride
+          ? {
+              ...state.projectSettings,
+              reportSettings: reportSettingsOverride,
+            }
+          : undefined,
+      );
       const response = await hostBridge.exportPdfReport({
         project,
         batchResult: project.state.lastBatchNestingResult ?? null,
         filePath: null,
+        companyLogoPath: overrides?.companyLogoPath ?? undefined,
       });
 
       if (!response.success) {
@@ -2597,6 +3256,278 @@ export default function App() {
         message: getErrorMessage(
           error,
           'The desktop host could not export the PDF report.',
+        ),
+      });
+    }
+  };
+
+  const exportExcelReport = async (overrides?: ReportExportOverrides) => {
+    const reportSettingsOverride = overrides?.reportSettings;
+    const hasResult =
+      state.batchNestResponse.materialResults.length > 0 ||
+      state.nestResponse.sheets.length > 0 ||
+      state.nestResponse.unplacedItems.length > 0;
+
+    if (!hasCapability(bridgeMessageTypes.exportExcelReport)) {
+      dispatch({
+        type: 'report-operation-failed',
+        message:
+          'The connected desktop host has not exposed Excel export yet. The current report fields still save with the project.',
+      });
+      return;
+    }
+
+    if (!hasResult) {
+      dispatch({
+        type: 'report-operation-failed',
+        message: 'Run nesting before exporting an Excel report.',
+      });
+      return;
+    }
+
+    dispatch({
+      type: 'report-operation-started',
+      message: 'Exporting Excel report…',
+    });
+
+    try {
+      const project = buildProjectRecord(
+        state,
+        reportSettingsOverride
+          ? {
+              ...state.projectSettings,
+              reportSettings: reportSettingsOverride,
+            }
+          : undefined,
+      );
+      const response = await hostBridge.exportExcelReport({
+        project,
+        batchResult: project.state.lastBatchNestingResult ?? null,
+        filePath: null,
+      });
+
+      if (!response.success) {
+        if (response.error?.code === 'cancelled') {
+          dispatch({
+            type: 'report-operation-finished',
+            message: response.message ?? 'Excel export was cancelled.',
+          });
+          return;
+        }
+
+        throw new Error(
+          getBridgeErrorMessage(
+            response.error,
+            response.message ?? 'The desktop host could not export the Excel report.',
+          ),
+        );
+      }
+
+      dispatch({
+        type: 'report-operation-finished',
+        message:
+          response.message ??
+          (response.filePath
+            ? `Exported Excel report to ${response.filePath}.`
+            : 'Excel report exported.'),
+      });
+    } catch (error) {
+      dispatch({
+        type: 'report-operation-failed',
+        message: getErrorMessage(
+          error,
+          'The desktop host could not export the Excel report.',
+        ),
+      });
+    }
+  };
+
+  const exportStiffenerReport = async (
+    overrides?: StiffenerExportOverrides,
+  ) => {
+    const stiffenerSettings =
+      overrides?.stiffenerTakeoff ?? state.projectSettings.stiffenerTakeoff;
+    const reportSettings =
+      overrides?.reportSettings ?? state.projectSettings.reportSettings;
+
+    if (!stiffenerSettings.enabled) {
+      dispatch({
+        type: 'stiffener-operation-failed',
+        message: 'Enable stiffener takeoff before exporting its standalone PDF.',
+      });
+      return;
+    }
+
+    if (!hasCapability(bridgeMessageTypes.exportStiffenerPdfReport)) {
+      dispatch({
+        type: 'stiffener-operation-failed',
+        message:
+          'The connected desktop host has not exposed stiffener PDF export yet.',
+      });
+      return;
+    }
+
+    dispatch({
+      type: 'stiffener-operation-started',
+      message: 'Exporting stiffener PDF report…',
+    });
+
+    try {
+      const project = {
+        ...buildStiffenerProjectRecord(state, {
+          ...state.projectSettings,
+          reportSettings,
+          stiffenerTakeoff: stiffenerSettings,
+        }),
+        metadata: mapMetadataToBridge(
+          applyReportSettingsToMetadata(state.projectMetadata, reportSettings),
+        ),
+      };
+      const response = await hostBridge.exportStiffenerPdfReport({
+        project,
+        filePath: null,
+        companyLogoPath: overrides?.companyLogoPath ?? undefined,
+      });
+
+      if (!response.success) {
+        if (response.error?.code === 'cancelled') {
+          dispatch({
+            type: 'stiffener-operation-finished',
+            report: state.stiffenerTakeoffReport,
+            message: response.message ?? 'Stiffener PDF export was cancelled.',
+          });
+          return;
+        }
+
+        throw new Error(
+          getBridgeErrorMessage(
+            response.error,
+            response.message ??
+              'The desktop host could not export the stiffener PDF report.',
+          ),
+        );
+      }
+
+      dispatch({
+        type: 'stiffener-operation-finished',
+        report: state.stiffenerTakeoffReport,
+        message:
+          response.message ??
+          (response.filePath
+            ? `Exported stiffener PDF report to ${response.filePath}.`
+            : 'Stiffener PDF report exported.'),
+      });
+    } catch (error) {
+      dispatch({
+        type: 'stiffener-operation-failed',
+        message: getErrorMessage(
+          error,
+          'The desktop host could not export the stiffener PDF report.',
+        ),
+      });
+    }
+  };
+
+  const exportExtrusionPdfReport = async () => {
+    if (!hasCapability(bridgeMessageTypes.exportExtrusionPdfReport)) {
+      dispatch({
+        type: 'extrusion-operation-failed',
+        message: 'The connected desktop host has not exposed extrusion PDF export yet.',
+      });
+      return;
+    }
+
+    dispatch({
+      type: 'extrusion-operation-started',
+      message: 'Exporting extrusion PDF report...',
+    });
+
+    try {
+      const response = await hostBridge.exportExtrusionPdfReport({
+        project: buildProjectRecord(state),
+        filePath: null,
+        companyLogoPath: desktopAppSettings.companyLogoPath ?? undefined,
+      });
+
+      if (!response.success) {
+        if (response.error?.code === 'cancelled') {
+          dispatch({
+            type: 'extrusion-operation-finished',
+            message: response.message ?? 'Extrusion PDF export was cancelled.',
+          });
+          return;
+        }
+
+        throw new Error(
+          getBridgeErrorMessage(
+            response.error,
+            response.message ?? 'The desktop host could not export the extrusion PDF report.',
+          ),
+        );
+      }
+
+      dispatch({
+        type: 'extrusion-operation-finished',
+        message: response.message ?? 'Extrusion PDF report exported.',
+      });
+    } catch (error) {
+      dispatch({
+        type: 'extrusion-operation-failed',
+        message: getErrorMessage(
+          error,
+          'The desktop host could not export the extrusion PDF report.',
+        ),
+      });
+    }
+  };
+
+  const exportExtrusionExcelReport = async () => {
+    if (!hasCapability(bridgeMessageTypes.exportExtrusionExcelReport)) {
+      dispatch({
+        type: 'extrusion-operation-failed',
+        message: 'The connected desktop host has not exposed extrusion Excel export yet.',
+      });
+      return;
+    }
+
+    dispatch({
+      type: 'extrusion-operation-started',
+      message: 'Exporting extrusion Excel report...',
+    });
+
+    try {
+      const response = await hostBridge.exportExtrusionExcelReport({
+        project: buildProjectRecord(state),
+        filePath: null,
+      });
+
+      if (!response.success) {
+        if (response.error?.code === 'cancelled') {
+          dispatch({
+            type: 'extrusion-operation-finished',
+            message: response.message ?? 'Extrusion Excel export was cancelled.',
+          });
+          return;
+        }
+
+        throw new Error(
+          getBridgeErrorMessage(
+            response.error,
+            response.message ?? 'The desktop host could not export the extrusion Excel report.',
+          ),
+        );
+      }
+
+      dispatch({
+        type: 'extrusion-operation-finished',
+        message: response.message ?? 'Extrusion Excel report exported.',
+      });
+    } catch (error) {
+      dispatch({
+        type: 'extrusion-operation-failed',
+        message: getErrorMessage(
+          error,
+          'The desktop host could not export the extrusion Excel report.',
         ),
       });
     }
@@ -2681,11 +3612,34 @@ export default function App() {
         />
       );
       break;
+    case 'extrusions':
+      content = (
+        <ExtrusionsPage
+          importedRows={state.importResponse.parts}
+          layout={state.extrusionLayout}
+          statusMessage={state.extrusionMessage}
+          busy={state.extrusionBusy}
+          canExportPdf={hasCapability(bridgeMessageTypes.exportExtrusionPdfReport)}
+          canExportExcel={hasCapability(bridgeMessageTypes.exportExtrusionExcelReport)}
+          onLayoutChange={(layout) =>
+            dispatch({
+              type: 'extrusion-layout-changed',
+              layout,
+              message:
+                'Extrusion layout changed. Save the project to persist these assignments.',
+            })
+          }
+          onExportPdf={exportExtrusionPdfReport}
+          onExportExcel={exportExtrusionExcelReport}
+        />
+      );
+      break;
     case 'results':
       content = (
         <ResultsPage
           material={resultsMaterial}
           selectedMaterialId={state.selectedMaterialId}
+          companyLogoPath={desktopAppSettings.companyLogoPath ?? null}
           kerfWidth={state.projectSettings.kerfWidth}
           nestResponse={state.nestResponse}
           batchNestResponse={state.batchNestResponse}
@@ -2696,11 +3650,37 @@ export default function App() {
           reportSettings={state.projectSettings.reportSettings}
           reportMessage={state.reportMessage}
           reportBusy={state.reportBusy}
+          stiffenerTakeoffEnabled={state.projectSettings.stiffenerTakeoff.enabled}
+          stiffenerTakeoffReport={state.stiffenerTakeoffReport}
+          stiffenerMessage={state.stiffenerMessage}
+          stiffenerBusy={state.stiffenerBusy}
           canSyncReportSettings={hasCapability(bridgeMessageTypes.updateReportSettings)}
           canExportReport={hasCapability(bridgeMessageTypes.exportPdfReport)}
+          canExportExcelReport={hasCapability(bridgeMessageTypes.exportExcelReport)}
+          canPreviewStiffenerTakeoff={hasCapability(
+            bridgeMessageTypes.getStiffenerTakeoff,
+          )}
+          canExportStiffenerReport={hasCapability(
+            bridgeMessageTypes.exportStiffenerPdfReport,
+          )}
+          stiffenerTakeoffSettings={state.projectSettings.stiffenerTakeoff}
           onReportSettingsChange={updateReportField}
-          onSyncReportSettings={syncReportSettings}
+          onStiffenerTakeoffChange={(stiffenerTakeoff) => {
+            dispatch({
+              type: 'project-settings-changed',
+              settings: {
+                ...state.projectSettings,
+                stiffenerTakeoff,
+              },
+              message:
+                'Stiffener takeoff settings changed. Save the project to persist them.',
+            });
+          }}
+          onPickCompanyLogo={pickCompanyLogoPath}
+          onSaveDesktopAppSettings={saveDesktopAppSettings}
           onExportReport={exportReport}
+          onExportExcelReport={exportExcelReport}
+          onExportStiffenerReport={exportStiffenerReport}
         />
       );
       break;
@@ -2717,6 +3697,9 @@ export default function App() {
           nestResponse={state.nestResponse}
           savedMaterialSnapshots={state.projectMaterialSnapshots}
           kerfWidth={state.projectSettings.kerfWidth}
+          reportSettings={state.projectSettings.reportSettings}
+          stiffenerTakeoff={state.projectSettings.stiffenerTakeoff}
+          companyLogoPath={desktopAppSettings.companyLogoPath ?? null}
           onMetadataChange={(field, value) =>
             {
               const nextMetadata = {
@@ -2733,6 +3716,7 @@ export default function App() {
                     state.projectMetadata,
                     nextMetadata,
                     state.projectSettings.reportSettings,
+                    desktopAppSettings.companyName,
                   ),
                 },
                 message:
@@ -2750,38 +3734,121 @@ export default function App() {
               message: 'Kerf width updated. Save the project to persist this setting.',
             });
           }}
+          onReportSettingsChange={updateReportField}
+          onStiffenerTakeoffChange={(stiffenerTakeoff) => {
+            dispatch({
+              type: 'project-settings-changed',
+              settings: {
+                ...state.projectSettings,
+                stiffenerTakeoff,
+              },
+              message:
+                'Stiffener takeoff settings changed. Save the project to persist them.',
+            });
+          }}
+          onPickCompanyLogo={pickCompanyLogoPath}
+          onSaveDesktopAppSettings={saveDesktopAppSettings}
         />
       );
       break;
   }
 
   const contentClassName =
-    state.activeRoute === 'results' ? 'app-route app-route--results' : 'app-route';
+    state.activeRoute === 'results'
+      ? 'app-route app-route--results'
+      : state.activeRoute === 'extrusions'
+        ? 'app-route app-route--extrusions'
+        : 'app-route';
 
   return (
-    <AppShell
-      activeRoute={state.activeRoute}
-      onRouteChange={(route) => dispatch({ type: 'route-changed', route })}
-      projectBusy={state.projectBusy}
-      onCreateProject={createNewProject}
-      onOpenProject={openProject}
-      onSaveProject={() => saveProject().then(() => undefined)}
-      onSaveProjectAs={() => saveProject({ saveAs: true }).then(() => undefined)}
-      canOpenProject={hasCapability(bridgeMessageTypes.openProject)}
-      canSaveProject={
-        hasCapability(bridgeMessageTypes.saveProject) ||
-        hasCapability(bridgeMessageTypes.saveProjectAs)
-      }
-      canSaveProjectAs={hasCapability(bridgeMessageTypes.saveProjectAs)}
-      bridgeConnected={state.bridge.connected}
-      bridgeStatusMessage={
-        state.bridge.lastError ??
-        state.bridge.handshake.message ??
-        'Desktop host connection unavailable.'
-      }
-      onReconnect={retryHandshake}
-    >
-      <div className={contentClassName}>{content}</div>
-    </AppShell>
+    <>
+      <AppShell
+        activeRoute={state.activeRoute}
+        onRouteChange={(route) => dispatch({ type: 'route-changed', route })}
+        projectBusy={state.projectBusy}
+        onCreateProject={createNewProject}
+        onOpenProject={openProject}
+        onSaveProject={() => saveProject().then(() => undefined)}
+        onSaveProjectAs={() => saveProject({ saveAs: true }).then(() => undefined)}
+        canOpenProject={hasCapability(bridgeMessageTypes.openProject)}
+        canSaveProject={
+          hasCapability(bridgeMessageTypes.saveProject) ||
+          hasCapability(bridgeMessageTypes.saveProjectAs)
+        }
+        canSaveProjectAs={hasCapability(bridgeMessageTypes.saveProjectAs)}
+        bridgeConnected={state.bridge.connected}
+        bridgeStatusMessage={
+          state.bridge.lastError ??
+          state.bridge.handshake.message ??
+          'Desktop host connection unavailable.'
+        }
+        onReconnect={retryHandshake}
+      >
+        <div className={contentClassName}>{content}</div>
+      </AppShell>
+      {unsavedPromptActionLabel ? (
+        <div
+          className="results-dialog-backdrop"
+          onClick={() => {
+            setUnsavedPromptActionLabel(null);
+            unsavedPromptResolverRef.current?.('cancel');
+            unsavedPromptResolverRef.current = null;
+          }}
+          role="presentation"
+        >
+          <div
+            aria-modal="true"
+            className="results-dialog app-confirm-dialog"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <div className="results-dialog__header">
+              <div>
+                <p className="eyebrow">Unsaved Changes</p>
+                <h3>Save before continuing?</h3>
+              </div>
+            </div>
+            <p className="section-note">
+              Do you want to save changes to this project before {unsavedPromptActionLabel}?
+            </p>
+            <div className="form-actions">
+              <button
+                className="secondary-button"
+                onClick={() => {
+                  setUnsavedPromptActionLabel(null);
+                  unsavedPromptResolverRef.current?.('save');
+                  unsavedPromptResolverRef.current = null;
+                }}
+                type="button"
+              >
+                Yes
+              </button>
+              <button
+                className="secondary-button"
+                onClick={() => {
+                  setUnsavedPromptActionLabel(null);
+                  unsavedPromptResolverRef.current?.('discard');
+                  unsavedPromptResolverRef.current = null;
+                }}
+                type="button"
+              >
+                No
+              </button>
+              <button
+                className="secondary-button"
+                onClick={() => {
+                  setUnsavedPromptActionLabel(null);
+                  unsavedPromptResolverRef.current?.('cancel');
+                  unsavedPromptResolverRef.current = null;
+                }}
+                type="button"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }

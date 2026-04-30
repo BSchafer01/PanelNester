@@ -27,21 +27,21 @@ public sealed class InstallerFileAssociationSpecs
             value =>
                 (string?)value.Attribute("Root") == "HKCU" &&
                 (string?)value.Attribute("Key") == @"Software\Classes\.pnest" &&
-                (string?)value.Attribute("Value") == "PanelNester.Project");
+                (string?)value.Attribute("Value") == "OptiFab.Project");
 
         Assert.Contains(
             registryValues,
             value =>
                 (string?)value.Attribute("Root") == "HKCU" &&
-                (string?)value.Attribute("Key") == @"Software\Classes\PanelNester.Project\DefaultIcon" &&
-                (string?)value.Attribute("Value") == "\"[INSTALLFOLDER]PanelNester.Desktop.exe\",0");
+                (string?)value.Attribute("Key") == @"Software\Classes\OptiFab.Project\DefaultIcon" &&
+                (string?)value.Attribute("Value") == "\"[INSTALLFOLDER]OptiFab.Desktop.exe\",0");
 
         Assert.Contains(
             registryValues,
             value =>
                 (string?)value.Attribute("Root") == "HKCU" &&
-                (string?)value.Attribute("Key") == @"Software\Classes\PanelNester.Project\shell\open\command" &&
-                (string?)value.Attribute("Value") == "\"[INSTALLFOLDER]PanelNester.Desktop.exe\" \"%1\"");
+                (string?)value.Attribute("Key") == @"Software\Classes\OptiFab.Project\shell\open\command" &&
+                (string?)value.Attribute("Value") == "\"[INSTALLFOLDER]OptiFab.Desktop.exe\" \"%1\"");
 
         Assert.DoesNotContain(@"FileExts\.pnest\UserChoice", authoring, StringComparison.OrdinalIgnoreCase);
     }

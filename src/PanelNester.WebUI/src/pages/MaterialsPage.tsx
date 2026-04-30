@@ -101,6 +101,39 @@ function formatCost(costPerSheet?: number | null): string {
   return costPerSheet == null ? '—' : `$${costPerSheet.toFixed(2)}`;
 }
 
+function formatMeasurement(value: number): string {
+  return value.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function MaterialsGlyph({ icon }: { icon: 'create' | 'library' | 'location' }) {
+  switch (icon) {
+    case 'create':
+      return (
+        <svg aria-hidden="true" viewBox="0 0 24 24">
+          <path d="M12 5.5v13" />
+          <path d="M5.5 12h13" />
+          <path d="M4.5 4.5h15v15h-15z" />
+        </svg>
+      );
+    case 'location':
+      return (
+        <svg aria-hidden="true" viewBox="0 0 24 24">
+          <path d="M12 20s5-4.8 5-9a5 5 0 1 0-10 0c0 4.2 5 9 5 9Z" />
+          <circle cx="12" cy="11" r="1.8" />
+        </svg>
+      );
+    case 'library':
+    default:
+      return (
+        <svg aria-hidden="true" viewBox="0 0 24 24">
+          <path d="M6 6h3v12H6z" />
+          <path d="M10.5 4.5H14v13h-3.5z" />
+          <path d="M15.5 7h2.5v10h-2.5z" />
+        </svg>
+      );
+  }
+}
+
 function shouldShowMaterialsStatus(message: string): boolean {
   const normalized = message.trim().toLowerCase();
   if (normalized.length === 0) {
@@ -255,7 +288,7 @@ export function MaterialsPage({
   const handleRestoreDefaultLocation = () => {
     if (
       !window.confirm(
-        'Restore the default material library location? PanelNester will point back to the standard materials.json file and recreate it there if needed.',
+        'Restore the default material library location? OptiFab will point back to the standard materials.json file and recreate it there if needed.',
       )
     ) {
       return;
@@ -273,40 +306,40 @@ export function MaterialsPage({
   };
 
   return (
-    <div className="page-grid">
-      <section className="panel">
-        <div className="section-header">
-          <div>
-            <p className="eyebrow">Materials</p>
-            <h2>Reusable material library</h2>
+    <div className="materials-library">
+      <header className="module-hero module-hero--materials">
+        <div className="module-hero__copy materials-page__hero-copy">
+          <div className="materials-page__hero-head">
+            <h1>Material Library</h1>
+            <div className="materials-page__hero-meta">
+              <p className="module-hero__intro">
+                Configure structural substrates and nesting parameters.
+              </p>
+              <p className="module-hero__meta">
+                {materials.length} saved material(s), {referencedMaterials.size} referenced by the current import.
+              </p>
+            </div>
           </div>
+          {shouldShowMaterialsStatus(materialsMessage) ? (
+            <p className="module-hero__meta">{materialsMessage}</p>
+          ) : null}
         </div>
+      </header>
 
-        {shouldShowMaterialsStatus(materialsMessage) ? (
-          <p className="muted">{materialsMessage}</p>
-        ) : null}
+      <div className="materials-library__grid">
 
-        <div className="stats-grid">
-          <article className="stat-card">
-            <span>Materials</span>
-            <strong>{materials.length}</strong>
-          </article>
-          <article className="stat-card">
-            <span>Referenced</span>
-            <strong>{referencedMaterials.size}</strong>
-          </article>
+      <section className="module-panel materials-editor">
+        <div className="materials-section-title">
+          <MaterialsGlyph icon="create" />
+          <h3>{mode === 'edit' ? 'Edit Material' : 'Create Material'}</h3>
         </div>
-      </section>
+        <p className="muted materials-editor__message">{editorMessage}</p>
 
-      <section className="panel">
-        <p className="eyebrow">Editor</p>
-        <h3>{mode === 'edit' ? 'Edit material' : 'Create material'}</h3>
-        <p className="muted">{editorMessage}</p>
-
-        <div className="form-grid form-grid--two-column">
+        <div className="form-grid form-grid--two-column materials-editor__grid">
           <label className="field field--wide">
             <span>Material name</span>
             <input
+              placeholder="e.g. Aluminum 6061-T6"
               onChange={(event) => updateDraft('name', event.target.value)}
               type="text"
               value={draft.name}
@@ -314,11 +347,27 @@ export function MaterialsPage({
           </label>
 
           <label className="field">
-            <span>Color / finish</span>
+            <span>Finish / grade</span>
             <input
               onChange={(event) => updateDraft('colorFinish', event.target.value)}
               type="text"
               value={draft.colorFinish}
+            />
+          </label>
+
+          <label className="field">
+            <span>Cost / sheet ($)</span>
+            <input
+              min="0"
+              onChange={(event) =>
+                updateDraft(
+                  'costPerSheet',
+                  event.target.value === '' ? null : Number(event.target.value),
+                )
+              }
+              step="0.01"
+              type="number"
+              value={draft.costPerSheet ?? ''}
             />
           </label>
 
@@ -349,7 +398,7 @@ export function MaterialsPage({
           </label>
 
           <label className="field">
-            <span>Default spacing (in)</span>
+            <span>Spacing (in)</span>
             <input
               min="0"
               onChange={(event) =>
@@ -362,7 +411,7 @@ export function MaterialsPage({
           </label>
 
           <label className="field">
-            <span>Default edge margin (in)</span>
+            <span>Edge margin (in)</span>
             <input
               min="0"
               onChange={(event) =>
@@ -374,31 +423,20 @@ export function MaterialsPage({
             />
           </label>
 
-          <label className="field">
-            <span>Cost per sheet</span>
-            <input
-              min="0"
-              onChange={(event) =>
-                updateDraft(
-                  'costPerSheet',
-                  event.target.value === '' ? null : Number(event.target.value),
-                )
-              }
-              step="0.01"
-              type="number"
-              value={draft.costPerSheet ?? ''}
-            />
-          </label>
-
-          <label className="checkbox-field">
-            <input
-              checked={draft.allowRotation}
-              onChange={(event) =>
-                updateDraft('allowRotation', event.target.checked)
-              }
-              type="checkbox"
-            />
-            <span>Allow 90° rotation</span>
+          <label className="materials-toggle-field field--wide">
+            <span>Allow 90 deg rotation</span>
+            <span className="materials-toggle-field__control project-toggle">
+              <input
+                checked={draft.allowRotation}
+                onChange={(event) =>
+                  updateDraft('allowRotation', event.target.checked)
+                }
+                type="checkbox"
+              />
+              <span className="project-toggle__track">
+                <span className="project-toggle__thumb" />
+              </span>
+            </span>
           </label>
 
           <label className="field field--wide">
@@ -420,24 +458,27 @@ export function MaterialsPage({
             Clear
           </button>
           <button
-            className="primary-button"
+            className="primary-button materials-editor__submit"
             disabled={editorBusy || materialsBusy}
             onClick={() => void handleSave()}
             type="button"
           >
-            {editorBusy ? 'Saving…' : mode === 'edit' ? 'Save changes' : 'Create material'}
+            {editorBusy ? 'Saving…' : mode === 'edit' ? 'Save changes' : 'Add material'}
           </button>
         </div>
       </section>
 
-      <section className="panel">
-        <div className="section-header">
+      <section className="module-panel materials-table-panel">
+        <div className="module-panel__header">
           <div>
-            <p className="eyebrow">Library</p>
-            <h3>Current materials</h3>
+            <div className="materials-section-title">
+              <MaterialsGlyph icon="library" />
+              <h3>Current Materials</h3>
+            </div>
           </div>
+          <span className="materials-count-badge">{materials.length} items active</span>
         </div>
-        <div className="library-location-card">
+        <div className="library-location-card materials-location-card">
           <div className="library-location-card__header">
             <div className="row-stack">
               <span>Library file</span>
@@ -516,12 +557,12 @@ export function MaterialsPage({
         </p>
 
         {materials.length > 0 ? (
-          <div className="table-shell">
-            <table>
+          <div className="table-shell materials-table-shell">
+            <table className="materials-table">
               <thead>
                 <tr>
                   <th>Name</th>
-                  <th>Sheet</th>
+                  <th>Sheet (in)</th>
                   <th>Spacing</th>
                   <th>Edge</th>
                   <th>Finish</th>
@@ -544,16 +585,16 @@ export function MaterialsPage({
                         </div>
                       </td>
                       <td>
-                        {material.sheetLength}" × {material.sheetWidth}"
+                        {formatMeasurement(material.sheetWidth)} x {formatMeasurement(material.sheetLength)}
                       </td>
-                      <td>{material.defaultSpacing}"</td>
-                      <td>{material.defaultEdgeMargin}"</td>
+                      <td>{formatMeasurement(material.defaultSpacing)}</td>
+                      <td>{formatMeasurement(material.defaultEdgeMargin)}</td>
                       <td>{material.colorFinish?.trim() || '—'}</td>
                       <td>{formatCost(material.costPerSheet)}</td>
                       <td>
                         <div className="table-actions">
                           <button
-                            className="secondary-button"
+                            className="module-table-action"
                             disabled={editorBusy}
                             onClick={() => void handleEdit(material.materialId)}
                             type="button"
@@ -561,7 +602,7 @@ export function MaterialsPage({
                             Edit
                           </button>
                           <button
-                            className="secondary-button"
+                            className="module-table-action module-table-action--danger"
                             disabled={editorBusy}
                             onClick={() =>
                               void handleDelete(material.materialId, material.name)
@@ -585,6 +626,7 @@ export function MaterialsPage({
           </div>
         )}
       </section>
+      </div>
     </div>
   );
 }

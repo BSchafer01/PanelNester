@@ -3,7 +3,7 @@
     <OutputType>Package</OutputType>
     <EnableDefaultItems>false</EnableDefaultItems>
     <InstallerPlatform>x64</InstallerPlatform>
-    <OutputName>PanelNester-PerUser</OutputName>
+    <OutputName>OptiFab-PerUser</OutputName>
     <SuppressIces>ICE38;ICE60;ICE64;ICE91</SuppressIces>
     <DesktopProjectPath>..\..\src\PanelNester.Desktop\PanelNester.Desktop.csproj</DesktopProjectPath>
     <DesktopPublishDir>$(BaseIntermediateOutputPath)desktop-publish\</DesktopPublishDir>
@@ -15,7 +15,7 @@
   </ItemGroup>
 
   <Target Name="PrepareDesktopPayload" BeforeTargets="ReadPreviousBindInputsAndBuiltOutputs">
-    <Message Text="Preparing PanelNester desktop payload for MSI packaging..." Importance="high" />
+    <Message Text="Preparing OptiFab desktop payload for MSI packaging..." Importance="high" />
     <RemoveDir Directories="$(DesktopPublishDir)" Condition="Exists('$(DesktopPublishDir)')" />
     <Exec Command="dotnet publish &quot;$(DesktopProjectPath)&quot; -c $(Configuration) -r win-x64 --self-contained false -p:PublishSingleFile=false -o &quot;$(DesktopPublishDir)&quot;" />
   </Target>

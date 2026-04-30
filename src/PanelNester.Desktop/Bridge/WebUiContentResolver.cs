@@ -26,7 +26,7 @@ public static class WebUiContentResolver
             {
                 return new WebUiContentLocation(
                     futureBuild,
-                    @"Web UI build (src\PanelNester.WebUI\dist)",
+                    "OptiFab Web UI build",
                     true);
             }
 

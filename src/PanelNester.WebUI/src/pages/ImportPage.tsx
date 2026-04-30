@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
+import { MaterialCombobox } from '../components/MaterialCombobox';
 import { StatusPill } from '../components/StatusPill';
+import { ThemedSelect, type ThemedSelectOption } from '../components/ThemedSelect';
 import {
   requiredImportFieldNames,
   type HostBridgeSnapshot,
@@ -28,6 +30,29 @@ type SortDirection = 'asc' | 'desc';
 type StatusFilter = 'all' | ValidationStatus;
 
 const requiredImportFieldSet = new Set<ImportFieldName>(requiredImportFieldNames);
+const pageSizeOptions = [100, 250, 500] as const;
+const defaultPageSize = 250;
+const manualAddMaterialComboboxId = 'import-manual-add-material';
+const statusFilterOptions: ThemedSelectOption[] = [
+  { value: 'all', label: 'All statuses' },
+  { value: 'valid', label: 'Valid' },
+  { value: 'warning', label: 'Warnings' },
+  { value: 'error', label: 'Errors' },
+];
+const sortOptions: ThemedSelectOption[] = [
+  { value: 'row', label: 'Row order' },
+  { value: 'part', label: 'Part ID' },
+  { value: 'material', label: 'Material' },
+  { value: 'group', label: 'Group' },
+  { value: 'status', label: 'Status' },
+  { value: 'quantity', label: 'Quantity' },
+  { value: 'length', label: 'Length' },
+  { value: 'width', label: 'Width' },
+];
+const pageSizeSelectOptions: ThemedSelectOption[] = pageSizeOptions.map((option) => ({
+  value: `${option}`,
+  label: `${option}`,
+}));
 
 interface ImportPageProps {
   bridge: HostBridgeSnapshot;
@@ -57,19 +82,6 @@ interface ImportPageProps {
   onUpdatePartRow: (part: PartRowUpdate) => Promise<void>;
   onDeletePartRow: (rowId: string) => Promise<void>;
   onRunNesting: () => Promise<void>;
-  onRetryHandshake: () => Promise<void>;
-}
-
-function getStatusTone(status: ValidationStatus): 'ok' | 'warn' | 'error' {
-  switch (status) {
-    case 'error':
-      return 'error';
-    case 'warning':
-      return 'warn';
-    case 'valid':
-    default:
-      return 'ok';
-  }
 }
 
 function getStatusRank(status: ValidationStatus): number {
@@ -387,6 +399,136 @@ function getResolutionTone(
   return 'error';
 }
 
+function ImportGlyph({ icon }: { icon: 'file' | 'batch' | 'filter' | 'sort' | 'row' }) {
+  switch (icon) {
+    case 'file':
+      return (
+        <svg aria-hidden="true" viewBox="0 0 24 24">
+          <path d="M7 4.5h7l4.5 4.5v10a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 5.5 19V6A1.5 1.5 0 0 1 7 4.5Z" />
+          <path d="M14 4.5V9h4.5" />
+          <path d="M9 13h6" />
+          <path d="M9 16h6" />
+        </svg>
+      );
+    case 'batch':
+      return (
+        <svg aria-hidden="true" viewBox="0 0 24 24">
+          <path d="m8 7 8 5-8 5z" />
+        </svg>
+      );
+    case 'filter':
+      return (
+        <svg aria-hidden="true" viewBox="0 0 24 24">
+          <path d="M4.5 7h15" />
+          <path d="M7.5 12h9" />
+          <path d="M10.5 17h3" />
+        </svg>
+      );
+    case 'sort':
+      return (
+        <svg aria-hidden="true" viewBox="0 0 24 24">
+          <path d="M5.5 7h13" />
+          <path d="M5.5 12h9" />
+          <path d="M5.5 17h5" />
+        </svg>
+      );
+    case 'row':
+    default:
+      return (
+        <svg aria-hidden="true" viewBox="0 0 24 24">
+          <path d="M7 7h10v10H7z" />
+        </svg>
+      );
+  }
+}
+
+function SearchGlyph() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <circle cx="11" cy="11" r="5.5" />
+      <path d="m15.5 15.5 3 3" />
+    </svg>
+  );
+}
+
+function RowMarker({ status }: { status: ValidationStatus }) {
+  if (status === 'warning') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <path d="M12 5.5 18.5 18H5.5z" />
+      </svg>
+    );
+  }
+
+  if (status === 'error') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="6.5" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="M7 7h10v10H7z" />
+    </svg>
+  );
+}
+
+function matchesPartSearch(part: PartRow, query: string): boolean {
+  const normalized = query.trim().toLowerCase();
+  if (normalized.length === 0) {
+    return true;
+  }
+
+  return [
+    part.rowId,
+    part.importedId,
+    part.materialName,
+    part.group ?? '',
+    ...part.validationMessages,
+  ].some((value) => value.toLowerCase().includes(normalized));
+}
+
+function formatDimensionValue(value: string): string {
+  if (value.trim().length === 0) {
+    return '—';
+  }
+
+  const parsed = Number.parseFloat(value);
+  if (Number.isNaN(parsed)) {
+    return value;
+  }
+
+  return parsed.toLocaleString(undefined, {
+    minimumFractionDigits: parsed % 1 === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function getImportStatusLabel(status: ValidationStatus): string {
+  switch (status) {
+    case 'error':
+      return 'Error';
+    case 'warning':
+      return 'Warning';
+    case 'valid':
+    default:
+      return 'Valid';
+  }
+}
+
+function getImportStatusNote(part: PartRow): string {
+  if (part.validationMessages.length === 0) {
+    return 'Ready for nesting';
+  }
+
+  const primaryMessage = part.validationMessages[0];
+  return part.validationMessages.length > 1
+    ? `${primaryMessage} (+${part.validationMessages.length - 1} more)`
+    : primaryMessage;
+}
+
 export function ImportPage({
   bridge,
   materials,
@@ -415,16 +557,18 @@ export function ImportPage({
   onUpdatePartRow,
   onDeletePartRow,
   onRunNesting,
-  onRetryHandshake,
 }: ImportPageProps) {
   const [editingRowId, setEditingRowId] = useState<string>();
   const [editingDraft, setEditingDraft] = useState<PartRowUpdate>();
   const [showAddRow, setShowAddRow] = useState(false);
   const [addDraft, setAddDraft] = useState<PartRowUpdate>({} as PartRowUpdate);
+  const [searchQuery, setSearchQuery] = useState('');
   const [materialFilter, setMaterialFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [sortKey, setSortKey] = useState<SortKey>('row');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+  const [pageSize, setPageSize] = useState<number>(defaultPageSize);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const activeImportResponse = mappingSession?.preview ?? importResponse;
   const displayFilePath = mappingSession?.filePath ?? selectedFilePath;
@@ -432,28 +576,58 @@ export function ImportPage({
   const showRowActions = !hasPendingImportReview && (canEditRows || canDeleteRows);
   const hasParts = activeImportResponse.parts.length > 0;
   const busy = importBusy || partMutationBusy;
-  const distinctMaterials = useMemo(
+  const { distinctMaterials, counts } = useMemo(() => {
+    const materialNames = new Set<string>();
+    let valid = 0;
+    let warning = 0;
+    let error = 0;
+
+    for (const part of activeImportResponse.parts) {
+      const materialName = part.materialName.trim();
+      if (materialName.length > 0) {
+        materialNames.add(materialName);
+      }
+
+      if (part.validationStatus === 'valid') {
+        valid += 1;
+      } else if (part.validationStatus === 'warning') {
+        warning += 1;
+      } else {
+        error += 1;
+      }
+    }
+
+    return {
+      distinctMaterials: Array.from(materialNames).sort((left, right) =>
+        compareStrings(left, right),
+      ),
+      counts: {
+        valid,
+        warning,
+        error,
+      },
+    };
+  }, [activeImportResponse.parts]);
+  const materialLibraryNames = useMemo(
     () =>
       Array.from(
         new Set(
-          activeImportResponse.parts
-            .map((part) => part.materialName.trim())
+          materials
+            .map((material) => material.name.trim())
             .filter((name) => name.length > 0),
         ),
       ).sort((left, right) => compareStrings(left, right)),
-    [activeImportResponse.parts],
+    [materials],
   );
-  const counts = useMemo(
-    () => ({
-      valid: activeImportResponse.parts.filter((part) => part.validationStatus === 'valid')
-        .length,
-      warning: activeImportResponse.parts.filter(
-        (part) => part.validationStatus === 'warning',
-      ).length,
-      error: activeImportResponse.parts.filter((part) => part.validationStatus === 'error')
-        .length,
-    }),
-    [activeImportResponse.parts],
+  const materialFilterOptions = useMemo<ThemedSelectOption[]>(
+    () => [
+      { value: 'all', label: 'All materials' },
+      ...distinctMaterials.map((materialName) => ({
+        value: materialName,
+        label: materialName,
+      })),
+    ],
+    [distinctMaterials],
   );
   const defaultMaterialName = useMemo(() => {
     if (
@@ -471,12 +645,44 @@ export function ImportPage({
         materialFilter === 'all' || part.materialName === materialFilter;
       const matchesStatus =
         statusFilter === 'all' || part.validationStatus === statusFilter;
+      const matchesQuery = matchesPartSearch(part, searchQuery);
 
-      return matchesMaterial && matchesStatus;
+      return matchesMaterial && matchesStatus && matchesQuery;
     });
 
     return sortParts(filtered, sortKey, sortDirection);
-  }, [activeImportResponse.parts, materialFilter, sortDirection, sortKey, statusFilter]);
+  }, [
+    activeImportResponse.parts,
+    materialFilter,
+    searchQuery,
+    sortDirection,
+    sortKey,
+    statusFilter,
+  ]);
+  const shouldPaginate = filteredParts.length > pageSize;
+  const totalPages = shouldPaginate
+    ? Math.max(1, Math.ceil(filteredParts.length / pageSize))
+    : 1;
+  const pagedParts = useMemo(() => {
+    if (!shouldPaginate) {
+      return filteredParts;
+    }
+
+    const pageStart = (currentPage - 1) * pageSize;
+    return filteredParts.slice(pageStart, pageStart + pageSize);
+  }, [currentPage, filteredParts, pageSize, shouldPaginate]);
+  const renderedRangeStart =
+    filteredParts.length === 0
+      ? 0
+      : shouldPaginate
+        ? (currentPage - 1) * pageSize + 1
+        : 1;
+  const renderedRangeEnd =
+    filteredParts.length === 0
+      ? 0
+      : shouldPaginate
+        ? renderedRangeStart + pagedParts.length - 1
+        : filteredParts.length;
 
   const mappedColumns = useMemo(
     () =>
@@ -575,6 +781,23 @@ export function ImportPage({
     materialFilter,
     showAddRow,
   ]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [
+    displayFilePath,
+    hasPendingImportReview,
+    materialFilter,
+    pageSize,
+    searchQuery,
+    sortDirection,
+    sortKey,
+    statusFilter,
+  ]);
+
+  useEffect(() => {
+    setCurrentPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
 
   const beginEdit = (part: PartRow) => {
     setEditingRowId(part.rowId);
@@ -691,55 +914,22 @@ export function ImportPage({
     );
   };
 
-  return (
-    <div className="page-grid">
-      <section className="panel">
-        <div className="section-header">
-          <div>
-            <p className="eyebrow">Import</p>
-            <h2>Import rows and prepare them for nesting</h2>
-          </div>
-          <div className="button-row">
-            <button
-              className="secondary-button"
-              onClick={() => void onRetryHandshake()}
-              type="button"
-            >
-              Retry
-            </button>
-            <button
-              className="primary-button"
-              disabled={!bridge.connected || busy || !canImportFiles}
-              onClick={() => void onImportFile()}
-              type="button"
-            >
-              {importBusy
-                ? 'Working…'
-                : hasPendingImportReview
-                  ? 'Choose another file'
-                  : 'Choose file'}
-            </button>
-            <button
-              className="secondary-button"
-              disabled={!bridge.connected || !canRunNesting || nestingBusy || busy}
-              onClick={() => void onRunNesting()}
-              type="button"
-            >
-              {nestingBusy
-                ? 'Nesting…'
-                : batchNestingEnabled
-                  ? 'Run batch nesting'
-                  : 'Run nesting'}
-            </button>
-          </div>
-        </div>
+  const recordCountLabel =
+    filteredParts.length === activeImportResponse.parts.length
+      ? `Showing ${filteredParts.length} records`
+      : `Showing ${filteredParts.length} of ${activeImportResponse.parts.length} records`;
 
-        <div className="import-status-stack">
-          <p className="section-note">{importMessage}</p>
+  return (
+    <div className="page-grid import-workspace">
+      <section className="module-hero module-hero--import">
+        <div className="module-hero__copy">
+          <p className="module-hero__breadcrumb">Workspace / Module</p>
+          <h1>Import &amp; Panel Management</h1>
+          <p className="module-hero__intro">{importMessage}</p>
           {displayFilePath ? (
-            <p className="section-note import-path">Source file: {displayFilePath}</p>
+            <p className="module-hero__meta import-path">Source file: {displayFilePath}</p>
           ) : null}
-          <p className="section-note">
+          <p className="module-hero__meta">
             {hasPendingImportReview
               ? 'Current imported rows remain unchanged until you finalize this review.'
               : batchNestingEnabled
@@ -747,14 +937,46 @@ export function ImportPage({
                 : nestingMessage}
           </p>
         </div>
+        <div className="module-hero__actions">
+          <button
+            className="secondary-button module-action-button"
+            disabled={!bridge.connected || busy || !canImportFiles}
+            onClick={() => void onImportFile()}
+            type="button"
+          >
+            <ImportGlyph icon="file" />
+            <span>
+              {importBusy
+                ? 'Working…'
+                : hasPendingImportReview
+                  ? 'Choose another file'
+                  : 'Choose file'}
+            </span>
+          </button>
+          <button
+            className="primary-button module-action-button module-action-button--primary"
+            disabled={!bridge.connected || !canRunNesting || nestingBusy || busy}
+            onClick={() => void onRunNesting()}
+            type="button"
+          >
+            <ImportGlyph icon="batch" />
+            <span>
+              {nestingBusy
+                ? 'Nesting…'
+                : batchNestingEnabled
+                  ? 'Run batch nesting'
+                  : 'Run nesting'}
+            </span>
+          </button>
+        </div>
       </section>
 
       {mappingSession ? (
-        <section className="panel">
-          <div className="section-header">
+        <section className="module-panel">
+          <div className="module-panel__header">
             <div>
-              <p className="eyebrow">Review</p>
-              <h3>Map columns and resolve incoming materials</h3>
+              <p className="eyebrow">Column Mapping</p>
+              <h3>Column mapping &amp; expected fields</h3>
             </div>
             <div className="button-row">
               <button
@@ -784,7 +1006,7 @@ export function ImportPage({
             </div>
           </div>
 
-          <div className="stats-grid">
+          <div className="stats-grid module-stats-grid">
             <article className="stat-card">
               <span>Columns</span>
               <strong>{mappingSession.preview.availableColumns.length}</strong>
@@ -829,7 +1051,7 @@ export function ImportPage({
                 is optional and can stay blank to keep imported rows ungrouped.
               </p>
 
-              <div className="mapping-cards-grid">
+              <div className="module-mapping-grid">
                 {mappingSession.preview.columnMappings.map((mapping) => {
                   const selectedSource = mappedColumns.get(mapping.targetField) ?? '';
                   const hasSelection = selectedSource.trim().length > 0;
@@ -843,23 +1065,18 @@ export function ImportPage({
                         : 'Choose a column';
 
                   return (
-                    <div className="mapping-card" key={mapping.targetField}>
-                      <div className="mapping-card__header">
-                        <strong>{getFieldLabel(mapping.targetField)}</strong>
-                        <StatusPill
-                          label={
-                            hasSelection
-                              ? 'Mapped'
-                              : isRequiredField
-                                ? 'Required'
-                                : 'Optional'
-                          }
-                          tone={hasSelection ? 'ok' : isRequiredField ? 'warn' : 'muted'}
-                        />
-                      </div>
+                    <div
+                      className={
+                        hasSelection
+                          ? 'module-mapping-tile module-mapping-tile--active'
+                          : 'module-mapping-tile'
+                      }
+                      key={mapping.targetField}
+                    >
+                      <span>{getFieldLabel(mapping.targetField)}</span>
                       <label className="field">
-                        <span>Source column</span>
                         <select
+                          className="module-mapping-tile__select"
                           disabled={busy}
                           onChange={(event) =>
                             handleColumnMappingChange(
@@ -877,7 +1094,10 @@ export function ImportPage({
                           ))}
                         </select>
                       </label>
-                      <p className="mapping-card__note">{statusLabel}</p>
+                      <strong>{statusLabel}</strong>
+                      <small>
+                        {hasSelection ? 'Mapped' : isRequiredField ? 'Required' : 'Optional'}
+                      </small>
                     </div>
                   );
                 })}
@@ -1155,8 +1375,8 @@ export function ImportPage({
         </section>
       ) : null}
 
-      <section className="panel">
-        <div className="section-header">
+      <section className="module-panel module-panel--table">
+        <div className="module-panel__header">
           <div>
             <p className="eyebrow">Payload</p>
             <h3>{mappingSession ? 'Preview rows' : 'Imported rows'}</h3>
@@ -1179,7 +1399,7 @@ export function ImportPage({
             : 'Use filters, inline edits, and add/delete actions here after the import is finalized.'}
         </p>
 
-        <div className="stats-grid">
+        <div className="stats-grid module-stats-grid">
           <article className="stat-card">
             <span>Rows</span>
             <strong>{activeImportResponse.parts.length}</strong>
@@ -1200,79 +1420,142 @@ export function ImportPage({
 
         {hasParts ? (
           <>
-            <div className="toolbar-grid">
-              <label className="field">
-                <span>Filter by material</span>
-                <select
+            <div className="module-table-toolbar">
+              <label className="module-search">
+                <SearchGlyph />
+                <input
                   disabled={busy}
-                  onChange={(event) => setMaterialFilter(event.target.value)}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Filter parts by ID, material, or group..."
+                  type="search"
+                  value={searchQuery}
+                />
+              </label>
+
+              <div className="module-toolbar-group">
+                <ThemedSelect
+                  ariaLabel="Filter imported rows by material"
+                  className="module-filter-chip"
+                  disabled={busy}
+                  icon={<ImportGlyph icon="filter" />}
+                  onChange={setMaterialFilter}
+                  options={materialFilterOptions}
                   value={materialFilter}
-                >
-                  <option value="all">All materials</option>
-                  {distinctMaterials.map((materialName) => (
-                    <option key={materialName} value={materialName}>
-                      {materialName}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                />
 
-              <label className="field">
-                <span>Filter by status</span>
-                <select
+                <ThemedSelect
+                  ariaLabel="Filter imported rows by validation status"
+                  className="module-filter-chip"
                   disabled={busy}
-                  onChange={(event) =>
-                    setStatusFilter(event.target.value as StatusFilter)
-                  }
+                  icon={<ImportGlyph icon="filter" />}
+                  onChange={(value) => setStatusFilter(value as StatusFilter)}
+                  options={statusFilterOptions}
                   value={statusFilter}
-                >
-                  <option value="all">All statuses</option>
-                  <option value="valid">Valid</option>
-                  <option value="warning">Warning</option>
-                  <option value="error">Error</option>
-                </select>
-              </label>
+                />
 
-              <label className="field">
-                <span>Sort rows</span>
-                <select
+                <ThemedSelect
+                  ariaLabel="Sort imported rows"
+                  className="module-filter-chip"
                   disabled={busy}
-                  onChange={(event) => setSortKey(event.target.value as SortKey)}
+                  icon={<ImportGlyph icon="sort" />}
+                  onChange={(value) => setSortKey(value as SortKey)}
+                  options={sortOptions}
                   value={sortKey}
-                >
-                  <option value="row">Row order</option>
-                  <option value="part">Part ID</option>
-                  <option value="material">Material</option>
-                  <option value="group">Group</option>
-                  <option value="status">Validation status</option>
-                  <option value="quantity">Quantity</option>
-                  <option value="length">Length</option>
-                  <option value="width">Width</option>
-                </select>
-              </label>
+                />
 
-              <button
-                className="secondary-button toolbar-button"
-                disabled={busy}
-                onClick={() =>
-                  setSortDirection((current) =>
-                    current === 'asc' ? 'desc' : 'asc',
-                  )
-                }
-                type="button"
-              >
-                {sortDirection === 'asc' ? 'Ascending' : 'Descending'}
-              </button>
+                <button
+                  className="secondary-button module-icon-button"
+                  disabled={busy}
+                  onClick={() =>
+                    setSortDirection((current) =>
+                      current === 'asc' ? 'desc' : 'asc',
+                    )
+                  }
+                  type="button"
+                  title={sortDirection === 'asc' ? 'Ascending sort' : 'Descending sort'}
+                >
+                  <ImportGlyph icon="sort" />
+                </button>
+              </div>
+
+              <div className="module-table-toolbar__summary">
+                <span>{recordCountLabel}</span>
+              </div>
             </div>
 
             <p className="section-note">
-              Showing {filteredParts.length} of {activeImportResponse.parts.length} row(s).
+              {shouldPaginate
+                ? `Showing rows ${renderedRangeStart}-${renderedRangeEnd} of ${filteredParts.length} filtered row(s) (${activeImportResponse.parts.length} total).`
+                : `Showing ${filteredParts.length} of ${activeImportResponse.parts.length} row(s).`}
             </p>
+
+            {shouldPaginate ? (
+              <div className="pagination-bar">
+                <div className="pagination-summary">
+                  <strong>
+                    Page {currentPage} of {totalPages}
+                  </strong>
+                  <span>
+                    Rendering {pagedParts.length} row(s) at a time keeps large imports responsive.
+                  </span>
+                </div>
+
+                <div className="pagination-controls">
+                  <div className="field pagination-field">
+                    <span>Rows per page</span>
+                    <ThemedSelect
+                      ariaLabel="Rows per page"
+                      disabled={busy}
+                      onChange={(value) => setPageSize(Number(value) || defaultPageSize)}
+                      options={pageSizeSelectOptions}
+                      value={`${pageSize}`}
+                    />
+                  </div>
+
+                  <div className="pagination-buttons">
+                    <button
+                      className="secondary-button"
+                      disabled={currentPage === 1}
+                      onClick={() => setCurrentPage(1)}
+                      type="button"
+                    >
+                      First
+                    </button>
+                    <button
+                      className="secondary-button"
+                      disabled={currentPage === 1}
+                      onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                      type="button"
+                    >
+                      Previous
+                    </button>
+                    <button
+                      className="secondary-button"
+                      disabled={currentPage === totalPages}
+                      onClick={() =>
+                        setCurrentPage((page) => Math.min(totalPages, page + 1))
+                      }
+                      type="button"
+                    >
+                      Next
+                    </button>
+                    <button
+                      className="secondary-button"
+                      disabled={currentPage === totalPages}
+                      onClick={() => setCurrentPage(totalPages)}
+                      type="button"
+                    >
+                      Last
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </>
         ) : null}
 
         {showAddRow ? (
-          <div className="editor-card">
+          <div className="editor-card module-add-row-card">
             <div className="section-header">
               <div>
                 <p className="eyebrow">New row</p>
@@ -1332,33 +1615,35 @@ export function ImportPage({
                   value={addDraft.quantity ?? ''}
                 />
               </label>
-               <label className="field field--wide">
-                 <span>Material</span>
-                 <input
+              <label className="field field--wide">
+                <span>Material</span>
+                <MaterialCombobox
+                  disabled={busy}
+                  inputId={manualAddMaterialComboboxId}
+                  materials={materialLibraryNames}
+                  onChange={(value) =>
+                    setAddDraft((current) => ({
+                      ...current,
+                      materialName: value,
+                    }))
+                  }
+                  value={addDraft.materialName ?? ''}
+                />
+              </label>
+              <label className="field field--wide">
+                <span>Group (optional)</span>
+                <input
                   onChange={(event) =>
                     setAddDraft((current) => ({
                       ...current,
-                      materialName: event.target.value,
+                      group: event.target.value,
                     }))
                   }
                   type="text"
-                   value={addDraft.materialName ?? ''}
-                 />
-               </label>
-               <label className="field field--wide">
-                 <span>Group (optional)</span>
-                 <input
-                   onChange={(event) =>
-                     setAddDraft((current) => ({
-                       ...current,
-                       group: event.target.value,
-                     }))
-                   }
-                   type="text"
-                   value={addDraft.group ?? ''}
-                 />
-               </label>
-             </div>
+                  value={addDraft.group ?? ''}
+                />
+              </label>
+            </div>
             <div className="form-actions">
               <button
                 className="secondary-button"
@@ -1382,40 +1667,44 @@ export function ImportPage({
 
         {hasParts ? (
           filteredParts.length > 0 ? (
-            <div className="table-shell">
-              <table>
+            <div className="table-shell module-table-shell">
+              <table className="module-table">
                 <thead>
                   <tr>
                     <th>Row</th>
-                    <th>Part</th>
+                    <th>Part reference</th>
                     <th>Length</th>
                     <th>Width</th>
                     <th>Qty</th>
-                    <th>Material</th>
+                    <th>Material spec</th>
                     <th>Group</th>
                     <th>Status</th>
-                    <th>Messages</th>
                     {showRowActions ? <th>Actions</th> : null}
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredParts.map((part) => {
+                  {pagedParts.map((part) => {
                     const isEditing = editingRowId === part.rowId;
                     const draft = isEditing ? editingDraft ?? createDraft(part) : undefined;
 
                     return (
                       <tr key={part.rowId}>
                         <td>
-                          <div className="row-meta">
-                            <strong>{part.rowId}</strong>
-                            <span>
-                              {part.validationMessages.length > 0
-                                ? `${part.validationMessages.length} issue(s)`
-                                : 'Ready'}
+                          <div className="module-row-id">
+                            <span className="module-row-id__marker">
+                              <RowMarker status={part.validationStatus} />
                             </span>
+                            <div className="row-meta">
+                              <strong>{part.rowId}</strong>
+                              <span>
+                                {part.validationMessages.length > 0
+                                  ? `${part.validationMessages.length} issue(s)`
+                                  : 'Ready'}
+                              </span>
+                            </div>
                           </div>
                         </td>
-                        <td>
+                        <td className="module-table__part">
                           {isEditing ? (
                             <input
                               className="table-input"
@@ -1430,7 +1719,7 @@ export function ImportPage({
                               value={draft?.importedId ?? ''}
                             />
                           ) : (
-                            part.importedId || '—'
+                            <strong>{part.importedId || '—'}</strong>
                           )}
                         </td>
                         <td>
@@ -1448,7 +1737,7 @@ export function ImportPage({
                               value={draft?.length ?? ''}
                             />
                           ) : (
-                            getRowValue(part, 'length')
+                            formatDimensionValue(getRowValue(part, 'length'))
                           )}
                         </td>
                         <td>
@@ -1466,7 +1755,7 @@ export function ImportPage({
                               value={draft?.width ?? ''}
                             />
                           ) : (
-                            getRowValue(part, 'width')
+                            formatDimensionValue(getRowValue(part, 'width'))
                           )}
                         </td>
                         <td>
@@ -1502,7 +1791,7 @@ export function ImportPage({
                               value={draft?.materialName ?? ''}
                             />
                           ) : (
-                            part.materialName || '—'
+                            <span className="module-table__tag">{part.materialName || '—'}</span>
                           )}
                         </td>
                         <td>
@@ -1524,23 +1813,21 @@ export function ImportPage({
                           )}
                         </td>
                         <td>
-                          <div className="row-status">
-                            <StatusPill
-                              label={`${part.validationStatus} · ${part.validationMessages.length}`}
-                              tone={getStatusTone(part.validationStatus)}
-                            />
+                          <div className="module-status-stack">
+                            <span
+                              className={`module-status-chip module-status-chip--${part.validationStatus}`}
+                              title={
+                                part.validationMessages.length > 0
+                                  ? part.validationMessages.join(' | ')
+                                  : 'Ready'
+                              }
+                            >
+                              {getImportStatusLabel(part.validationStatus)}
+                            </span>
+                            <span className="module-status-note">
+                              {getImportStatusNote(part)}
+                            </span>
                           </div>
-                        </td>
-                        <td>
-                          {part.validationMessages.length > 0 ? (
-                            <ul className="row-message-list">
-                              {part.validationMessages.map((message, index) => (
-                                <li key={`${part.rowId}-${index}`}>{message}</li>
-                              ))}
-                            </ul>
-                          ) : (
-                            '—'
-                          )}
                         </td>
                         {showRowActions ? (
                           <td>
@@ -1568,7 +1855,7 @@ export function ImportPage({
                                 <>
                                   {canEditRows ? (
                                     <button
-                                      className="secondary-button"
+                                      className="module-table-action"
                                       disabled={!bridge.connected || busy}
                                       onClick={() => beginEdit(part)}
                                       type="button"
@@ -1578,7 +1865,7 @@ export function ImportPage({
                                   ) : null}
                                   {canDeleteRows ? (
                                     <button
-                                      className="secondary-button"
+                                      className="module-table-action module-table-action--danger"
                                       disabled={!bridge.connected || busy}
                                       onClick={() => void requestDelete(part.rowId)}
                                       type="button"
@@ -1613,6 +1900,29 @@ export function ImportPage({
             </span>
           </div>
         )}
+
+        <div className="module-table-footer">
+          <div className="module-legend">
+            <span className="module-legend__item">
+              <i className="module-legend__dot module-legend__dot--valid" />
+              {counts.valid} Valid
+            </span>
+            <span className="module-legend__item">
+              <i className="module-legend__dot module-legend__dot--error" />
+              {counts.error} Errors
+            </span>
+            <span className="module-legend__item">
+              <i className="module-legend__dot module-legend__dot--warning" />
+              {counts.warning} Warnings
+            </span>
+          </div>
+
+          {shouldPaginate ? (
+            <span className="module-table-footer__page">
+              Page {currentPage} of {totalPages}
+            </span>
+          ) : null}
+        </div>
       </section>
     </div>
   );

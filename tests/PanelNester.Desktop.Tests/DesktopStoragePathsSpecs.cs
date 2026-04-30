@@ -6,17 +6,17 @@ namespace PanelNester.Desktop.Tests;
 public sealed class DesktopStoragePathsSpecs
 {
     [Fact]
-    public void App_data_root_directory_uses_local_appdata_panelnester()
+    public void App_data_root_directory_uses_local_appdata_optifab()
     {
         var expectedPath = global::System.IO.Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "PanelNester");
+            "OptiFab");
 
         Assert.Equal(expectedPath, DesktopStoragePaths.AppDataRootDirectory);
     }
 
     [Fact]
-    public void Material_library_path_uses_local_appdata_panelnester_materials_json()
+    public void Material_library_path_uses_local_appdata_optifab_materials_json()
     {
         var expectedPath = global::System.IO.Path.Combine(
             DesktopStoragePaths.AppDataRootDirectory,
@@ -26,7 +26,7 @@ public sealed class DesktopStoragePathsSpecs
     }
 
     [Fact]
-    public void WebView2_user_data_path_uses_local_appdata_panelnester_webview2_userdata()
+    public void WebView2_user_data_path_uses_local_appdata_optifab_webview2_userdata()
     {
         var expectedPath = global::System.IO.Path.Combine(
             DesktopStoragePaths.AppDataRootDirectory,

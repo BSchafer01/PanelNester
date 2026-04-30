@@ -6,6 +6,7 @@ internal static class Phase05BridgeExpectations
     [
         "run-batch-nesting",
         "update-report-settings",
-        "export-pdf-report"
+        "export-pdf-report",
+        "export-excel-report"
     ];
 }

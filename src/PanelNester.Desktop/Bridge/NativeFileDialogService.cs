@@ -74,7 +74,7 @@ public sealed class NativeFileDialogService : IFileDialogService
 
                     var dialog = new SaveFileDialog
                     {
-                        Title = string.IsNullOrWhiteSpace(request.Title) ? "Save PanelNester project" : request.Title,
+                        Title = string.IsNullOrWhiteSpace(request.Title) ? "Save OptiFab project" : request.Title,
                         AddExtension = true,
                         CheckPathExists = true,
                         OverwritePrompt = request.OverwritePrompt,
@@ -212,7 +212,7 @@ public sealed class NativeFileDialogService : IFileDialogService
     {
         if (string.IsNullOrWhiteSpace(request.FileName))
         {
-            return $"panelnester-project{defaultExtension}";
+            return $"optifab-project{defaultExtension}";
         }
 
         return string.IsNullOrWhiteSpace(Path.GetExtension(request.FileName))
@@ -223,7 +223,7 @@ public sealed class NativeFileDialogService : IFileDialogService
     private static string BuildSaveFallbackFilter(string defaultExtension) =>
         string.Equals(defaultExtension, ".pdf", StringComparison.OrdinalIgnoreCase)
             ? "PDF files (*.pdf)|*.pdf|All files (*.*)|*.*"
-            : "PanelNester project files (*.pnest)|*.pnest|All files (*.*)|*.*";
+            : "OptiFab project files (*.pnest)|*.pnest|All files (*.*)|*.*";
 
     private static string NormalizeExtension(string extension)
     {

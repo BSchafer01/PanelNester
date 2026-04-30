@@ -378,7 +378,7 @@ public sealed class JsonMaterialRepository : IMaterialRepository, IMaterialLibra
         string.IsNullOrWhiteSpace(configuredDefaultPath)
             ? Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "PanelNester",
+                "OptiFab",
                 "materials.json")
             : configuredDefaultPath;
 

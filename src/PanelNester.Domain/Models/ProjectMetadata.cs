@@ -16,6 +16,8 @@ public sealed record ProjectMetadata
 
     public DateTime? Date { get; init; }
 
+    public DateTime? RequiredDate { get; init; }
+
     public string? Revision { get; init; }
 
     public string? Notes { get; init; }

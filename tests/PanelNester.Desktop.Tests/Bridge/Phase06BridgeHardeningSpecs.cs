@@ -211,7 +211,9 @@ public sealed class Phase06BridgeHardeningSpecs : IDisposable
             new BatchNestingService(new ShelfNestingService()),
             new ReportDataService(),
             exporter,
-            () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true));
+            new ClosedXmlExcelReportExporter(),
+            () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true),
+            exportedPdfOpener: static _ => { });
     }
 
     private static Project CreateMinimalProject() =>

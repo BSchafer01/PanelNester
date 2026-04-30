@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using PanelNester.Domain.Models;
 using PanelNester.Domain.Contracts;
 using PanelNester.Services.Projects;
@@ -117,6 +118,112 @@ public sealed class ProjectPersistenceSpecs : IDisposable
         var restored = await serializer.LoadAsync(filePath);
 
         Assert.Equal(0.125m, restored.Settings.KerfWidth);
+    }
+
+    [Fact]
+    public async Task Required_date_persists_across_project_save_open_cycle()
+    {
+        var filePath = Path.Combine(_workspacePath, "required-date-roundtrip.pnest");
+        var serializer = new ProjectSerializer();
+        var sampleProject = Phase03ProjectPersistenceSpec.CreateSampleProject();
+        var project = sampleProject with
+        {
+            Metadata = sampleProject.Metadata with
+            {
+                RequiredDate = new DateTime(2026, 05, 20, 0, 0, 0, DateTimeKind.Utc)
+            }
+        };
+
+        EnsureWorkspace();
+        await serializer.SaveAsync(project, filePath);
+        var restored = await serializer.LoadAsync(filePath);
+
+        Assert.Equal(project.Metadata.RequiredDate, restored.Metadata.RequiredDate);
+    }
+
+    [Fact]
+    public async Task Stiffener_takeoff_settings_persist_across_project_save_open_cycle()
+    {
+        var filePath = Path.Combine(_workspacePath, "stiffener-roundtrip.pnest");
+        var serializer = new ProjectSerializer();
+        var project = Phase03ProjectPersistenceSpec.CreateSampleProject() with
+        {
+            Settings = Phase03ProjectPersistenceSpec.CreateSampleProject().Settings with
+            {
+                StiffenerTakeoff = new StiffenerTakeoffSettings
+                {
+                    Enabled = true,
+                    MinimumLengthInches = 40m,
+                    MinimumWidthInches = 36m,
+                    WidthDeductionInches = 3.5m,
+                    StockLengthFeet = 24m,
+                    ReportTitle = "Project Stiffener Takeoff",
+                    Extrusion = "2x1 aluminum tube",
+                    ReleaseId = "REL-04B",
+                    PoNumber = "PO-88210",
+                    Color = "Bone White",
+                    ColorNumber = "BW-11",
+                    Manufacturer = "Kovach",
+                    Status = "Ready for production"
+                }
+            }
+        };
+
+        EnsureWorkspace();
+        await serializer.SaveAsync(project, filePath);
+        var restored = await serializer.LoadAsync(filePath);
+
+        Assert.Equal(project.Settings.StiffenerTakeoff, restored.Settings.StiffenerTakeoff);
+    }
+
+    [Fact]
+    public async Task Report_settings_persist_release_and_status_across_project_save_open_cycle()
+    {
+        var filePath = Path.Combine(_workspacePath, "report-settings-roundtrip.pnest");
+        var serializer = new ProjectSerializer();
+        var sampleProject = Phase03ProjectPersistenceSpec.CreateSampleProject();
+        var project = sampleProject with
+        {
+            Settings = sampleProject.Settings with
+            {
+                ReportSettings = sampleProject.Settings.ReportSettings with
+                {
+                    CompanyName = "Acme Panels",
+                    ReportTitle = "Batch Nest Release 04",
+                    ReleaseId = "REL-04",
+                    Status = "Issued for fabrication"
+                }
+            }
+        };
+
+        EnsureWorkspace();
+        await serializer.SaveAsync(project, filePath);
+        var restored = await serializer.LoadAsync(filePath);
+
+        Assert.Equal(project.Settings.ReportSettings, restored.Settings.ReportSettings);
+    }
+
+    [Fact]
+    public async Task Loading_legacy_json_without_stiffener_takeoff_settings_applies_safe_defaults()
+    {
+        var filePath = Path.Combine(_workspacePath, "legacy-no-stiffener.pnest");
+        var serializer = new ProjectSerializer();
+        var project = Phase03ProjectPersistenceSpec.CreateSampleProject();
+        var json = JsonSerializer.SerializeToNode(project, CreateLegacyJsonOptions());
+        Assert.NotNull(json);
+
+        var root = Assert.IsType<JsonObject>(json);
+        var settings = Assert.IsType<JsonObject>(root["settings"]);
+        settings.Remove("stiffenerTakeoff");
+
+        EnsureWorkspace();
+        await File.WriteAllTextAsync(filePath, root.ToJsonString(CreateLegacyJsonOptions()));
+
+        var restored = await serializer.LoadAsync(filePath);
+
+        Assert.Equal(
+            new StiffenerTakeoffSettings(),
+            restored.Settings.StiffenerTakeoff);
     }
 
     [Fact]

@@ -20,11 +20,30 @@ table ProjectMetadata {
   has_date:bool;
   revision:string;
   notes:string;
+  required_date_ticks:long;
+  has_required_date:bool;
 }
 
 table ProjectSettings {
   kerf_width:double;
   report_settings:ReportSettings;
+  stiffener_takeoff:StiffenerTakeoffSettings;
+}
+
+table StiffenerTakeoffSettings {
+  enabled:bool;
+  minimum_length_inches:double;
+  minimum_width_inches:double;
+  width_deduction_inches:double;
+  stock_length_feet:double;
+  report_title:string;
+  extrusion:string;
+  release_id:string;
+  po_number:string;
+  color:string;
+  color_number:string;
+  manufacturer:string;
+  status:string;
 }
 
 table ReportSettings {
@@ -32,6 +51,8 @@ table ReportSettings {
   report_title:string;
   project_job_name:string;
   project_job_number:string;
+  release_id:string;
+  status:string;
   report_date_ticks:long;
   has_report_date:bool;
   notes:string;
@@ -57,6 +78,7 @@ table ProjectState {
   selected_material_id:string;
   last_nesting_result:NestResponse;
   last_batch_nesting_result:BatchNestResponse;
+  extrusion_layout_json:string;
 }
 
 table PartRow {

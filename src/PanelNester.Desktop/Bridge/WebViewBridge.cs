@@ -7,7 +7,7 @@ namespace PanelNester.Desktop.Bridge;
 
 public sealed class WebViewBridge
 {
-    private const string VirtualHostName = "app.panelnester.local";
+    private const string VirtualHostName = "app.optifab.local";
     private const string HostReceiverShim = """
         if (!window.__panelNesterHostReceiverShim) {
             window.__panelNesterHostReceiverShim = true;
@@ -90,6 +90,47 @@ public sealed class WebViewBridge
             """;
         var result = await ExecuteScriptAsync(script, cancellationToken).ConfigureAwait(true);
         return string.Equals(result, "true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public Task<bool> CreateNewProjectAsync(CancellationToken cancellationToken = default) =>
+        InvokeDesktopHostActionAsync("createNewProject", cancellationToken);
+
+    public Task<bool> InvokeOpenProjectPickerAsync(CancellationToken cancellationToken = default) =>
+        InvokeDesktopHostActionAsync("openProject", cancellationToken, "{}");
+
+    public Task<bool> SaveProjectAsync(CancellationToken cancellationToken = default) =>
+        InvokeDesktopHostActionAsync("saveProject", cancellationToken);
+
+    public Task<bool> SaveProjectAsAsync(CancellationToken cancellationToken = default) =>
+        InvokeDesktopHostActionAsync("saveProjectAs", cancellationToken);
+
+    public async Task<DesktopCloseSaveResult> SaveProjectBeforeCloseAsync(CancellationToken cancellationToken = default)
+    {
+        await WaitForHostReadyAsync(cancellationToken).ConfigureAwait(true);
+
+        var script = """
+            (async () => {
+                const desktopHost = window.panelNesterDesktopHost;
+                if (!desktopHost?.saveProjectBeforeClose) {
+                    return {
+                        status: 'failed',
+                        message: 'Project save before close is unavailable.'
+                    };
+                }
+
+                const result = await desktopHost.saveProjectBeforeClose();
+                return result ?? {
+                    status: 'failed',
+                    message: 'Project save before close did not return a result.'
+                };
+            })();
+            """;
+        var result = await ExecuteScriptAsync(script, cancellationToken).ConfigureAwait(true);
+        var saveResult = JsonSerializer.Deserialize<DesktopCloseSaveResult>(result, BridgeJson.SerializerOptions);
+
+        return saveResult ?? new DesktopCloseSaveResult(
+            "failed",
+            "Project save before close returned an empty result.");
     }
 
     public Task WaitForHostReadyAsync(CancellationToken cancellationToken = default) =>
@@ -179,4 +220,42 @@ public sealed class WebViewBridge
     private void OnStatusChanged(string status) => StatusChanged?.Invoke(this, status);
 
     private void OnDocumentTitleChanged(string title) => DocumentTitleChanged?.Invoke(this, title);
+
+    private async Task<bool> InvokeDesktopHostActionAsync(
+        string actionName,
+        CancellationToken cancellationToken,
+        string? requestJson = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(actionName);
+
+        await WaitForHostReadyAsync(cancellationToken).ConfigureAwait(true);
+
+        var invocation = requestJson is null ? "await action();" : $"await action({requestJson});";
+        var script = $$"""
+            (async () => {
+                const desktopHost = window.panelNesterDesktopHost;
+                const action = desktopHost?.{{actionName}};
+                if (typeof action !== 'function') {
+                    return false;
+                }
+
+                {{invocation}}
+                return true;
+            })();
+            """;
+        var result = await ExecuteScriptAsync(script, cancellationToken).ConfigureAwait(true);
+        return string.Equals(result, "true", StringComparison.OrdinalIgnoreCase);
+    }
+}
+
+public sealed record DesktopCloseSaveResult(string Status, string? Message)
+{
+    public bool Saved =>
+        string.Equals(Status, "saved", StringComparison.Ordinal);
+
+    public bool Cancelled =>
+        string.Equals(Status, "cancelled", StringComparison.Ordinal);
+
+    public bool Failed =>
+        string.Equals(Status, "failed", StringComparison.Ordinal);
 }

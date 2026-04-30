@@ -1,30 +1,39 @@
 import {
   Suspense,
   lazy,
+  useDeferredValue,
   useEffect,
   useMemo,
-  useRef,
   useState,
-  type CSSProperties,
 } from 'react';
 import { StatusPill } from '../components/StatusPill';
+import { ThemedSelect } from '../components/ThemedSelect';
+import {
+  buildBatchSheets,
+  buildPanelSearchIndex,
+  buildPanelSearchResults,
+  compareLabels,
+  decoratePlacements,
+  sheetLookupKey,
+} from './resultsBatchSheetSearch';
 import type {
   BatchNestResponse,
   Material,
-  NestPlacement,
   NestResponse,
-  PartRow,
   ProjectMaterialSnapshot,
   ReportSettings,
+  StiffenerTakeoffReportData,
+  StiffenerTakeoffSettings,
+  UnplacedItem,
 } from '../types/contracts';
 
 interface ResultsPageProps {
   material?: Material;
   selectedMaterialId?: string;
+  companyLogoPath?: string | null;
   kerfWidth: number;
   nestResponse: NestResponse;
   batchNestResponse: BatchNestResponse;
-  parts: PartRow[];
   statusMessage: string;
   savedMaterialSnapshots: ProjectMaterialSnapshot[];
   pendingMaterialSnapshots: ProjectMaterialSnapshot[];
@@ -32,11 +41,28 @@ interface ResultsPageProps {
   reportSettings: ReportSettings;
   reportMessage: string;
   reportBusy: boolean;
+  stiffenerTakeoffEnabled: boolean;
+  stiffenerTakeoffSettings: StiffenerTakeoffSettings;
+  stiffenerTakeoffReport: StiffenerTakeoffReportData | null;
+  stiffenerMessage: string;
+  stiffenerBusy: boolean;
   canSyncReportSettings: boolean;
   canExportReport: boolean;
+  canExportExcelReport: boolean;
+  canPreviewStiffenerTakeoff: boolean;
+  canExportStiffenerReport: boolean;
   onReportSettingsChange: (field: keyof ReportSettings, value: string) => void;
-  onSyncReportSettings: () => Promise<void>;
-  onExportReport: () => Promise<void>;
+  onStiffenerTakeoffChange: (settings: StiffenerTakeoffSettings) => void;
+  onPickCompanyLogo: () => Promise<string | undefined>;
+  onSaveDesktopAppSettings: (settings: {
+    companyLogoPath?: string | null;
+    companyName?: string | null;
+  }) => Promise<boolean>;
+  onExportReport: (overrides?: ReportExportOverrides) => Promise<void>;
+  onExportExcelReport: (overrides?: ReportExportOverrides) => Promise<void>;
+  onExportStiffenerReport: (
+    overrides?: StiffenerExportOverrides,
+  ) => Promise<void>;
 }
 
 interface MaterialResultView {
@@ -46,170 +72,63 @@ interface MaterialResultView {
   response: NestResponse;
 }
 
-interface ResultsPlacement extends NestPlacement {
-  group?: string | null;
-  displayGroup: string;
+interface ReportDraft {
+  companyLogoPath: string;
+  companyName: string;
+  reportTitle: string;
+  projectJobName: string;
+  projectJobNumber: string;
+  releaseId: string;
+  status: string;
+  reportDate: string;
+  notes: string;
 }
 
-interface GroupResultView {
-  key: string;
-  label: string;
-  placements: ResultsPlacement[];
-  sheetIds: string[];
+interface StiffenerExportDraft extends ReportDraft {
+  stiffenerReportTitle: string;
+  extrusion: string;
+  stiffenerReleaseId: string;
+  poNumber: string;
+  color: string;
+  colorNumber: string;
+  manufacturer: string;
+  stiffenerStatus: string;
 }
+
+interface ReportExportOverrides {
+  companyLogoPath?: string | null;
+  reportSettings?: ReportSettings;
+}
+
+interface StiffenerExportOverrides {
+  companyLogoPath?: string | null;
+  reportSettings: ReportSettings;
+  stiffenerTakeoff: StiffenerTakeoffSettings;
+}
+
+interface SplitButtonProps {
+  label: string;
+  busyLabel: string;
+  busy: boolean;
+  disabled: boolean;
+  tone?: 'primary' | 'secondary';
+  menuOpen: boolean;
+  onToggleMenu: () => void;
+  onPrimaryAction: () => void;
+  onOpenOverrides: () => void;
+}
+
+interface UnplacedRow extends UnplacedItem {
+  materialKey: string;
+  materialName: string;
+}
+
+type ResultsDrawerTab = 'unplaced' | 'stiffeners';
 
 const SheetViewer = lazy(async () => {
   const module = await import('../components/SheetViewer');
   return { default: module.SheetViewer };
 });
-
-const baseWorkspaceTabs = [
-  { id: 'report-fields', label: 'Report fields' },
-  { id: 'summary-by-material', label: 'Summary by material' },
-  { id: 'group-review', label: 'Review by group' },
-  { id: 'sheet-detail', label: 'Sheet detail' },
-  { id: 'placement-inspection', label: 'Placement inspection' },
-  { id: 'unplaced', label: 'Unplaced' },
-] as const;
-
-type ResultsWorkspaceTabId = (typeof baseWorkspaceTabs)[number]['id'];
-
-const minWorkspaceWidth = 360;
-const resultsSplitterWidth = 14;
-const minViewerWidth = 420;
-
-function itemLabel(partId: string): string {
-  return partId.trim().length > 0 ? partId : 'Run';
-}
-
-function normalizeGroup(value?: string | null): string | null {
-  const trimmed = value?.trim() ?? '';
-  return trimmed.length > 0 ? trimmed : null;
-}
-
-function getGroupKey(value?: string | null): string {
-  return normalizeGroup(value) ?? '';
-}
-
-function getDisplayGroup(value?: string | null): string {
-  return normalizeGroup(value) ?? 'Ungrouped';
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max);
-}
-
-function getBasePartId(part: PartRow): string {
-  const importedId = part.importedId.trim();
-  return importedId.length > 0 ? importedId : part.rowId;
-}
-
-function buildPlacementGroupLookup(parts: PartRow[]): Map<string, string | null> {
-  const lookup = new Map<string, string | null>();
-
-  for (const part of parts) {
-    const group = normalizeGroup(part.group);
-    const basePartId = getBasePartId(part);
-    const partCount = Math.max(part.quantity, 1);
-
-    if (partCount === 1) {
-      if (!lookup.has(basePartId)) {
-        lookup.set(basePartId, group);
-      }
-      continue;
-    }
-
-    for (let instanceNumber = 1; instanceNumber <= partCount; instanceNumber += 1) {
-      const partId = `${basePartId}#${instanceNumber}`;
-      if (!lookup.has(partId)) {
-        lookup.set(partId, group);
-      }
-    }
-  }
-
-  return lookup;
-}
-
-function decoratePlacements(
-  placements: NestPlacement[],
-  placementGroups: Map<string, string | null>,
-): ResultsPlacement[] {
-  return placements.map((placement) => {
-    const group = placementGroups.get(placement.partId) ?? null;
-
-    return {
-      ...placement,
-      group,
-      displayGroup: getDisplayGroup(group),
-    };
-  });
-}
-
-function buildGroupSummaries(
-  parts: PartRow[],
-  placements: ResultsPlacement[],
-): GroupResultView[] {
-  const namedGroupOrder: string[] = [];
-  const seenNamedGroups = new Set<string>();
-  let includeUngrouped = false;
-
-  const registerNamedGroup = (value?: string | null) => {
-    const normalized = normalizeGroup(value);
-    if (!normalized) {
-      includeUngrouped = true;
-      return;
-    }
-
-    if (seenNamedGroups.has(normalized)) {
-      return;
-    }
-
-    seenNamedGroups.add(normalized);
-    namedGroupOrder.push(normalized);
-  };
-
-  for (const part of parts) {
-    registerNamedGroup(part.group);
-  }
-
-  for (const placement of placements) {
-    registerNamedGroup(placement.group);
-  }
-
-  if (namedGroupOrder.length === 0) {
-    return [];
-  }
-
-  const placementsByGroup = new Map<string, ResultsPlacement[]>();
-  for (const placement of placements) {
-    const groupKey = getGroupKey(placement.group);
-    const groupedPlacements = placementsByGroup.get(groupKey) ?? [];
-    groupedPlacements.push(placement);
-    placementsByGroup.set(groupKey, groupedPlacements);
-  }
-
-  const orderedGroupKeys = includeUngrouped
-    ? [...namedGroupOrder, '']
-    : namedGroupOrder;
-
-  return orderedGroupKeys
-    .map((groupKey) => {
-      const groupedPlacements = placementsByGroup.get(groupKey) ?? [];
-      if (groupedPlacements.length === 0) {
-        return null;
-      }
-
-      return {
-        key: groupKey,
-        label: getDisplayGroup(groupKey),
-        placements: groupedPlacements,
-        sheetIds: Array.from(
-          new Set(groupedPlacements.map((placement) => placement.sheetId)),
-        ),
-      } satisfies GroupResultView;
-    })
-    .filter((group): group is GroupResultView => group !== null);
-}
 
 function createLegacyMaterialResult(
   material: Material | undefined,
@@ -221,13 +140,12 @@ function createLegacyMaterialResult(
 
   const materialName =
     material?.name ?? nestResponse.sheets[0]?.materialName ?? 'Imported material';
-  const materialId = material?.materialId;
 
   return [
     {
-      key: materialId ?? materialName,
+      key: material?.materialId ?? materialName,
+      materialId: material?.materialId,
       materialName,
-      materialId,
       response: nestResponse,
     },
   ];
@@ -241,8 +159,8 @@ function buildMaterialResults(
   if (batchNestResponse.materialResults.length > 0) {
     return batchNestResponse.materialResults.map((result) => ({
       key: result.materialId ?? result.materialName,
-      materialName: result.materialName,
       materialId: result.materialId ?? undefined,
+      materialName: result.materialName,
       response: result.result,
     }));
   }
@@ -250,109 +168,248 @@ function buildMaterialResults(
   return createLegacyMaterialResult(material, nestResponse);
 }
 
-function findSnapshotMaterial(
-  snapshots: ProjectMaterialSnapshot[],
-  materialId?: string,
-  materialName?: string,
-): ProjectMaterialSnapshot | undefined {
-  if (materialId) {
-    const byId = snapshots.find((snapshot) => snapshot.materialId === materialId);
-    if (byId) {
-      return byId;
-    }
-  }
-
-  if (materialName) {
-    return snapshots.find((snapshot) => snapshot.name === materialName);
-  }
-
-  return undefined;
+function createReportDraft(reportSettings: ReportSettings): ReportDraft {
+  return {
+    companyLogoPath: '',
+    companyName: reportSettings.companyName ?? '',
+    reportTitle: reportSettings.reportTitle ?? '',
+    projectJobName: reportSettings.projectJobName ?? '',
+    projectJobNumber: reportSettings.projectJobNumber ?? '',
+    releaseId: reportSettings.releaseId ?? '',
+    status: reportSettings.status ?? '',
+    reportDate: reportSettings.reportDate ?? '',
+    notes: reportSettings.notes ?? '',
+  };
 }
 
-function sumMaterialResults(materialResults: MaterialResultView[]) {
-  return materialResults.reduce(
-    (totals, result) => ({
-      totalSheets: totals.totalSheets + result.response.summary.totalSheets,
-      totalPlaced: totals.totalPlaced + result.response.summary.totalPlaced,
-      totalUnplaced: totals.totalUnplaced + result.response.summary.totalUnplaced,
-      utilizationTotal:
-        totals.utilizationTotal + result.response.summary.overallUtilization,
-    }),
-    {
-      totalSheets: 0,
-      totalPlaced: 0,
-      totalUnplaced: 0,
-      utilizationTotal: 0,
-    },
+function createStiffenerDraft(
+  companyLogoPath: string | null | undefined,
+  reportSettings: ReportSettings,
+  settings: StiffenerTakeoffSettings,
+): StiffenerExportDraft {
+  return {
+    ...createReportDraft(reportSettings),
+    companyLogoPath: companyLogoPath ?? '',
+    stiffenerReportTitle: settings.reportTitle ?? '',
+    extrusion: settings.extrusion ?? '',
+    stiffenerReleaseId: settings.releaseId ?? '',
+    poNumber: settings.poNumber ?? '',
+    color: settings.color ?? '',
+    colorNumber: settings.colorNumber ?? '',
+    manufacturer: settings.manufacturer ?? '',
+    stiffenerStatus: settings.status ?? '',
+  };
+}
+
+function toReportSettings(draft: ReportDraft): ReportSettings {
+  return {
+    companyName: draft.companyName,
+    reportTitle: draft.reportTitle,
+    projectJobName: draft.projectJobName,
+    projectJobNumber: draft.projectJobNumber,
+    releaseId: draft.releaseId,
+    status: draft.status,
+    reportDate: draft.reportDate,
+    notes: draft.notes,
+  };
+}
+
+function fileNameFromPath(value: string): string {
+  const parts = value.split(/[\\/]/);
+  return parts[parts.length - 1] ?? value;
+}
+
+function SplitButton({
+  label,
+  busyLabel,
+  busy,
+  disabled,
+  tone = 'secondary',
+  menuOpen,
+  onToggleMenu,
+  onPrimaryAction,
+  onOpenOverrides,
+}: SplitButtonProps) {
+  const primaryClassName =
+    tone === 'primary'
+      ? 'primary-button module-action-button module-action-button--primary'
+      : 'secondary-button module-action-button';
+  const toggleClassName =
+    tone === 'primary'
+      ? 'primary-button module-split-button__toggle'
+      : 'secondary-button module-split-button__toggle';
+
+  return (
+    <div className="module-split-button">
+      <button
+        className={primaryClassName}
+        disabled={disabled}
+        onClick={onPrimaryAction}
+        type="button"
+      >
+        {busy ? busyLabel : label}
+      </button>
+      <button
+        aria-expanded={menuOpen}
+        className={toggleClassName}
+        disabled={disabled}
+        onClick={onToggleMenu}
+        type="button"
+      >
+        <svg aria-hidden="true" viewBox="0 0 24 24">
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      </button>
+      {menuOpen ? (
+        <div className="module-split-button__menu">
+          <button
+            className="module-split-button__menu-item"
+            onClick={onOpenOverrides}
+            type="button"
+          >
+            Override parameters
+          </button>
+        </div>
+      ) : null}
+    </div>
   );
+}
+
+interface LogoFieldProps {
+  value: string;
+  disabled?: boolean;
+  onChoose: () => Promise<void>;
+  onClear: () => void;
+}
+
+function LogoField({ value, disabled, onChoose, onClear }: LogoFieldProps) {
+  return (
+    <label className="field field--wide">
+      <span>Company logo</span>
+      <div className="results-logo-field">
+        <input
+          disabled
+          placeholder="No logo selected"
+          type="text"
+          value={value ? fileNameFromPath(value) : ''}
+        />
+        <div className="results-logo-field__actions">
+          <button
+            className="secondary-button"
+            disabled={disabled}
+            onClick={() => void onChoose()}
+            type="button"
+          >
+            Choose
+          </button>
+          <button
+            className="secondary-button"
+            disabled={disabled || value.length === 0}
+            onClick={onClear}
+            type="button"
+          >
+            Clear
+          </button>
+        </div>
+      </div>
+      <small>Global app setting shared across report exports.</small>
+    </label>
+  );
+}
+
+function formatDimension(value: number): string {
+  return Number.isInteger(value)
+    ? `${value}`
+    : value.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function formatArea(value: number): string {
+  return value.toLocaleString(undefined, {
+    maximumFractionDigits: value >= 100 ? 0 : 2,
+  });
+}
+
+function itemLabel(partId: string): string {
+  return partId.trim().length > 0 ? partId : 'Run';
 }
 
 export function ResultsPage({
   material,
   selectedMaterialId,
+  companyLogoPath,
   kerfWidth,
   nestResponse,
   batchNestResponse,
-  parts,
   statusMessage,
-  savedMaterialSnapshots,
-  pendingMaterialSnapshots,
   projectDirty,
   reportSettings,
   reportMessage,
   reportBusy,
+  stiffenerTakeoffEnabled,
+  stiffenerTakeoffSettings,
+  stiffenerTakeoffReport,
+  stiffenerMessage,
+  stiffenerBusy,
   canSyncReportSettings,
   canExportReport,
+  canExportExcelReport,
+  canPreviewStiffenerTakeoff,
+  canExportStiffenerReport,
   onReportSettingsChange,
+  onStiffenerTakeoffChange,
+  onPickCompanyLogo,
+  onSaveDesktopAppSettings,
   onExportReport,
+  onExportExcelReport,
+  onExportStiffenerReport,
 }: ResultsPageProps) {
   const materialResults = useMemo(
     () => buildMaterialResults(batchNestResponse, material, nestResponse),
     [batchNestResponse, material, nestResponse],
   );
-  const hasGroupedParts = useMemo(
-    () => parts.some((part) => normalizeGroup(part.group) !== null),
-    [parts],
+  const batchSheets = useMemo(() => buildBatchSheets(materialResults), [materialResults]);
+  const panelSearchIndex = useMemo(
+    () => buildPanelSearchIndex(batchSheets),
+    [batchSheets],
   );
-  const workspaceTabs = useMemo(
-    () =>
-      hasGroupedParts
-        ? baseWorkspaceTabs
-        : baseWorkspaceTabs.filter((tab) => tab.id !== 'group-review'),
-    [hasGroupedParts],
-  );
-  const totals = useMemo(() => sumMaterialResults(materialResults), [materialResults]);
-  const averageUtilization =
-    materialResults.length > 0
-      ? totals.utilizationTotal / materialResults.length
-      : nestResponse.summary.overallUtilization;
-  const hasSheets =
-    materialResults.some((result) => result.response.sheets.length > 0) ||
-    nestResponse.sheets.length > 0;
-  const hasPlacements =
-    materialResults.some((result) => result.response.placements.length > 0) ||
-    nestResponse.placements.length > 0;
-  const hasOutput =
-    materialResults.length > 0 ||
-    nestResponse.sheets.length > 0 ||
-    nestResponse.unplacedItems.length > 0;
-  const hasEmptyResult = hasOutput && !hasSheets && !hasPlacements;
-  const emptyRunNote = nestResponse.unplacedItems.find(
-    (item) => item.reasonCode === 'empty-run',
-  );
-
-  const [activeMaterialKey, setActiveMaterialKey] = useState<string>();
-  const [activeSheetId, setActiveSheetId] = useState<string>();
-  const [activeGroupKey, setActiveGroupKey] = useState<string>();
+  const [materialFilterKey, setMaterialFilterKey] = useState('all');
+  const [panelSearchQuery, setPanelSearchQuery] = useState('');
+  const deferredPanelSearchQuery = useDeferredValue(panelSearchQuery.trim());
+  const [activeSheetKey, setActiveSheetKey] = useState<string>();
   const [selectedPlacementId, setSelectedPlacementId] = useState<string>();
-  const [activeWorkspaceTab, setActiveWorkspaceTab] =
-    useState<ResultsWorkspaceTabId>('report-fields');
-  const [workspaceWidth, setWorkspaceWidth] = useState(520);
-  const [isResizingWorkspace, setIsResizingWorkspace] = useState(false);
-  const splitLayoutRef = useRef<HTMLDivElement>(null);
+  const [drawerTab, setDrawerTab] = useState<ResultsDrawerTab | null>(null);
+  const [reportDialogOpen, setReportDialogOpen] = useState(false);
+  const [stiffenerDialogOpen, setStiffenerDialogOpen] = useState(false);
+  const [openMenu, setOpenMenu] = useState<'report' | 'stiffener' | null>(null);
+  const [reportDraft, setReportDraft] = useState<ReportDraft>(() =>
+    {
+      const draft = createReportDraft(reportSettings);
+      return {
+        ...draft,
+        companyLogoPath: companyLogoPath ?? '',
+      };
+    },
+  );
+  const [stiffenerDraft, setStiffenerDraft] = useState<StiffenerExportDraft>(() =>
+    createStiffenerDraft(companyLogoPath, reportSettings, stiffenerTakeoffSettings),
+  );
+  const materialFilterOptions = useMemo(
+    () => [
+      { value: 'all', label: 'All materials' },
+      ...materialResults.map((result) => ({
+        value: result.key,
+        label: result.materialName,
+      })),
+    ],
+    [materialResults],
+  );
+  const panelSearchResults = useMemo(
+    () => buildPanelSearchResults(panelSearchIndex, deferredPanelSearchQuery),
+    [deferredPanelSearchQuery, panelSearchIndex],
+  );
 
   useEffect(() => {
-    const preferred =
+    const preferredMaterial =
       materialResults.find(
         (result) =>
           (selectedMaterialId && result.materialId === selectedMaterialId) ||
@@ -360,974 +417,1183 @@ export function ResultsPage({
           result.materialName === material?.name,
       ) ?? materialResults[0];
 
-    setActiveMaterialKey((current) =>
-      current && materialResults.some((result) => result.key === current)
+    setMaterialFilterKey((current) => {
+      if (current === 'all') {
+        return preferredMaterial?.key ?? 'all';
+      }
+
+      return materialResults.some((result) => result.key === current)
         ? current
-        : preferred?.key,
-    );
+        : preferredMaterial?.key ?? 'all';
+    });
   }, [material, materialResults, selectedMaterialId]);
 
   useEffect(() => {
-    if (workspaceTabs.some((tab) => tab.id === activeWorkspaceTab)) {
+    if (!reportDialogOpen) {
       return;
     }
 
-    setActiveWorkspaceTab('summary-by-material');
-  }, [activeWorkspaceTab, workspaceTabs]);
+    const draft = createReportDraft(reportSettings);
+    setReportDraft({
+      ...draft,
+      companyLogoPath: companyLogoPath ?? '',
+    });
+  }, [companyLogoPath, reportDialogOpen, reportSettings]);
 
+  useEffect(() => {
+    if (!stiffenerDialogOpen) {
+      return;
+    }
+
+    setStiffenerDraft(
+      createStiffenerDraft(companyLogoPath, reportSettings, stiffenerTakeoffSettings),
+    );
+  }, [companyLogoPath, reportSettings, stiffenerDialogOpen, stiffenerTakeoffSettings]);
+
+  useEffect(() => {
+    if (!openMenu) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element) || !target.closest('.module-split-button')) {
+        setOpenMenu(null);
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [openMenu]);
+
+  const filteredSheets = useMemo(() => {
+    const materialScopedSheets = batchSheets.filter(
+      (sheet) => materialFilterKey === 'all' || sheet.materialKey === materialFilterKey,
+    );
+
+    if (deferredPanelSearchQuery.length === 0) {
+      return [...materialScopedSheets].sort(
+        (left, right) =>
+          compareLabels(left.materialName, right.materialName) ||
+          left.sheet.sheetNumber - right.sheet.sheetNumber,
+      );
+    }
+
+    return materialScopedSheets
+      .filter((sheet) =>
+        panelSearchResults.firstMatchBySheet.has(
+          sheetLookupKey(sheet.materialKey, sheet.sheet.sheetId),
+        ),
+      )
+      .sort(
+        (left, right) =>
+          compareLabels(left.materialName, right.materialName) ||
+          left.sheet.sheetNumber - right.sheet.sheetNumber,
+      );
+  }, [
+    batchSheets,
+    deferredPanelSearchQuery,
+    materialFilterKey,
+    panelSearchResults.firstMatchBySheet,
+  ]);
+
+  useEffect(() => {
+    const firstSheetKey = filteredSheets[0]
+      ? sheetLookupKey(filteredSheets[0].materialKey, filteredSheets[0].sheet.sheetId)
+      : undefined;
+
+    setActiveSheetKey((current) =>
+      current &&
+      filteredSheets.some(
+        (sheet) => sheetLookupKey(sheet.materialKey, sheet.sheet.sheetId) === current,
+      )
+        ? current
+        : firstSheetKey,
+    );
+  }, [filteredSheets]);
+
+  const activeSheetView =
+    filteredSheets.find(
+      (sheet) => sheetLookupKey(sheet.materialKey, sheet.sheet.sheetId) === activeSheetKey,
+    ) ?? filteredSheets[0];
   const activeMaterialResult =
-    materialResults.find((result) => result.key === activeMaterialKey) ?? materialResults[0];
-  const activeMaterialParts = useMemo(
-    () =>
-      activeMaterialResult
-        ? parts.filter((part) => part.materialName === activeMaterialResult.materialName)
-        : [],
-    [activeMaterialResult, parts],
-  );
-  const activeMaterialPlacementGroups = useMemo(
-    () => buildPlacementGroupLookup(activeMaterialParts),
-    [activeMaterialParts],
-  );
+    materialResults.find((result) => result.key === activeSheetView?.materialKey) ??
+    materialResults.find((result) => result.key === materialFilterKey) ??
+    materialResults[0];
   const activeMaterialPlacements = useMemo(
+    () => decoratePlacements(activeMaterialResult?.response.placements ?? []),
+    [activeMaterialResult],
+  );
+  const activeSheetPlacements = useMemo(
     () =>
-      activeMaterialResult
-        ? decoratePlacements(
-            activeMaterialResult.response.placements,
-            activeMaterialPlacementGroups,
-          )
-        : [],
-    [activeMaterialPlacementGroups, activeMaterialResult],
-  );
-  const activeMaterialGroupSummaries = useMemo(
-    () => buildGroupSummaries(activeMaterialParts, activeMaterialPlacements),
-    [activeMaterialParts, activeMaterialPlacements],
+      activeMaterialPlacements.filter(
+        (placement) => placement.sheetId === activeSheetView?.sheet.sheetId,
+      ),
+    [activeMaterialPlacements, activeSheetView?.sheet.sheetId],
   );
 
   useEffect(() => {
-    const preferredGroupKey = activeMaterialGroupSummaries[0]?.key;
-    setActiveGroupKey((current) =>
-      current !== undefined &&
-      activeMaterialGroupSummaries.some((group) => group.key === current)
-        ? current
-        : preferredGroupKey,
-    );
-  }, [activeMaterialGroupSummaries]);
-
-  const activeGroupSummary =
-    activeMaterialGroupSummaries.find((group) => group.key === activeGroupKey) ??
-    activeMaterialGroupSummaries[0];
-
-  useEffect(() => {
-    if (activeWorkspaceTab !== 'group-review' || !activeGroupSummary) {
-      return;
-    }
-
-    setActiveSheetId((current) =>
-      current && activeGroupSummary.sheetIds.includes(current)
-        ? current
-        : activeGroupSummary.sheetIds[0],
-    );
     setSelectedPlacementId((current) =>
       current &&
-      activeGroupSummary.placements.some((placement) => placement.placementId === current)
+      activeSheetPlacements.some((placement) => placement.placementId === current)
         ? current
         : undefined,
     );
-  }, [activeGroupSummary, activeWorkspaceTab]);
+  }, [activeSheetPlacements]);
 
-  useEffect(() => {
-    const firstSheetId = activeMaterialResult?.response.sheets[0]?.sheetId;
-    setActiveSheetId((current) =>
-      current &&
-      activeMaterialResult?.response.sheets.some((sheet) => sheet.sheetId === current)
-        ? current
-        : firstSheetId,
-    );
-    setSelectedPlacementId(undefined);
-  }, [activeMaterialResult]);
-
-  useEffect(() => {
-    if (!isResizingWorkspace) {
-      return undefined;
-    }
-
-    const previousCursor = document.body.style.cursor;
-    const previousUserSelect = document.body.style.userSelect;
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-
-    const handlePointerMove = (event: PointerEvent) => {
-      const layout = splitLayoutRef.current;
-      if (!layout) {
-        return;
-      }
-
-      const bounds = layout.getBoundingClientRect();
-      const maxWidth = Math.max(
-        minWorkspaceWidth,
-        bounds.width - minViewerWidth - resultsSplitterWidth,
-      );
-      setWorkspaceWidth(
-        clamp(event.clientX - bounds.left, minWorkspaceWidth, maxWidth),
-      );
-    };
-
-    const stopResizing = () => {
-      setIsResizingWorkspace(false);
-    };
-
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', stopResizing);
-    window.addEventListener('pointercancel', stopResizing);
-
-    return () => {
-      document.body.style.cursor = previousCursor;
-      document.body.style.userSelect = previousUserSelect;
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', stopResizing);
-      window.removeEventListener('pointercancel', stopResizing);
-    };
-  }, [isResizingWorkspace]);
-
-  const activeSheet =
-    activeMaterialResult?.response.sheets.find((sheet) => sheet.sheetId === activeSheetId) ??
-    activeMaterialResult?.response.sheets[0] ??
-    null;
-  const activeSheetPlacements = useMemo(
-    () =>
-      activeMaterialPlacements.filter((placement) => placement.sheetId === activeSheet?.sheetId),
-    [activeMaterialPlacements, activeSheet?.sheetId],
-  );
-  const selectedPlacement = activeMaterialPlacements.find(
+  const selectedPlacement = activeSheetPlacements.find(
     (placement) => placement.placementId === selectedPlacementId,
   );
-  const activeGroupSheetRows = useMemo(() => {
-    if (!activeMaterialResult || !activeGroupSummary) {
-      return [];
-    }
+  const sheetSearchMatches =
+    activeSheetView && deferredPanelSearchQuery.length > 0
+      ? panelSearchResults.sheetCounts.get(
+          sheetLookupKey(activeSheetView.materialKey, activeSheetView.sheet.sheetId),
+        ) ?? 0
+      : 0;
+  const totalPlacedArea = activeSheetPlacements.reduce(
+    (sum, placement) => sum + placement.width * placement.height,
+    0,
+  );
+  const sheetArea = activeSheetView
+    ? activeSheetView.sheet.sheetLength * activeSheetView.sheet.sheetWidth
+    : 0;
+  const scrapArea = Math.max(sheetArea - totalPlacedArea, 0);
+  const unplacedRows = useMemo<UnplacedRow[]>(
+    () =>
+      materialResults
+        .filter((result) => materialFilterKey === 'all' || result.key === materialFilterKey)
+        .flatMap((result) =>
+          result.response.unplacedItems.map((item) => ({
+            ...item,
+            materialKey: result.key,
+            materialName: result.materialName,
+          })),
+        )
+        .filter((item) =>
+          deferredPanelSearchQuery.length === 0
+            ? true
+            : item.partId.toLowerCase().includes(deferredPanelSearchQuery.toLowerCase()),
+        ),
+    [deferredPanelSearchQuery, materialFilterKey, materialResults],
+  );
+  const hasOutput =
+    materialResults.length > 0 ||
+    nestResponse.sheets.length > 0 ||
+    nestResponse.unplacedItems.length > 0;
+  const stiffenerSummary = stiffenerTakeoffReport?.overallSummary;
+  const stiffenerNote = !stiffenerTakeoffEnabled
+    ? 'Enable stiffener takeoff in Project settings to populate this tab.'
+    : !canPreviewStiffenerTakeoff
+      ? 'The connected desktop host has not exposed stiffener preview yet.'
+      : !canExportStiffenerReport
+        ? 'Preview is available, but standalone stiffener PDF export is not exposed in this host.'
+        : 'Preview and export both use the current project stiffener settings and ready imported rows.';
 
-    return activeMaterialResult.response.sheets
-      .filter((sheet) => activeGroupSummary.sheetIds.includes(sheet.sheetId))
-      .map((sheet) => {
-        const sheetPlacements = activeMaterialPlacements.filter(
-          (placement) => placement.sheetId === sheet.sheetId,
-        );
-        const selectedGroupPlacements = sheetPlacements.filter(
-          (placement) => getGroupKey(placement.group) === activeGroupSummary.key,
-        );
+  const applyReportDraft = () => {
+    const nextValues = [
+      ['companyName', reportDraft.companyName],
+      ['reportTitle', reportDraft.reportTitle],
+      ['projectJobName', reportDraft.projectJobName],
+      ['projectJobNumber', reportDraft.projectJobNumber],
+      ['releaseId', reportDraft.releaseId],
+      ['status', reportDraft.status],
+      ['reportDate', reportDraft.reportDate],
+      ['notes', reportDraft.notes],
+    ] as const;
 
-        return {
-          otherGroupCount: sheetPlacements.length - selectedGroupPlacements.length,
-          selectedGroupCount: selectedGroupPlacements.length,
-          sheet,
-        };
+    nextValues.forEach(([field, value]) => {
+      if ((reportSettings[field] ?? '') !== value) {
+        onReportSettingsChange(field, value);
+      }
+    });
+
+    void (async () => {
+      const saved = await onSaveDesktopAppSettings({
+        companyLogoPath:
+          reportDraft.companyLogoPath.trim().length > 0
+            ? reportDraft.companyLogoPath.trim()
+            : null,
+        companyName: reportDraft.companyName.trim() || null,
       });
-  }, [activeGroupSummary, activeMaterialPlacements, activeMaterialResult]);
-  const viewerActiveGroupKey =
-    activeWorkspaceTab === 'group-review' ? activeGroupSummary?.key : undefined;
-  const viewerActiveGroupLabel =
-    activeWorkspaceTab === 'group-review' ? activeGroupSummary?.label : undefined;
-
-  const savedSnapshot = activeMaterialResult
-    ? findSnapshotMaterial(
-        savedMaterialSnapshots,
-        activeMaterialResult.materialId,
-        activeMaterialResult.materialName,
-      )
-    : undefined;
-  const pendingSnapshot = activeMaterialResult
-    ? findSnapshotMaterial(
-        pendingMaterialSnapshots,
-        activeMaterialResult.materialId,
-        activeMaterialResult.materialName,
-      )
-    : undefined;
-  const displaySnapshot = projectDirty
-    ? pendingSnapshot ?? savedSnapshot
-    : savedSnapshot ?? pendingSnapshot;
-  const snapshotStatus: 'saved' | 'pending' | 'none' = displaySnapshot
-    ? projectDirty && pendingSnapshot
-      ? 'pending'
-      : savedSnapshot
-        ? 'saved'
-        : 'pending'
-    : 'none';
-  const exportReady = canExportReport && hasOutput;
-  const resultStatusTone = hasEmptyResult
-    ? 'warn'
-    : hasOutput
-      ? batchNestResponse.success || nestResponse.success
-        ? 'ok'
-        : 'warn'
-      : 'muted';
-  const resultStatusLabel = hasEmptyResult
-    ? 'No sheets produced'
-    : hasOutput
-      ? batchNestResponse.materialResults.length > 1
-        ? 'Batch results ready'
-        : 'Results ready'
-      : 'Pending';
-  const exportStatusLabel = canExportReport
-    ? exportReady
-      ? hasEmptyResult
-        ? 'Empty-result export ready'
-        : 'Export ready'
-      : 'No exportable result'
-    : 'Export bridge pending';
-  const reportFieldsNote = !canExportReport
-    ? 'PDF export will light up when the desktop host exposes the Phase 5 export bridge.'
-    : hasOutput
-      ? 'PDF export uses the values shown here. No separate apply step is required.'
-      : 'PDF export uses the values shown here. Run nesting to generate an exportable result.';
-  const viewerResetToken = `${activeMaterialResult?.key ?? 'none'}:${activeSheet?.sheetId ?? 'none'}`;
-  const splitLayoutStyle = {
-    '--results-workspace-width': `${workspaceWidth}px`,
-    '--results-splitter-width': `${resultsSplitterWidth}px`,
-  } as CSSProperties & {
-    '--results-workspace-width': string;
-    '--results-splitter-width': string;
+      if (saved) {
+        setReportDialogOpen(false);
+      }
+    })();
   };
 
-  const viewerPanel = activeSheet ? (
-    <Suspense
-      fallback={
-        <section className="panel sheet-viewer-panel">
-          <div className="section-header">
-            <div>
-              <p className="eyebrow">Viewer</p>
-              <h3>Sheet layout viewer</h3>
-            </div>
-          </div>
-          <div className="empty-state">
-            <strong>Loading viewer</strong>
-            <span>Preparing the interactive sheet viewport.</span>
-          </div>
-        </section>
+  const exportReportFromDialog = async () => {
+    await onExportReport({
+      companyLogoPath:
+        reportDraft.companyLogoPath.trim().length > 0
+          ? reportDraft.companyLogoPath.trim()
+          : null,
+      reportSettings: {
+        companyName: reportDraft.companyName,
+        reportTitle: reportDraft.reportTitle,
+        projectJobName: reportDraft.projectJobName,
+        projectJobNumber: reportDraft.projectJobNumber,
+        releaseId: reportDraft.releaseId,
+        status: reportDraft.status,
+        reportDate: reportDraft.reportDate,
+        notes: reportDraft.notes,
+      },
+    });
+    setReportDialogOpen(false);
+  };
+
+  const syncReportDraft = (draft: ReportDraft) => {
+    const nextValues = [
+      ['companyName', draft.companyName],
+      ['reportTitle', draft.reportTitle],
+      ['projectJobName', draft.projectJobName],
+      ['projectJobNumber', draft.projectJobNumber],
+      ['releaseId', draft.releaseId],
+      ['status', draft.status],
+      ['reportDate', draft.reportDate],
+      ['notes', draft.notes],
+    ] as const;
+
+    nextValues.forEach(([field, value]) => {
+      if ((reportSettings[field] ?? '') !== value) {
+        onReportSettingsChange(field, value);
       }
-    >
-      <SheetViewer
-        activeGroup={viewerActiveGroupKey}
-        activeGroupLabel={viewerActiveGroupLabel}
-        materialName={activeMaterialResult?.materialName ?? material?.name ?? 'Material'}
-        onSelectPlacement={setSelectedPlacementId}
-        placements={activeMaterialPlacements}
-        resetViewToken={viewerResetToken}
-        selectedPlacementId={selectedPlacementId}
-        sheet={activeSheet}
-      />
-    </Suspense>
-  ) : (
-    <section className="panel sheet-viewer-panel">
-      <div className="section-header">
-        <div>
-          <p className="eyebrow">Viewer</p>
-          <h3>Sheet layout viewer</h3>
-        </div>
-      </div>
-      <div className="viewer-placeholder__canvas" aria-hidden="true">
-        <div className="viewer-placeholder__sheet-outline">
-          <span>{hasEmptyResult ? 'No sheet layouts were produced' : 'Choose a sheet to inspect'}</span>
-        </div>
-      </div>
-      <div className="empty-state">
-        <strong>{hasEmptyResult ? 'This run finished without any sheet layouts' : 'No sheet selected'}</strong>
-        <span>
-          {hasEmptyResult
-            ? emptyRunNote?.reasonDescription ??
-              'The current run did not produce any placed panels. Review the unplaced reasons below or return to Import to adjust the input.'
-            : 'Choose a material result and sheet to inspect the layout.'}
-        </span>
-      </div>
-    </section>
-  );
+    });
+  };
+
+  const saveStiffenerDraft = () => {
+    syncReportDraft(stiffenerDraft);
+    if (
+      (stiffenerTakeoffSettings.reportTitle ?? '') !== stiffenerDraft.stiffenerReportTitle ||
+      (stiffenerTakeoffSettings.extrusion ?? '') !== stiffenerDraft.extrusion ||
+      (stiffenerTakeoffSettings.releaseId ?? '') !== stiffenerDraft.stiffenerReleaseId ||
+      (stiffenerTakeoffSettings.poNumber ?? '') !== stiffenerDraft.poNumber ||
+      (stiffenerTakeoffSettings.color ?? '') !== stiffenerDraft.color ||
+      (stiffenerTakeoffSettings.colorNumber ?? '') !== stiffenerDraft.colorNumber ||
+      (stiffenerTakeoffSettings.manufacturer ?? '') !== stiffenerDraft.manufacturer ||
+      (stiffenerTakeoffSettings.status ?? '') !== stiffenerDraft.stiffenerStatus
+    ) {
+      onStiffenerTakeoffChange({
+        ...stiffenerTakeoffSettings,
+        reportTitle: stiffenerDraft.stiffenerReportTitle,
+        extrusion: stiffenerDraft.extrusion,
+        releaseId: stiffenerDraft.stiffenerReleaseId,
+        poNumber: stiffenerDraft.poNumber,
+        color: stiffenerDraft.color,
+        colorNumber: stiffenerDraft.colorNumber,
+        manufacturer: stiffenerDraft.manufacturer,
+        status: stiffenerDraft.stiffenerStatus,
+      });
+    }
+
+    void (async () => {
+      const saved = await onSaveDesktopAppSettings({
+        companyLogoPath:
+          stiffenerDraft.companyLogoPath.trim().length > 0
+            ? stiffenerDraft.companyLogoPath.trim()
+            : null,
+        companyName: stiffenerDraft.companyName.trim() || null,
+      });
+      if (saved) {
+        setStiffenerDialogOpen(false);
+      }
+    })();
+  };
+
+  const exportStiffenerFromDialog = async () => {
+    await onExportStiffenerReport({
+      companyLogoPath:
+        stiffenerDraft.companyLogoPath.trim().length > 0
+          ? stiffenerDraft.companyLogoPath.trim()
+          : null,
+      reportSettings: toReportSettings(stiffenerDraft),
+      stiffenerTakeoff: {
+        ...stiffenerTakeoffSettings,
+        reportTitle: stiffenerDraft.stiffenerReportTitle,
+        extrusion: stiffenerDraft.extrusion,
+        releaseId: stiffenerDraft.stiffenerReleaseId,
+        poNumber: stiffenerDraft.poNumber,
+        color: stiffenerDraft.color,
+        colorNumber: stiffenerDraft.colorNumber,
+        manufacturer: stiffenerDraft.manufacturer,
+        status: stiffenerDraft.stiffenerStatus,
+      },
+    });
+    setStiffenerDialogOpen(false);
+  };
+
+  const sheetHeaderLabel = activeSheetView
+    ? `${activeSheetView.sheet.sheetId} | ${activeSheetView.materialName}`
+    : 'No sheet selected';
+  const sheetSummaryLabel = activeSheetView
+    ? `${formatDimension(activeSheetView.sheet.sheetLength)} x ${formatDimension(activeSheetView.sheet.sheetWidth)} in`
+    : 'Waiting for a nesting result';
 
   return (
-    <div className="page-grid results-page">
-      <section className="panel hero-panel">
-        <div className="section-header">
-          <div>
-            <p className="eyebrow">Results</p>
-            <h2>Multi-material layouts, sheet inspection, and report export</h2>
+    <div className="results-explorer">
+      <div className="results-explorer__layout">
+        <aside className="results-sidebar">
+          <div className="results-sidebar__header">
+            <p className="eyebrow">Batch Explorer</p>
+            <h2>Explore sheets</h2>
+            <p className="section-note">{statusMessage}</p>
           </div>
-          <div className="status-row">
-            <StatusPill tone={resultStatusTone} label={resultStatusLabel} />
-            <StatusPill
-              tone={exportReady ? 'ok' : canExportReport ? 'warn' : 'muted'}
-              label={exportStatusLabel}
-            />
+
+          <div className="results-sidebar__filters">
+            <label className="field">
+              <span>Filter by material</span>
+              <ThemedSelect
+                ariaLabel="Filter results by material"
+                disabled={materialResults.length === 0}
+                onChange={setMaterialFilterKey}
+                options={materialFilterOptions}
+                value={materialFilterKey}
+              />
+            </label>
+
+            <label className="module-search results-sidebar__search">
+              <svg aria-hidden="true" viewBox="0 0 24 24">
+                <circle cx="11" cy="11" r="5.5" />
+                <path d="m15.5 15.5 3 3" />
+              </svg>
+              <input
+                onChange={(event) => setPanelSearchQuery(event.target.value)}
+                placeholder="Find panel ID..."
+                type="search"
+                value={panelSearchQuery}
+              />
+            </label>
           </div>
-        </div>
 
-        <p className="muted">{statusMessage}</p>
-
-        {hasEmptyResult ? (
-          <div className="results-empty-intent">
-            <strong>No panels were placed in this run</strong>
-            <span>
-              {activeMaterialResult
-                ? `The current ${activeMaterialResult.materialName} result has no sheets to inspect yet. Review the unplaced reasons below or return to Import to correct the input.`
-                : 'This run finished without producing any sheet layouts. Review the unplaced reasons below or return to Import to correct the input.'}
-            </span>
-            <div className="token-list">
-              <span className="token">0 sheets generated</span>
-              <span className="token">Viewer stays in empty-state mode</span>
-              <span className="token">
-                {exportReady
-                  ? 'PDF export can capture this empty result'
-                  : 'PDF export unlocks when the host bridge is available'}
-              </span>
+          <div className="results-sidebar__sheet-list">
+            <div className="results-sidebar__section-head">
+              <span>Available sheets</span>
+              <small>
+                {filteredSheets.length} shown
+                {deferredPanelSearchQuery.length > 0
+                  ? ` · ${panelSearchResults.totalMatchCount} match(es)`
+                  : ''}
+              </small>
             </div>
-          </div>
-        ) : null}
 
-        <div className="stats-grid">
-          <article className="stat-card">
-            <span>Materials</span>
-            <strong>{materialResults.length}</strong>
-          </article>
-          <article className="stat-card">
-            <span>Sheets</span>
-            <strong>{totals.totalSheets}</strong>
-          </article>
-          <article className="stat-card">
-            <span>Placed</span>
-            <strong>{totals.totalPlaced}</strong>
-          </article>
-          <article className="stat-card">
-            <span>Unplaced</span>
-            <strong>{totals.totalUnplaced}</strong>
-          </article>
-          <article className="stat-card">
-            <span>Avg utilization</span>
-            <strong>{averageUtilization.toFixed(1)}%</strong>
-          </article>
-          <article className="stat-card">
-            <span>Kerf</span>
-            <strong>{kerfWidth}"</strong>
-          </article>
-        </div>
-      </section>
+            {filteredSheets.length > 0 ? (
+              <div className="results-sheet-table-shell">
+                <table className="results-sheet-table">
+                  <thead>
+                    <tr>
+                      <th>Sheet ID</th>
+                      <th>Size</th>
+                      <th>Util.</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredSheets.map((sheet) => {
+                      const key = sheetLookupKey(sheet.materialKey, sheet.sheet.sheetId);
+                      const isActive = key === activeSheetKey;
+                      const hitCount = panelSearchResults.sheetCounts.get(key) ?? 0;
 
-      <div
-        className={`results-split-layout${isResizingWorkspace ? ' results-split-layout--resizing' : ''}`}
-        data-results-layout="workspace-left-viewer-right"
-        ref={splitLayoutRef}
-        style={splitLayoutStyle}
-      >
-        <section aria-label="Results workspace" className="panel results-workspace">
-          <div className="results-workspace__header">
-            <div>
-              <p className="eyebrow">Workspace</p>
-              <h3>Review results without leaving the layout view</h3>
-            </div>
-          </div>
-
-          <div
-            aria-label="Results detail views"
-            className="results-workspace__tabs"
-            role="tablist"
-          >
-            {workspaceTabs.map((tab) => {
-              const isActive = tab.id === activeWorkspaceTab;
-
-              return (
-                <button
-                  aria-selected={isActive}
-                  className={
-                    isActive
-                      ? 'results-workspace__tab results-workspace__tab--active'
-                      : 'results-workspace__tab'
-                  }
-                  key={tab.id}
-                  onClick={() => setActiveWorkspaceTab(tab.id)}
-                  role="tab"
-                  type="button"
-                >
-                  {tab.label}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="results-workspace__panel" id="results-workspace-panel">
-            {activeWorkspaceTab === 'report-fields' ? (
-              <div className="results-tab-panel" role="tabpanel">
-                <div className="section-header">
-                  <div>
-                    <p className="eyebrow">Report</p>
-                    <h3>Editable export fields</h3>
-                  </div>
-                  <div className="button-row">
-                    <button
-                      className="primary-button"
-                      disabled={!exportReady || reportBusy}
-                      onClick={() => void onExportReport()}
-                      type="button"
-                    >
-                      {reportBusy ? 'Exporting…' : 'Export PDF report'}
-                    </button>
-                  </div>
-                </div>
-
-                <p className="muted">{reportMessage}</p>
-
-                <div className="form-grid form-grid--two-column">
-                  <label className="field">
-                    <span>Company name</span>
-                    <input
-                      onChange={(event) =>
-                        onReportSettingsChange('companyName', event.target.value)
-                      }
-                      type="text"
-                      value={reportSettings.companyName ?? ''}
-                    />
-                  </label>
-
-                  <label className="field">
-                    <span>Report title</span>
-                    <input
-                      onChange={(event) =>
-                        onReportSettingsChange('reportTitle', event.target.value)
-                      }
-                      type="text"
-                      value={reportSettings.reportTitle ?? ''}
-                    />
-                  </label>
-
-                  <label className="field">
-                    <span>Project / job name</span>
-                    <input
-                      onChange={(event) =>
-                        onReportSettingsChange('projectJobName', event.target.value)
-                      }
-                      type="text"
-                      value={reportSettings.projectJobName ?? ''}
-                    />
-                  </label>
-
-                  <label className="field">
-                    <span>Project / job number</span>
-                    <input
-                      onChange={(event) =>
-                        onReportSettingsChange('projectJobNumber', event.target.value)
-                      }
-                      type="text"
-                      value={reportSettings.projectJobNumber ?? ''}
-                    />
-                  </label>
-
-                  <label className="field">
-                    <span>Report date</span>
-                    <input
-                      onChange={(event) =>
-                        onReportSettingsChange('reportDate', event.target.value)
-                      }
-                      type="date"
-                      value={reportSettings.reportDate ?? ''}
-                    />
-                  </label>
-
-                  <label className="field field--wide">
-                    <span>Notes</span>
-                    <textarea
-                      onChange={(event) => onReportSettingsChange('notes', event.target.value)}
-                      value={reportSettings.notes ?? ''}
-                    />
-                  </label>
-                </div>
-
-                <p className="section-note">
-                  {reportFieldsNote}
-                  {canSyncReportSettings ? ' The host no longer needs a separate apply step.' : ''}
-                </p>
-              </div>
-            ) : null}
-
-            {activeWorkspaceTab === 'summary-by-material' ? (
-              <div className="results-tab-panel" role="tabpanel">
-                <div className="results-tab-subsection">
-                  <p className="eyebrow">Summary by material</p>
-                  <h3>Choose the result set to inspect</h3>
-                  {materialResults.length > 0 ? (
-                    <>
-                      <label className="field">
-                        <span>Active material</span>
-                        <select
-                          className="results-material-selector"
-                          onChange={(event) => setActiveMaterialKey(event.target.value)}
-                          value={activeMaterialResult?.key ?? ''}
+                      return (
+                        <tr
+                          className={isActive ? 'table-row--active' : undefined}
+                          key={key}
+                          onClick={() => {
+                            setActiveSheetKey(key);
+                            if (hitCount > 0) {
+                              const firstMatch =
+                                panelSearchResults.firstMatchBySheet.get(key);
+                              setSelectedPlacementId(firstMatch?.placementId);
+                            }
+                          }}
                         >
-                          {materialResults.map((result) => (
-                            <option key={result.key} value={result.key}>
-                              {result.materialName} — {result.response.summary.totalSheets} sheet(s) · {result.response.summary.totalPlaced} placed
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-
-                      <div className="table-shell">
-                        <table>
-                          <thead>
-                            <tr>
-                              <th>Material</th>
-                              <th>Sheets</th>
-                              <th>Placed</th>
-                              <th>Unplaced</th>
-                              <th>Utilization</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {materialResults.map((result) => (
-                              <tr
-                                className={
-                                  result.key === activeMaterialResult?.key
-                                    ? 'table-row--active'
-                                    : undefined
-                                }
-                                key={result.key}
-                                onClick={() => setActiveMaterialKey(result.key)}
-                              >
-                                <td>{result.materialName}</td>
-                                <td>{result.response.summary.totalSheets}</td>
-                                <td>{result.response.summary.totalPlaced}</td>
-                                <td>{result.response.summary.totalUnplaced}</td>
-                                <td>{result.response.summary.overallUtilization.toFixed(1)}%</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="empty-state">
-                      <strong>
-                        {hasEmptyResult ? 'No sheet groups were produced' : 'No results yet'}
-                      </strong>
-                      <span>
-                        {hasEmptyResult
-                          ? 'This nesting attempt completed without any generated sheets. The unplaced section explains what blocked layout creation.'
-                          : 'Run nesting from the Import page to populate sheets, placements, and export data.'}
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="results-tab-subsection">
-                  <p className="eyebrow">Material snapshot</p>
-                  <h3>
-                    Saved context for {activeMaterialResult?.materialName ?? 'the current result'}
-                  </h3>
-                  {displaySnapshot ? (
-                    <>
-                      <p className="muted">
-                        {snapshotStatus === 'saved'
-                          ? 'These settings already live inside the saved project file.'
-                          : 'These are the current live settings that will be written on the next save.'}
-                      </p>
-                      <dl className="definition-list">
-                        <div>
-                          <dt>Material</dt>
-                          <dd>{displaySnapshot.name}</dd>
-                        </div>
-                        <div>
-                          <dt>Sheet</dt>
-                          <dd>
-                            {displaySnapshot.sheetLength}" × {displaySnapshot.sheetWidth}"
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>Rotation</dt>
-                          <dd>{displaySnapshot.allowRotation ? 'Allowed' : 'Locked'}</dd>
-                        </div>
-                        <div>
-                          <dt>Spacing</dt>
-                          <dd>{displaySnapshot.defaultSpacing}"</dd>
-                        </div>
-                        <div>
-                          <dt>Edge margin</dt>
-                          <dd>{displaySnapshot.defaultEdgeMargin}"</dd>
-                        </div>
-                      </dl>
-                    </>
-                  ) : (
-                    <div className="empty-state">
-                      <strong>No material snapshot available</strong>
-                      <span>
-                        Save the project to pin the material settings that explain this layout.
-                      </span>
-                    </div>
-                  )}
-                </div>
+                          <td>
+                            <div className="results-sheet-row">
+                              <strong>{sheet.sheet.sheetId}</strong>
+                              <span>{sheet.materialName}</span>
+                              {hitCount > 0 ? <small>{hitCount} hit(s)</small> : null}
+                            </div>
+                          </td>
+                          <td>
+                            {formatDimension(sheet.sheet.sheetLength)}x
+                            {formatDimension(sheet.sheet.sheetWidth)}
+                          </td>
+                          <td>{sheet.sheet.utilizationPercent.toFixed(1)}%</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
-            ) : null}
+            ) : (
+              <div className="empty-state">
+                <strong>
+                  {hasOutput
+                    ? 'No sheets match this filter'
+                    : 'No sheet layouts available yet'}
+                </strong>
+                <span>
+                  {hasOutput
+                    ? 'Try a different material filter or widen the panel search.'
+                    : 'Run nesting from Import to populate the batch explorer.'}
+                </span>
+              </div>
+            )}
+          </div>
 
-            {activeWorkspaceTab === 'group-review' ? (
-              <div className="results-tab-panel" role="tabpanel">
-                <div className="results-tab-subsection">
-                  <p className="eyebrow">Review by group</p>
-                  <h3>
-                    {activeMaterialResult
-                      ? `${activeMaterialResult.materialName} grouped panel review`
-                      : 'Grouped panel review'}
-                  </h3>
-
-                  {materialResults.length > 0 ? (
-                    <label className="field">
-                      <span>Active material</span>
-                      <select
-                        className="results-material-selector"
-                        onChange={(event) => setActiveMaterialKey(event.target.value)}
-                        value={activeMaterialResult?.key ?? ''}
-                      >
-                        {materialResults.map((result) => (
-                          <option key={result.key} value={result.key}>
-                            {result.materialName}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  ) : null}
-
-                  {activeMaterialGroupSummaries.length > 0 ? (
-                    <>
-                      <label className="field">
-                        <span>Active group</span>
-                        <select
-                          className="results-sheet-selector"
-                          onChange={(event) => setActiveGroupKey(event.target.value)}
-                          value={activeGroupSummary?.key ?? ''}
-                        >
-                          {activeMaterialGroupSummaries.map((group) => (
-                            <option key={group.key || '__ungrouped__'} value={group.key}>
-                              {group.label} — {group.placements.length} panel(s) · {group.sheetIds.length} sheet(s)
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-
-                      <div className="selection-summary">
-                        <span>Viewer focus</span>
-                        <strong>{activeGroupSummary?.label ?? 'Choose a group'}</strong>
-                        <small>
-                          {activeGroupSummary?.placements.length ?? 0} placed panel(s) across{' '}
-                          {activeGroupSummary?.sheetIds.length ?? 0} sheet(s). The viewer keeps this
-                          group at full color and subdues every other group.
-                        </small>
-                      </div>
-
-                      <div className="table-shell">
-                        <table>
-                          <thead>
-                            <tr>
-                              <th>Group</th>
-                              <th>Placed panels</th>
-                              <th>Sheets touched</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {activeMaterialGroupSummaries.map((group) => (
-                              <tr
-                                className={
-                                  group.key === activeGroupSummary?.key
-                                    ? 'table-row--active'
-                                    : undefined
-                                }
-                                key={group.key || '__ungrouped__'}
-                                onClick={() => setActiveGroupKey(group.key)}
-                              >
-                                <td>{group.label}</td>
-                                <td>{group.placements.length}</td>
-                                <td>{group.sheetIds.length}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="empty-state">
-                      <strong>No grouped panels in the active material result</strong>
-                      <span>
-                        {materialResults.length > 0
-                          ? 'Another material result carries grouped panels. Switch materials to review them here.'
-                          : 'Run nesting on the current grouped import to unlock group-focused review.'}
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                {activeGroupSummary ? (
-                  <div className="results-tab-subsection">
-                    <p className="eyebrow">Sheets touched by {activeGroupSummary.label}</p>
-                    <h3>Keep the current material context while stepping sheet by sheet</h3>
-                    <p className="section-note">
-                      Mixed-group sheets stay readable: {activeGroupSummary.label} renders normally,
-                      while every other group fades back until you hover it for detail.
-                    </p>
-
-                    {activeGroupSheetRows.length > 0 ? (
-                      <div className="table-shell">
-                        <table>
-                          <thead>
-                            <tr>
-                              <th>Sheet</th>
-                              <th>{activeGroupSummary.label}</th>
-                              <th>Other groups</th>
-                              <th>Utilization</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {activeGroupSheetRows.map((row) => (
-                              <tr
-                                className={
-                                  row.sheet.sheetId === activeSheet?.sheetId
-                                    ? 'table-row--active'
-                                    : undefined
-                                }
-                                key={row.sheet.sheetId}
-                                onClick={() => setActiveSheetId(row.sheet.sheetId)}
-                              >
-                                <td>#{row.sheet.sheetNumber}</td>
-                                <td>{row.selectedGroupCount}</td>
-                                <td>{row.otherGroupCount}</td>
-                                <td>{row.sheet.utilizationPercent.toFixed(1)}%</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    ) : (
-                      <div className="empty-state">
-                        <strong>No placed sheets for this group yet</strong>
-                        <span>
-                          Unplaced items still appear on the Unplaced tab when a grouped run cannot
-                          produce layout for this selection.
-                        </span>
-                      </div>
-                    )}
-                  </div>
+          <div className="results-sidebar__drawer">
+            <div className="results-drawer-tabs" role="tablist" aria-label="Results details">
+              <button
+                aria-expanded={drawerTab === 'unplaced'}
+                aria-selected={drawerTab === 'unplaced'}
+                className={
+                  drawerTab === 'unplaced'
+                    ? 'results-drawer-tab results-drawer-tab--active'
+                    : 'results-drawer-tab'
+                }
+                onClick={() =>
+                  setDrawerTab((current) =>
+                    current === 'unplaced' ? null : 'unplaced',
+                  )
+                }
+                role="tab"
+                type="button"
+              >
+                Unplaced
+                {unplacedRows.length > 0 ? (
+                  <span className="results-drawer-tab__badge">{unplacedRows.length}</span>
                 ) : null}
-              </div>
-            ) : null}
+              </button>
+              <button
+                aria-expanded={drawerTab === 'stiffeners'}
+                aria-selected={drawerTab === 'stiffeners'}
+                className={
+                  drawerTab === 'stiffeners'
+                    ? 'results-drawer-tab results-drawer-tab--active'
+                    : 'results-drawer-tab'
+                }
+                onClick={() =>
+                  setDrawerTab((current) =>
+                    current === 'stiffeners' ? null : 'stiffeners',
+                  )
+                }
+                role="tab"
+                type="button"
+              >
+                Stiffeners
+              </button>
+            </div>
 
-            {activeWorkspaceTab === 'sheet-detail' ? (
-              <div className="results-tab-panel" role="tabpanel">
-                <p className="eyebrow">Sheet detail</p>
-                <h3>
-                  {activeMaterialResult
-                    ? `${activeMaterialResult.materialName} sheet-by-sheet`
-                    : 'Sheet-by-sheet'}
-                </h3>
-
-                {activeMaterialResult && activeMaterialResult.response.sheets.length > 0 ? (
-                  <>
-                    <label className="field">
-                      <span>Active sheet</span>
-                      <select
-                        className="results-sheet-selector"
-                        onChange={(event) => setActiveSheetId(event.target.value)}
-                        value={activeSheet?.sheetId ?? ''}
-                      >
-                        {activeMaterialResult.response.sheets.map((sheet) => (
-                          <option key={sheet.sheetId} value={sheet.sheetId}>
-                            Sheet #{sheet.sheetNumber} — {sheet.utilizationPercent.toFixed(1)}% utilized
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <div className="table-shell">
-                      <table>
+            {drawerTab ? (
+              <div className="results-drawer-panel">
+                {drawerTab === 'unplaced' ? (
+                  unplacedRows.length > 0 ? (
+                    <div className="results-drawer-table-shell">
+                      <table className="results-drawer-table">
                         <thead>
                           <tr>
-                            <th>Sheet</th>
-                            <th>Size</th>
-                            <th>Utilization</th>
-                            <th>Placements</th>
+                            <th>Part</th>
+                            <th>Material</th>
+                            <th>Reason</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {activeMaterialResult.response.sheets.map((sheet) => (
+                          {unplacedRows.map((item) => (
                             <tr
-                              className={
-                                sheet.sheetId === activeSheet?.sheetId
-                                  ? 'table-row--active'
-                                  : undefined
-                              }
-                              key={sheet.sheetId}
-                              onClick={() => setActiveSheetId(sheet.sheetId)}
+                              key={`${item.materialKey}:${item.partId}:${item.reasonCode}:${item.reasonDescription}`}
                             >
-                              <td>#{sheet.sheetNumber}</td>
+                              <td>{itemLabel(item.partId)}</td>
+                              <td>{item.materialName}</td>
                               <td>
-                                {sheet.sheetLength}" × {sheet.sheetWidth}"
-                              </td>
-                              <td>{sheet.utilizationPercent.toFixed(1)}%</td>
-                              <td>
-                                {
-                                  activeMaterialResult.response.placements.filter(
-                                    (placement) => placement.sheetId === sheet.sheetId,
-                                  ).length
-                                }
+                                <strong>{item.reasonCode}</strong>
+                                <br />
+                                <span>{item.reasonDescription}</span>
                               </td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
                     </div>
-                  </>
+                  ) : (
+                    <div className="empty-state">
+                      <strong>No unplaced panels in scope</strong>
+                      <span>Any layout failures for the current filter will appear here.</span>
+                    </div>
+                  )
                 ) : (
-                  <div className="empty-state">
-                    <strong>
-                      {hasEmptyResult
-                        ? 'No sheets were produced for this run'
-                        : 'No sheets for this material'}
-                    </strong>
-                    <span>
-                      {hasEmptyResult
-                        ? 'The viewer stays in an intentional empty state until a run generates at least one sheet.'
-                        : 'Partial runs still keep unplaced items visible in the workspace.'}
-                    </span>
-                  </div>
-                )}
-              </div>
-            ) : null}
+                  <div className="results-stiffeners">
+                    <div className="results-sidebar__section-head">
+                      <span>Stiffener report</span>
+                      <small>{stiffenerTakeoffEnabled ? 'Enabled' : 'Disabled'}</small>
+                    </div>
 
-            {activeWorkspaceTab === 'placement-inspection' ? (
-              <div className="results-tab-panel" role="tabpanel">
-                <p className="eyebrow">Placement inspection</p>
-                <h3>Coordinates and click-to-inspect detail</h3>
-                {selectedPlacement ? (
-                  <div className="selection-summary">
-                    <span>Selected part</span>
-                    <strong>{selectedPlacement.partId}</strong>
-                    <small>
-                      {selectedPlacement.width}" × {selectedPlacement.height}" at (
-                      {selectedPlacement.x}", {selectedPlacement.y}") ·{' '}
-                      {selectedPlacement.rotated90 ? 'Rotated 90°' : 'Not rotated'} ·{' '}
-                      {selectedPlacement.displayGroup}
-                    </small>
-                  </div>
-                ) : (
-                  <p className="section-note">
-                    {hasEmptyResult
-                      ? 'No placements were created in this run yet.'
-                      : 'Click a placement in the viewer or table to pin its dimensions and origin here.'}
-                  </p>
-                )}
+                    <p className="section-note">{stiffenerMessage}</p>
+                    <p className="section-note">{stiffenerNote}</p>
 
-                {activeSheetPlacements.length > 0 ? (
-                  <div className="table-shell">
-                    <table>
-                      <thead>
-                          <tr>
-                            <th>Part</th>
-                            <th>Group</th>
-                            <th>Origin</th>
-                            <th>Size</th>
-                            <th>Rotated</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {activeSheetPlacements.map((placement) => (
-                          <tr
-                            className={
-                              placement.placementId === selectedPlacementId
-                                ? 'table-row--active'
-                                : undefined
-                            }
-                            key={placement.placementId}
-                            onClick={() =>
-                              setSelectedPlacementId((current) =>
-                                current === placement.placementId
-                                  ? undefined
-                                  : placement.placementId,
-                              )
-                            }
-                          >
-                            <td>{placement.partId}</td>
-                            <td>{placement.displayGroup}</td>
-                            <td>
-                              ({placement.x}", {placement.y}")
-                            </td>
-                            <td>
-                              {placement.width}" × {placement.height}"
-                            </td>
-                            <td>{placement.rotated90 ? 'Yes' : 'No'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <div className="empty-state">
-                    <strong>No placements on the selected sheet</strong>
-                    <span>
-                      {activeSheet
-                        ? 'Successful layouts populate the table and the viewer together.'
-                        : 'Generate a sheet layout to inspect placed parts here.'}
-                    </span>
-                  </div>
-                )}
-              </div>
-            ) : null}
+                    <div className="results-stiffeners__content">
+                      {stiffenerSummary && stiffenerTakeoffReport?.hasTakeoff ? (
+                        <>
+                        <div className="stats-grid results-stiffener-stats">
+                          <article className="stat-card">
+                            <span>Eligible</span>
+                            <strong>{stiffenerSummary.eligiblePanelCount}</strong>
+                          </article>
+                          <article className="stat-card">
+                            <span>Stiffeners</span>
+                            <strong>{stiffenerSummary.totalStiffenerCount}</strong>
+                          </article>
+                          <article className="stat-card">
+                            <span>Linear feet</span>
+                            <strong>{stiffenerSummary.totalLinearFeet.toFixed(1)}</strong>
+                          </article>
+                          <article className="stat-card">
+                            <span>Stock count</span>
+                            <strong>{stiffenerSummary.requiredStockCount}</strong>
+                          </article>
+                        </div>
 
-            {activeWorkspaceTab === 'unplaced' ? (
-              <div className="results-tab-panel" role="tabpanel">
-                <p className="eyebrow">Unplaced</p>
-                <h3>Failure reasons stay visible</h3>
-                {activeMaterialResult && activeMaterialResult.response.unplacedItems.length > 0 ? (
-                  <ul className="feature-list">
-                    {activeMaterialResult.response.unplacedItems.map((item) => (
-                      <li key={`${item.partId}-${item.reasonCode}-${item.reasonDescription}`}>
-                        <strong>
-                          {itemLabel(
-                            item.partId ||
-                              (item.reasonCode === 'empty-run' ? 'Nesting run' : 'Run'),
-                          )}
-                        </strong>{' '}
-                        ({item.reasonCode}): {item.reasonDescription}
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div className="empty-state">
-                    <strong>No unplaced items for this material</strong>
-                    <span>
-                      Oversized parts, invalid input, and space failures surface here when they occur.
-                    </span>
+                        <div className="results-stiffeners__table-shell">
+                          <table className="results-drawer-table">
+                            <thead>
+                              <tr>
+                                <th>Length</th>
+                                <th>Pieces</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {stiffenerTakeoffReport.overallLengths.map((length) => (
+                                <tr key={length.label}>
+                                  <td>{length.label}</td>
+                                  <td>{length.pieceCount}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        </>
+                      ) : (
+                        <div className="empty-state">
+                          <strong>No stiffener takeoff loaded</strong>
+                          <span>
+                            {stiffenerTakeoffEnabled
+                              ? 'When the current ready rows require stiffeners, their rollup will appear here.'
+                              : 'Enable stiffener takeoff on Project Setup to use this report.'}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="form-actions">
+                      <SplitButton
+                        busy={stiffenerBusy}
+                        busyLabel="Working…"
+                        disabled={!canExportStiffenerReport || stiffenerBusy}
+                        label="Export stiffener PDF"
+                        menuOpen={openMenu === 'stiffener'}
+                        onOpenOverrides={() => {
+                          setOpenMenu(null);
+                          setStiffenerDialogOpen(true);
+                        }}
+                        onPrimaryAction={() => void onExportStiffenerReport()}
+                        onToggleMenu={() =>
+                          setOpenMenu((current) =>
+                            current === 'stiffener' ? null : 'stiffener',
+                          )
+                        }
+                      />
+                    </div>
                   </div>
                 )}
               </div>
             ) : null}
           </div>
+        </aside>
+
+        <section className="results-stage">
+          <div className="results-stage__toolbar">
+            <div className="results-stage__identity">
+              <strong>{sheetHeaderLabel}</strong>
+              <span>{sheetSummaryLabel}</span>
+              <small>
+                Kerf {formatDimension(kerfWidth)} in
+                {projectDirty ? ' · Unsaved changes' : ' · Saved result context'}
+              </small>
+            </div>
+
+            <div className="results-stage__actions">
+              <SplitButton
+                busy={reportBusy}
+                busyLabel="Exporting…"
+                disabled={!canExportReport || reportBusy || !hasOutput}
+                label="Export PDF"
+                menuOpen={openMenu === 'report'}
+                onOpenOverrides={() => {
+                  setOpenMenu(null);
+                  setReportDialogOpen(true);
+                }}
+                onPrimaryAction={() => void onExportReport()}
+                onToggleMenu={() =>
+                  setOpenMenu((current) =>
+                    current === 'report' ? null : 'report',
+                  )
+                }
+                tone="primary"
+              />
+              <button
+                className="secondary-button module-action-button"
+                disabled={!canExportExcelReport || reportBusy || !hasOutput}
+                onClick={() => void onExportExcelReport()}
+                type="button"
+              >
+                {reportBusy ? 'Exporting…' : 'Export Excel'}
+              </button>
+            </div>
+          </div>
+
+          {activeSheetView ? (
+            <div className="results-viewer-frame">
+              <Suspense
+                fallback={
+                  <div className="empty-state">
+                    <strong>Loading viewer…</strong>
+                    <span>The active sheet is being prepared for inspection.</span>
+                  </div>
+                }
+              >
+                <SheetViewer
+                  materialName={activeSheetView.materialName}
+                  onSelectPlacement={setSelectedPlacementId}
+                  placements={activeMaterialPlacements}
+                  selectedPlacementId={selectedPlacementId}
+                  sheet={activeSheetView.sheet}
+                  showChrome={false}
+                />
+              </Suspense>
+
+              <div className="results-viewer-metrics">
+                <article className="results-viewer-metric">
+                  <span>Sheet utilization</span>
+                  <strong>{activeSheetView.sheet.utilizationPercent.toFixed(1)}%</strong>
+                </article>
+                <article className="results-viewer-metric">
+                  <span>Scrap area</span>
+                  <strong>{formatArea(scrapArea)} sq in</strong>
+                </article>
+                <article className="results-viewer-metric">
+                  <span>Placements</span>
+                  <strong>{activeSheetPlacements.length}</strong>
+                </article>
+                {sheetSearchMatches > 0 ? (
+                  <article className="results-viewer-metric">
+                    <span>Search hits</span>
+                    <strong>{sheetSearchMatches}</strong>
+                  </article>
+                ) : null}
+              </div>
+            </div>
+          ) : (
+            <div className="module-panel">
+              <div className="empty-state">
+                <strong>No sheet selected</strong>
+                <span>Choose a sheet from the explorer to inspect the layout here.</span>
+              </div>
+            </div>
+          )}
+
+          <section className="results-inspection">
+            <div className="results-inspection__header">
+              <div className="results-sidebar__section-head">
+                <span>Placement inspection</span>
+                <small>{activeSheetPlacements.length} entities detected</small>
+              </div>
+              {selectedPlacement ? (
+                <StatusPill label={`${selectedPlacement.partId} selected`} tone="ok" />
+              ) : null}
+            </div>
+
+            {activeSheetPlacements.length > 0 ? (
+              <div className="results-inspection__table-shell">
+                <table className="results-inspection__table">
+                  <thead>
+                    <tr>
+                      <th>Part ID</th>
+                      <th>Pos (x, y)</th>
+                      <th>Size</th>
+                      <th>Rotation</th>
+                      <th>Group</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeSheetPlacements.map((placement) => (
+                      <tr
+                        className={
+                          placement.placementId === selectedPlacementId
+                            ? 'table-row--active'
+                            : undefined
+                        }
+                        key={placement.placementId}
+                        onClick={() =>
+                          setSelectedPlacementId((current) =>
+                            current === placement.placementId
+                              ? undefined
+                              : placement.placementId,
+                          )
+                        }
+                      >
+                        <td>
+                          <div className="results-placement-cell">
+                            <i />
+                            <strong>{placement.partId}</strong>
+                          </div>
+                        </td>
+                        <td>
+                          {placement.x.toFixed(2)}, {placement.y.toFixed(2)}
+                        </td>
+                        <td>
+                          {formatDimension(placement.width)} x {formatDimension(placement.height)}
+                        </td>
+                        <td>{placement.rotated90 ? '90.00°' : '0.00°'}</td>
+                        <td>{placement.displayGroup}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="empty-state">
+                <strong>No placements on the active sheet</strong>
+                <span>
+                  Successful layouts will populate the viewer and inspection table together.
+                </span>
+              </div>
+            )}
+          </section>
         </section>
-
-        <div
-          aria-label="Resize results workspace"
-          aria-orientation="vertical"
-          aria-valuemin={minWorkspaceWidth}
-          aria-valuenow={Math.round(workspaceWidth)}
-          className="results-splitter"
-          onPointerDown={(event) => {
-            if (!event.isPrimary || event.button !== 0) {
-              return;
-            }
-            event.preventDefault();
-            setIsResizingWorkspace(true);
-          }}
-          role="separator"
-          tabIndex={-1}
-          title="Drag to resize the workspace and viewer columns"
-        />
-
-        <div
-          aria-label="Current sheet viewer"
-          className="results-viewer-column"
-          data-active-sheet-id={activeSheet?.sheetId}
-        >
-          {viewerPanel}
-        </div>
       </div>
+
+      {reportDialogOpen ? (
+        <div
+          className="results-dialog-backdrop"
+          onClick={() => setReportDialogOpen(false)}
+          role="presentation"
+        >
+          <div
+            aria-modal="true"
+            className="results-dialog"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <div className="results-dialog__header">
+              <div>
+                <p className="eyebrow">Report Options</p>
+                <h3>Define report overrides</h3>
+              </div>
+              {!canSyncReportSettings ? (
+                <StatusPill label="Local only" tone="warn" />
+              ) : null}
+            </div>
+
+            <p className="section-note">{reportMessage}</p>
+            <div className="form-grid form-grid--two-column">
+              <LogoField
+                disabled={reportBusy}
+                onChoose={async () => {
+                  const nextPath = await onPickCompanyLogo();
+                  if (nextPath !== undefined) {
+                    setReportDraft((current) => ({
+                      ...current,
+                      companyLogoPath: nextPath,
+                    }));
+                  }
+                }}
+                onClear={() =>
+                  setReportDraft((current) => ({
+                    ...current,
+                    companyLogoPath: '',
+                  }))
+                }
+                value={reportDraft.companyLogoPath}
+              />
+              <label className="field">
+                <span>Company name</span>
+                <input
+                  onChange={(event) =>
+                    setReportDraft((current) => ({
+                      ...current,
+                      companyName: event.target.value,
+                    }))
+                  }
+                  type="text"
+                  value={reportDraft.companyName}
+                />
+              </label>
+              <label className="field">
+                <span>Report title</span>
+                <input
+                  onChange={(event) =>
+                    setReportDraft((current) => ({
+                      ...current,
+                      reportTitle: event.target.value,
+                    }))
+                  }
+                  type="text"
+                  value={reportDraft.reportTitle}
+                />
+              </label>
+              <label className="field">
+                <span>Project / job name</span>
+                <input
+                  onChange={(event) =>
+                    setReportDraft((current) => ({
+                      ...current,
+                      projectJobName: event.target.value,
+                    }))
+                  }
+                  type="text"
+                  value={reportDraft.projectJobName}
+                />
+              </label>
+              <label className="field">
+                <span>Project / job number</span>
+                <input
+                  onChange={(event) =>
+                    setReportDraft((current) => ({
+                      ...current,
+                      projectJobNumber: event.target.value,
+                    }))
+                  }
+                  type="text"
+                  value={reportDraft.projectJobNumber}
+                />
+              </label>
+              <label className="field">
+                <span>Release</span>
+                <input
+                  onChange={(event) =>
+                    setReportDraft((current) => ({
+                      ...current,
+                      releaseId: event.target.value,
+                    }))
+                  }
+                  type="text"
+                  value={reportDraft.releaseId}
+                />
+              </label>
+              <label className="field">
+                <span>Status</span>
+                <input
+                  onChange={(event) =>
+                    setReportDraft((current) => ({
+                      ...current,
+                      status: event.target.value,
+                    }))
+                  }
+                  type="text"
+                  value={reportDraft.status}
+                />
+              </label>
+              <label className="field">
+                <span>Report date</span>
+                <input
+                  onChange={(event) =>
+                    setReportDraft((current) => ({
+                      ...current,
+                      reportDate: event.target.value,
+                    }))
+                  }
+                  type="date"
+                  value={reportDraft.reportDate}
+                />
+              </label>
+              <label className="field field--wide">
+                <span>Notes</span>
+                <textarea
+                  onChange={(event) =>
+                    setReportDraft((current) => ({
+                      ...current,
+                      notes: event.target.value,
+                    }))
+                  }
+                  value={reportDraft.notes}
+                />
+              </label>
+            </div>
+
+            <div className="form-actions">
+              <button
+                className="secondary-button"
+                onClick={() => setReportDialogOpen(false)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="primary-button"
+                onClick={() => void exportReportFromDialog()}
+                type="button"
+              >
+                Export PDF
+              </button>
+              <button
+                className="secondary-button"
+                onClick={() =>
+                  void onExportExcelReport({
+                    companyLogoPath: reportDraft.companyLogoPath,
+                    reportSettings: toReportSettings(reportDraft),
+                  }).then(() => setReportDialogOpen(false))
+                }
+                type="button"
+              >
+                Export Excel
+              </button>
+              <button
+                className="secondary-button"
+                onClick={applyReportDraft}
+                type="button"
+              >
+                Save changes
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {stiffenerDialogOpen ? (
+        <div
+          className="results-dialog-backdrop"
+          onClick={() => setStiffenerDialogOpen(false)}
+          role="presentation"
+        >
+          <div
+            aria-modal="true"
+            className="results-dialog"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <div className="results-dialog__header">
+              <div>
+                <p className="eyebrow">Stiffener Overrides</p>
+                <h3>Adjust export parameters</h3>
+              </div>
+            </div>
+
+            <p className="section-note">
+              Use temporary overrides for this export or save them back to the project.
+            </p>
+            <div className="form-grid form-grid--two-column">
+              <LogoField
+                disabled={stiffenerBusy}
+                onChoose={async () => {
+                  const nextPath = await onPickCompanyLogo();
+                  if (nextPath !== undefined) {
+                    setStiffenerDraft((current) => ({
+                      ...current,
+                      companyLogoPath: nextPath,
+                    }));
+                  }
+                }}
+                onClear={() =>
+                  setStiffenerDraft((current) => ({
+                    ...current,
+                    companyLogoPath: '',
+                  }))
+                }
+                value={stiffenerDraft.companyLogoPath}
+              />
+              <label className="field">
+                <span>Company name</span>
+                <input
+                  onChange={(event) =>
+                    setStiffenerDraft((current) => ({
+                      ...current,
+                      companyName: event.target.value,
+                    }))
+                  }
+                  type="text"
+                  value={stiffenerDraft.companyName}
+                />
+              </label>
+              <label className="field">
+                <span>Stiffener report title</span>
+                <input
+                  onChange={(event) =>
+                    setStiffenerDraft((current) => ({
+                      ...current,
+                      stiffenerReportTitle: event.target.value,
+                    }))
+                  }
+                  type="text"
+                  value={stiffenerDraft.stiffenerReportTitle}
+                />
+              </label>
+              <label className="field">
+                <span>Project / job name</span>
+                <input
+                  onChange={(event) =>
+                    setStiffenerDraft((current) => ({
+                      ...current,
+                      projectJobName: event.target.value,
+                    }))
+                  }
+                  type="text"
+                  value={stiffenerDraft.projectJobName}
+                />
+              </label>
+              <label className="field">
+                <span>Project / job number</span>
+                <input
+                  onChange={(event) =>
+                    setStiffenerDraft((current) => ({
+                      ...current,
+                      projectJobNumber: event.target.value,
+                    }))
+                  }
+                  type="text"
+                  value={stiffenerDraft.projectJobNumber}
+                />
+              </label>
+              <label className="field">
+                <span>Release</span>
+                <input
+                  onChange={(event) =>
+                    setStiffenerDraft((current) => ({
+                      ...current,
+                      stiffenerReleaseId: event.target.value,
+                    }))
+                  }
+                  type="text"
+                  value={stiffenerDraft.stiffenerReleaseId}
+                />
+              </label>
+              <label className="field">
+                <span>Status</span>
+                <input
+                  onChange={(event) =>
+                    setStiffenerDraft((current) => ({
+                      ...current,
+                      stiffenerStatus: event.target.value,
+                    }))
+                  }
+                  type="text"
+                  value={stiffenerDraft.stiffenerStatus}
+                />
+              </label>
+              <label className="field">
+                <span>Report date</span>
+                <input
+                  onChange={(event) =>
+                    setStiffenerDraft((current) => ({
+                      ...current,
+                      reportDate: event.target.value,
+                    }))
+                  }
+                  type="date"
+                  value={stiffenerDraft.reportDate}
+                />
+              </label>
+              <label className="field">
+                <span>P.O. #</span>
+                <input
+                  onChange={(event) =>
+                    setStiffenerDraft((current) => ({
+                      ...current,
+                      poNumber: event.target.value,
+                    }))
+                  }
+                  type="text"
+                  value={stiffenerDraft.poNumber}
+                />
+              </label>
+              <label className="field field--wide">
+                <span>Extrusion</span>
+                <input
+                  onChange={(event) =>
+                    setStiffenerDraft((current) => ({
+                      ...current,
+                      extrusion: event.target.value,
+                    }))
+                  }
+                  placeholder="e.g. 1 x 2 aluminum tube"
+                  type="text"
+                  value={stiffenerDraft.extrusion}
+                />
+              </label>
+              <label className="field">
+                <span>Color</span>
+                <input
+                  onChange={(event) =>
+                    setStiffenerDraft((current) => ({
+                      ...current,
+                      color: event.target.value,
+                    }))
+                  }
+                  type="text"
+                  value={stiffenerDraft.color}
+                />
+              </label>
+              <label className="field">
+                <span>Color #</span>
+                <input
+                  onChange={(event) =>
+                    setStiffenerDraft((current) => ({
+                      ...current,
+                      colorNumber: event.target.value,
+                    }))
+                  }
+                  type="text"
+                  value={stiffenerDraft.colorNumber}
+                />
+              </label>
+              <label className="field field--wide">
+                <span>Manufacturer</span>
+                <input
+                  onChange={(event) =>
+                    setStiffenerDraft((current) => ({
+                      ...current,
+                      manufacturer: event.target.value,
+                    }))
+                  }
+                  type="text"
+                  value={stiffenerDraft.manufacturer}
+                />
+              </label>
+              <label className="field field--wide">
+                <span>Notes</span>
+                <textarea
+                  onChange={(event) =>
+                    setStiffenerDraft((current) => ({
+                      ...current,
+                      notes: event.target.value,
+                    }))
+                  }
+                  value={stiffenerDraft.notes}
+                />
+              </label>
+            </div>
+
+            <div className="form-actions">
+              <button
+                className="secondary-button"
+                onClick={() => setStiffenerDialogOpen(false)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="primary-button"
+                onClick={() => void exportStiffenerFromDialog()}
+                type="button"
+              >
+                Export PDF
+              </button>
+              <button
+                className="secondary-button"
+                onClick={saveStiffenerDraft}
+                type="button"
+              >
+                Save changes
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

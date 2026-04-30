@@ -10,6 +10,10 @@ public sealed record ReportSettings
 
     public string? ProjectJobNumber { get; init; }
 
+    public string? ReleaseId { get; init; }
+
+    public string? Status { get; init; }
+
     public DateTime? ReportDate { get; init; }
 
     public string? Notes { get; init; }

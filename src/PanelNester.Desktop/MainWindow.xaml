@@ -6,12 +6,12 @@
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         mc:Ignorable="d"
-        Title="Untitled Project — PanelNester"
+        Title="Untitled Project — OptiFab"
         Icon="Assets\PanelNester.ico"
         Height="900"
         Width="1440"
-        MinHeight="640"
-        MinWidth="960"
+        MinHeight="520"
+        MinWidth="720"
         Background="#1E1E1E"
         BorderBrush="#2D2D30"
         BorderThickness="1"
@@ -118,7 +118,7 @@
                                VerticalAlignment="Center"
                                Foreground="{StaticResource ShellPrimaryTextBrush}"
                                FontSize="12"
-                               Text="Untitled Project — PanelNester"
+                               Text="Untitled Project — OptiFab"
                                TextTrimming="CharacterEllipsis" />
                 </Grid>
 

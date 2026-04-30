@@ -1,8 +1,10 @@
+using System.Diagnostics;
 using System.IO;
 using PanelNester.Desktop;
 using PanelNester.Domain.Contracts;
 using PanelNester.Domain.Models;
 using PanelNester.Services.Import;
+using PanelNester.Services.Reporting;
 
 namespace PanelNester.Desktop.Bridge;
 
@@ -15,7 +17,10 @@ public static class DesktopBridgeRegistration
         IImportService importService,
         INestingService nestingService,
         Func<WebUiContentLocation> contentLocationAccessor,
-        IMaterialLibraryLocationService? materialLibraryLocationService = null) =>
+        DesktopAppSettingsStore? desktopAppSettingsStore = null,
+        IMaterialLibraryLocationService? materialLibraryLocationService = null,
+        Action<string>? exportedPdfOpener = null,
+        IExcelReportExporter? excelReportExporter = null) =>
         CreateDefault(
             fileDialogService,
             materialService,
@@ -24,7 +29,10 @@ public static class DesktopBridgeRegistration
             new NoOpPartEditorService(),
             nestingService,
             contentLocationAccessor,
-            materialLibraryLocationService);
+            desktopAppSettingsStore,
+            materialLibraryLocationService,
+            exportedPdfOpener,
+            excelReportExporter);
 
     public static BridgeMessageDispatcher CreateDefault(
         IFileDialogService fileDialogService,
@@ -33,8 +41,14 @@ public static class DesktopBridgeRegistration
         IImportService importService,
         IPartEditorService partEditorService,
         INestingService nestingService,
+        IBatchNestingService? batchNestingService,
+        IReportDataService? reportDataService,
+        IPdfReportExporter? pdfReportExporter,
+        IExcelReportExporter? excelReportExporter,
         Func<WebUiContentLocation> contentLocationAccessor,
-        IMaterialLibraryLocationService? materialLibraryLocationService = null) =>
+        DesktopAppSettingsStore? desktopAppSettingsStore = null,
+        IMaterialLibraryLocationService? materialLibraryLocationService = null,
+        Action<string>? exportedPdfOpener = null) =>
         CreateDefault(
             fileDialogService,
             materialService,
@@ -42,11 +56,16 @@ public static class DesktopBridgeRegistration
             importService,
             partEditorService,
             nestingService,
-            batchNestingService: null,
-            reportDataService: null,
-            pdfReportExporter: null,
+            batchNestingService,
+            reportDataService,
+            pdfReportExporter,
+            excelReportExporter,
+            stiffenerTakeoffService: null,
+            stiffenerPdfReportExporter: null,
             contentLocationAccessor,
-            materialLibraryLocationService);
+            desktopAppSettingsStore,
+            materialLibraryLocationService,
+            exportedPdfOpener);
 
     public static BridgeMessageDispatcher CreateDefault(
         IFileDialogService fileDialogService,
@@ -59,7 +78,72 @@ public static class DesktopBridgeRegistration
         IReportDataService? reportDataService,
         IPdfReportExporter? pdfReportExporter,
         Func<WebUiContentLocation> contentLocationAccessor,
-        IMaterialLibraryLocationService? materialLibraryLocationService = null)
+        DesktopAppSettingsStore? desktopAppSettingsStore = null,
+        IMaterialLibraryLocationService? materialLibraryLocationService = null,
+        Action<string>? exportedPdfOpener = null) =>
+        CreateDefault(
+            fileDialogService,
+            materialService,
+            projectService,
+            importService,
+            partEditorService,
+            nestingService,
+            batchNestingService,
+            reportDataService,
+            pdfReportExporter,
+            excelReportExporter: null,
+            contentLocationAccessor,
+            desktopAppSettingsStore,
+            materialLibraryLocationService,
+            exportedPdfOpener);
+
+    public static BridgeMessageDispatcher CreateDefault(
+        IFileDialogService fileDialogService,
+        IMaterialService materialService,
+        IProjectService projectService,
+        IImportService importService,
+        IPartEditorService partEditorService,
+        INestingService nestingService,
+        Func<WebUiContentLocation> contentLocationAccessor,
+        DesktopAppSettingsStore? desktopAppSettingsStore = null,
+        IMaterialLibraryLocationService? materialLibraryLocationService = null,
+        Action<string>? exportedPdfOpener = null,
+        IExcelReportExporter? excelReportExporter = null) =>
+        CreateDefault(
+            fileDialogService,
+            materialService,
+            projectService,
+            importService,
+            partEditorService,
+            nestingService,
+            batchNestingService: null,
+            reportDataService: null,
+            pdfReportExporter: null,
+            excelReportExporter,
+            stiffenerTakeoffService: null,
+            stiffenerPdfReportExporter: null,
+            contentLocationAccessor,
+            desktopAppSettingsStore,
+            materialLibraryLocationService,
+            exportedPdfOpener);
+
+    public static BridgeMessageDispatcher CreateDefault(
+        IFileDialogService fileDialogService,
+        IMaterialService materialService,
+        IProjectService projectService,
+        IImportService importService,
+        IPartEditorService partEditorService,
+        INestingService nestingService,
+        IBatchNestingService? batchNestingService,
+        IReportDataService? reportDataService,
+        IPdfReportExporter? pdfReportExporter,
+        IExcelReportExporter? excelReportExporter,
+        IStiffenerTakeoffService? stiffenerTakeoffService,
+        IStiffenerPdfReportExporter? stiffenerPdfReportExporter,
+        Func<WebUiContentLocation> contentLocationAccessor,
+        DesktopAppSettingsStore? desktopAppSettingsStore = null,
+        IMaterialLibraryLocationService? materialLibraryLocationService = null,
+        Action<string>? exportedPdfOpener = null)
     {
         ArgumentNullException.ThrowIfNull(fileDialogService);
         ArgumentNullException.ThrowIfNull(materialService);
@@ -78,7 +162,7 @@ public static class DesktopBridgeRegistration
                 var contentLocation = contentLocationAccessor();
                 var response = new BridgeHandshakeResponse(
                     true,
-                    "PanelNester Desktop Host",
+                    "OptiFab Desktop Host",
                     GetHostVersion(),
                     "webview2",
                     GetCapabilities(request, dispatcher),
@@ -105,7 +189,7 @@ public static class DesktopBridgeRegistration
                 {
                     var dialogResult = await fileDialogService
                         .OpenAsync(
-                            new OpenFileDialogRequest("Import PanelNester parts", ImportFileFilters),
+                            new OpenFileDialogRequest("Import OptiFab parts", ImportFileFilters),
                             cancellationToken)
                         .ConfigureAwait(false);
 
@@ -178,7 +262,7 @@ public static class DesktopBridgeRegistration
                 {
                     var dialogResult = await fileDialogService
                         .OpenAsync(
-                            new OpenFileDialogRequest("Open a PanelNester project", ProjectFileFilters),
+                            new OpenFileDialogRequest("Open an OptiFab project", ProjectFileFilters),
                             cancellationToken)
                         .ConfigureAwait(false);
 
@@ -213,7 +297,7 @@ public static class DesktopBridgeRegistration
                 {
                     var dialogResult = await fileDialogService
                         .SaveAsync(
-                            new SaveFileDialogRequest("Save PanelNester project", BuildProjectFileName(request.Project), ProjectFileFilters),
+                            new SaveFileDialogRequest("Save OptiFab project", BuildProjectFileName(request.Project), ProjectFileFilters),
                             cancellationToken)
                         .ConfigureAwait(false);
 
@@ -249,7 +333,7 @@ public static class DesktopBridgeRegistration
                     var dialogResult = await fileDialogService
                         .SaveAsync(
                             new SaveFileDialogRequest(
-                                "Save PanelNester project as",
+                                "Save OptiFab project as",
                                 string.IsNullOrWhiteSpace(request.SuggestedFileName)
                                     ? BuildProjectFileName(request.Project)
                                     : request.SuggestedFileName,
@@ -294,6 +378,84 @@ public static class DesktopBridgeRegistration
                         null,
                         $"Loaded metadata for '{metadata.ProjectName}'."));
             });
+
+        if (desktopAppSettingsStore is not null)
+        {
+            dispatcher.Register<GetDesktopAppSettingsRequest>(
+                BridgeMessageTypes.GetDesktopAppSettings,
+                (_, _) =>
+                {
+                    var settings = desktopAppSettingsStore.Load();
+                    return Task.FromResult<object?>(
+                        new GetDesktopAppSettingsResponse(
+                            true,
+                            ToPayload(settings),
+                            null,
+                            "Loaded desktop application settings."));
+                });
+
+            dispatcher.Register<UpdateDesktopAppSettingsRequest>(
+                BridgeMessageTypes.UpdateDesktopAppSettings,
+                (request, _) =>
+                {
+                    try
+                    {
+                        var currentSettings = desktopAppSettingsStore.Load();
+                        var nextSettings = NormalizeDesktopAppSettings(request.Settings, currentSettings);
+                        desktopAppSettingsStore.Save(nextSettings);
+
+                        return Task.FromResult<object?>(
+                            new UpdateDesktopAppSettingsResponse(
+                                true,
+                                ToPayload(nextSettings),
+                                null,
+                                "Updated desktop application settings."));
+                    }
+                    catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or NotSupportedException)
+                    {
+                        return Task.FromResult<object?>(
+                            UpdateDesktopAppSettingsResponse.Failure(
+                                "desktop-settings-update-failed",
+                                ex.Message));
+                    }
+                });
+        }
+
+        if (stiffenerTakeoffService is not null)
+        {
+            dispatcher.Register<GetStiffenerTakeoffRequest>(
+                BridgeMessageTypes.GetStiffenerTakeoff,
+                async (request, cancellationToken) =>
+                {
+                    try
+                    {
+                        var report = await stiffenerTakeoffService
+                            .BuildAsync(
+                                new StiffenerTakeoffRequest
+                                {
+                                    Project = request.Project
+                                },
+                                cancellationToken)
+                            .ConfigureAwait(false);
+
+                        return new GetStiffenerTakeoffResponse(
+                            true,
+                            report,
+                            null,
+                            report.HasTakeoff
+                                ? "Calculated stiffener takeoff."
+                                : "No stiffeners were required for the current ready rows and settings.");
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        return GetStiffenerTakeoffResponse.Failure("stiffener-takeoff-failed", ex.Message);
+                    }
+                });
+        }
 
         dispatcher.Register<UpdateProjectMetadataRequest>(
             BridgeMessageTypes.UpdateProjectMetadata,
@@ -631,7 +793,7 @@ public static class DesktopBridgeRegistration
                         var dialogResult = await fileDialogService
                             .SaveAsync(
                                 new SaveFileDialogRequest(
-                                    "Export PanelNester PDF report",
+                                    "Export OptiFab PDF report",
                                     string.IsNullOrWhiteSpace(request.SuggestedFileName)
                                         ? BuildPdfFileName(request.Project)
                                         : BuildPdfFileName(request.Project, request.SuggestedFileName),
@@ -659,16 +821,33 @@ public static class DesktopBridgeRegistration
                                 },
                                 cancellationToken)
                             .ConfigureAwait(false);
+                        var logoPath = ResolveCompanyLogoPath(request.CompanyLogoPath, desktopAppSettingsStore);
+                        reportData = reportData with
+                        {
+                            CompanyLogoPath = logoPath
+                        };
 
                         await pdfReportExporter
                             .ExportAsync(reportData, filePath, cancellationToken)
                             .ConfigureAwait(false);
 
+                        var message = $"Exported PDF report to '{Path.GetFileName(filePath)}'.";
+
+                        try
+                        {
+                            (exportedPdfOpener ?? OpenExportedPdf)(filePath);
+                            message = $"Exported and opened PDF report '{Path.GetFileName(filePath)}'.";
+                        }
+                        catch (Exception ex)
+                        {
+                            message = $"{message} Could not open it automatically: {ex.Message}";
+                        }
+
                         return new ExportPdfReportResponse(
                             true,
                             filePath,
                             null,
-                            $"Exported PDF report to '{Path.GetFileName(filePath)}'.");
+                            message);
                     }
                     catch (OperationCanceledException)
                     {
@@ -681,8 +860,413 @@ public static class DesktopBridgeRegistration
                 });
         }
 
+        if (batchNestingService is not null &&
+            reportDataService is not null &&
+            excelReportExporter is not null)
+        {
+            dispatcher.Register<ExportExcelReportRequest>(
+                BridgeMessageTypes.ExportExcelReport,
+                async (request, cancellationToken) =>
+                {
+                    var filePath = NormalizeFilePath(request.FilePath);
+                    if (string.IsNullOrWhiteSpace(filePath))
+                    {
+                        var dialogResult = await fileDialogService
+                            .SaveAsync(
+                                new SaveFileDialogRequest(
+                                    "Export OptiFab Excel report",
+                                    string.IsNullOrWhiteSpace(request.SuggestedFileName)
+                                        ? BuildExcelFileName(request.Project)
+                                        : BuildExcelFileName(request.Project, request.SuggestedFileName),
+                                    ExcelFileFilters,
+                                    ".xlsx"),
+                                cancellationToken)
+                            .ConfigureAwait(false);
+
+                        if (!dialogResult.Success || string.IsNullOrWhiteSpace(dialogResult.FilePath))
+                        {
+                            return ExportExcelReportResponse.Cancelled();
+                        }
+
+                        filePath = dialogResult.FilePath;
+                    }
+
+                    try
+                    {
+                        var reportData = await reportDataService
+                            .BuildReportDataAsync(
+                                new ReportDataRequest
+                                {
+                                    Project = request.Project,
+                                    BatchResult = request.BatchResult
+                                },
+                                cancellationToken)
+                            .ConfigureAwait(false);
+
+                        await excelReportExporter
+                            .ExportAsync(reportData, filePath, cancellationToken)
+                            .ConfigureAwait(false);
+
+                        var message = $"Exported Excel report to '{Path.GetFileName(filePath)}'.";
+
+                        try
+                        {
+                            OpenExportedFile(filePath);
+                            message = $"Exported and opened Excel report '{Path.GetFileName(filePath)}'.";
+                        }
+                        catch (Exception ex)
+                        {
+                            message = $"{message} Could not open it automatically: {ex.Message}";
+                        }
+
+                        return new ExportExcelReportResponse(
+                            true,
+                            filePath,
+                            null,
+                            message);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        return ExportExcelReportResponse.Failure(
+                            filePath,
+                            "report-excel-export-failed",
+                            ex.Message);
+                    }
+                });
+        }
+
+        if (stiffenerTakeoffService is not null &&
+            stiffenerPdfReportExporter is not null)
+        {
+            dispatcher.Register<ExportStiffenerPdfReportRequest>(
+                BridgeMessageTypes.ExportStiffenerPdfReport,
+                async (request, cancellationToken) =>
+                {
+                    var filePath = NormalizeFilePath(request.FilePath);
+                    if (string.IsNullOrWhiteSpace(filePath))
+                    {
+                        var dialogResult = await fileDialogService
+                            .SaveAsync(
+                                new SaveFileDialogRequest(
+                                    "Export OptiFab stiffener PDF report",
+                                    string.IsNullOrWhiteSpace(request.SuggestedFileName)
+                                        ? BuildStiffenerPdfFileName(request.Project)
+                                        : BuildStiffenerPdfFileName(request.Project, request.SuggestedFileName),
+                                    PdfFileFilters,
+                                    ".pdf"),
+                                cancellationToken)
+                            .ConfigureAwait(false);
+
+                        if (!dialogResult.Success || string.IsNullOrWhiteSpace(dialogResult.FilePath))
+                        {
+                            return ExportStiffenerPdfReportResponse.Cancelled();
+                        }
+
+                        filePath = dialogResult.FilePath;
+                    }
+
+                    try
+                    {
+                        var report = await stiffenerTakeoffService
+                            .BuildAsync(
+                                new StiffenerTakeoffRequest
+                                {
+                                    Project = request.Project
+                                },
+                                cancellationToken)
+                            .ConfigureAwait(false);
+                        var logoPath = ResolveCompanyLogoPath(request.CompanyLogoPath, desktopAppSettingsStore);
+                        report = report with
+                        {
+                            CompanyLogoPath = logoPath
+                        };
+
+                        if (!report.Settings.Enabled)
+                        {
+                            return ExportStiffenerPdfReportResponse.Failure(
+                                filePath,
+                                "stiffener-report-disabled",
+                                "Stiffener takeoff is disabled for this project.");
+                        }
+
+                        await stiffenerPdfReportExporter
+                            .ExportAsync(report, filePath, cancellationToken)
+                            .ConfigureAwait(false);
+
+                        var message = $"Exported stiffener PDF report to '{Path.GetFileName(filePath)}'.";
+
+                        try
+                        {
+                            (exportedPdfOpener ?? OpenExportedPdf)(filePath);
+                            message = $"Exported and opened stiffener PDF report '{Path.GetFileName(filePath)}'.";
+                        }
+                        catch (Exception ex)
+                        {
+                            message = $"{message} Could not open it automatically: {ex.Message}";
+                        }
+
+                        return new ExportStiffenerPdfReportResponse(
+                            true,
+                            filePath,
+                            null,
+                            message);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        return ExportStiffenerPdfReportResponse.Failure(
+                            filePath,
+                            "stiffener-report-export-failed",
+                            ex.Message);
+                    }
+                });
+        }
+
+        var extrusionTakeoffService = new ExtrusionTakeoffService();
+        var extrusionPdfReportExporter = new QuestPdfExtrusionReportExporter();
+        var extrusionExcelReportExporter = new ClosedXmlExtrusionReportExporter();
+
+        dispatcher.Register<GetExtrusionLayoutRequest>(
+            BridgeMessageTypes.GetExtrusionLayout,
+            async (request, cancellationToken) =>
+            {
+                try
+                {
+                    var layout = await extrusionTakeoffService
+                        .BuildLayoutAsync(
+                            new ExtrusionLayoutRequest
+                            {
+                                Project = request.Project
+                            },
+                            cancellationToken)
+                        .ConfigureAwait(false);
+
+                    return new GetExtrusionLayoutResponse(
+                        true,
+                        layout,
+                        null,
+                        "Prepared extrusion layout.");
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    return GetExtrusionLayoutResponse.Failure("extrusion-layout-failed", ex.Message);
+                }
+            });
+
+        dispatcher.Register<UpdateExtrusionLayoutRequest>(
+            BridgeMessageTypes.UpdateExtrusionLayout,
+            (request, cancellationToken) =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var project = request.Project with
+                {
+                    State = request.Project.State with
+                    {
+                        ExtrusionLayout = request.Layout ?? new ExtrusionLayoutState()
+                    }
+                };
+
+                return Task.FromResult<object?>(
+                    new UpdateExtrusionLayoutResponse(
+                        true,
+                        project,
+                        project.State.ExtrusionLayout,
+                        null,
+                        "Updated extrusion layout. Save the project to keep these changes."));
+            });
+
+        dispatcher.Register<GetExtrusionReportRequest>(
+            BridgeMessageTypes.GetExtrusionReport,
+            async (request, cancellationToken) =>
+            {
+                try
+                {
+                    var report = await extrusionTakeoffService
+                        .BuildReportAsync(
+                            new ExtrusionReportRequest
+                            {
+                                Project = request.Project
+                            },
+                            cancellationToken)
+                        .ConfigureAwait(false);
+
+                    return new GetExtrusionReportResponse(
+                        true,
+                        report,
+                        null,
+                        report.HasTakeoff
+                            ? "Calculated extrusion report."
+                            : "No extrusion segments have been assigned for this layout.");
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    return GetExtrusionReportResponse.Failure("extrusion-report-failed", ex.Message);
+                }
+            });
+
+        dispatcher.Register<ExportExtrusionPdfReportRequest>(
+            BridgeMessageTypes.ExportExtrusionPdfReport,
+            async (request, cancellationToken) =>
+            {
+                var filePath = NormalizeFilePath(request.FilePath);
+                if (string.IsNullOrWhiteSpace(filePath))
+                {
+                    var dialogResult = await fileDialogService
+                        .SaveAsync(
+                            new SaveFileDialogRequest(
+                                "Export OptiFab extrusion PDF report",
+                                string.IsNullOrWhiteSpace(request.SuggestedFileName)
+                                    ? BuildExtrusionPdfFileName(request.Project)
+                                    : BuildExtrusionPdfFileName(request.Project, request.SuggestedFileName),
+                                PdfFileFilters,
+                                ".pdf"),
+                            cancellationToken)
+                        .ConfigureAwait(false);
+
+                    if (!dialogResult.Success || string.IsNullOrWhiteSpace(dialogResult.FilePath))
+                    {
+                        return ExportExtrusionPdfReportResponse.Cancelled();
+                    }
+
+                    filePath = dialogResult.FilePath;
+                }
+
+                try
+                {
+                    var report = await extrusionTakeoffService
+                        .BuildReportAsync(new ExtrusionReportRequest { Project = request.Project }, cancellationToken)
+                        .ConfigureAwait(false);
+                    report = report with
+                    {
+                        CompanyLogoPath = ResolveCompanyLogoPath(request.CompanyLogoPath, desktopAppSettingsStore)
+                    };
+
+                    await extrusionPdfReportExporter.ExportAsync(report, filePath, cancellationToken).ConfigureAwait(false);
+                    var message = $"Exported extrusion PDF report to '{Path.GetFileName(filePath)}'.";
+
+                    try
+                    {
+                        (exportedPdfOpener ?? OpenExportedPdf)(filePath);
+                        message = $"Exported and opened extrusion PDF report '{Path.GetFileName(filePath)}'.";
+                    }
+                    catch (Exception ex)
+                    {
+                        message = $"{message} Could not open it automatically: {ex.Message}";
+                    }
+
+                    return new ExportExtrusionPdfReportResponse(true, filePath, null, message);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    return ExportExtrusionPdfReportResponse.Failure(filePath, "extrusion-report-export-failed", ex.Message);
+                }
+            });
+
+        dispatcher.Register<ExportExtrusionExcelReportRequest>(
+            BridgeMessageTypes.ExportExtrusionExcelReport,
+            async (request, cancellationToken) =>
+            {
+                var filePath = NormalizeFilePath(request.FilePath);
+                if (string.IsNullOrWhiteSpace(filePath))
+                {
+                    var dialogResult = await fileDialogService
+                        .SaveAsync(
+                            new SaveFileDialogRequest(
+                                "Export OptiFab extrusion Excel report",
+                                string.IsNullOrWhiteSpace(request.SuggestedFileName)
+                                    ? BuildExtrusionExcelFileName(request.Project)
+                                    : BuildExtrusionExcelFileName(request.Project, request.SuggestedFileName),
+                                ExcelFileFilters,
+                                ".xlsx"),
+                            cancellationToken)
+                        .ConfigureAwait(false);
+
+                    if (!dialogResult.Success || string.IsNullOrWhiteSpace(dialogResult.FilePath))
+                    {
+                        return ExportExtrusionExcelReportResponse.Cancelled();
+                    }
+
+                    filePath = dialogResult.FilePath;
+                }
+
+                try
+                {
+                    var report = await extrusionTakeoffService
+                        .BuildReportAsync(new ExtrusionReportRequest { Project = request.Project }, cancellationToken)
+                        .ConfigureAwait(false);
+                    await extrusionExcelReportExporter.ExportAsync(report, filePath, cancellationToken).ConfigureAwait(false);
+                    OpenExportedFile(filePath);
+                    return new ExportExtrusionExcelReportResponse(
+                        true,
+                        filePath,
+                        null,
+                        $"Exported extrusion Excel report to '{Path.GetFileName(filePath)}'.");
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    return ExportExtrusionExcelReportResponse.Failure(filePath, "extrusion-report-export-failed", ex.Message);
+                }
+            });
+
         return dispatcher;
     }
+
+    public static BridgeMessageDispatcher CreateDefault(
+        IFileDialogService fileDialogService,
+        IMaterialService materialService,
+        IProjectService projectService,
+        IImportService importService,
+        IPartEditorService partEditorService,
+        INestingService nestingService,
+        IBatchNestingService? batchNestingService,
+        IReportDataService? reportDataService,
+        IPdfReportExporter? pdfReportExporter,
+        IStiffenerTakeoffService? stiffenerTakeoffService,
+        IStiffenerPdfReportExporter? stiffenerPdfReportExporter,
+        Func<WebUiContentLocation> contentLocationAccessor,
+        DesktopAppSettingsStore? desktopAppSettingsStore = null,
+        IMaterialLibraryLocationService? materialLibraryLocationService = null,
+        Action<string>? exportedPdfOpener = null) =>
+        CreateDefault(
+            fileDialogService,
+            materialService,
+            projectService,
+            importService,
+            partEditorService,
+            nestingService,
+            batchNestingService,
+            reportDataService,
+            pdfReportExporter,
+            excelReportExporter: null,
+            stiffenerTakeoffService,
+            stiffenerPdfReportExporter,
+            contentLocationAccessor,
+            desktopAppSettingsStore,
+            materialLibraryLocationService,
+            exportedPdfOpener);
 
     private static bool IsMaterialInUse(DeleteMaterialRequest request, Material material) =>
         string.Equals(request.SelectedMaterialId, material.MaterialId, StringComparison.Ordinal) ||
@@ -691,7 +1275,7 @@ public static class DesktopBridgeRegistration
 
     private static readonly IReadOnlyList<FileDialogFilter> ProjectFileFilters =
     [
-        new FileDialogFilter("PanelNester project files", ["pnest"]),
+        new FileDialogFilter("OptiFab project files", ["pnest"]),
         new FileDialogFilter("All files", ["*.*"])
     ];
 
@@ -709,6 +1293,135 @@ public static class DesktopBridgeRegistration
         new FileDialogFilter("All files", ["*.*"])
     ];
 
+    private static readonly IReadOnlyList<FileDialogFilter> ExcelFileFilters =
+    [
+        new FileDialogFilter("Excel workbooks", ["xlsx"]),
+        new FileDialogFilter("All files", ["*.*"])
+    ];
+
+    private static DesktopAppSettingsPayload ToPayload(DesktopAppSettings settings) =>
+        new(settings.CompanyLogoPath, settings.CompanyName);
+
+    private static DesktopAppSettings NormalizeDesktopAppSettings(
+        DesktopAppSettingsPayload? settings,
+        DesktopAppSettings currentSettings)
+    {
+        ArgumentNullException.ThrowIfNull(currentSettings);
+
+        if (settings is null)
+        {
+            return currentSettings;
+        }
+
+        var companyLogoPath = ImportCompanyLogo(
+            settings.CompanyLogoPath,
+            currentSettings.CompanyLogoPath);
+        return new DesktopAppSettings
+        {
+            ActiveMaterialLibraryPath = currentSettings.ActiveMaterialLibraryPath,
+            CompanyLogoPath = companyLogoPath,
+            CompanyName = NormalizeOptionalValue(settings.CompanyName)
+        };
+    }
+
+    private static string? ImportCompanyLogo(string? requestedPath, string? currentLogoPath)
+    {
+        var normalizedRequested = NormalizeOptionalFilePath(requestedPath);
+        var normalizedCurrent = NormalizeOptionalFilePath(currentLogoPath);
+
+        if (string.IsNullOrWhiteSpace(normalizedRequested))
+        {
+            CleanupImportedCompanyLogos(exceptPath: null);
+            return null;
+        }
+
+        if (!File.Exists(normalizedRequested))
+        {
+            throw new FileNotFoundException("The selected company logo could not be found.", normalizedRequested);
+        }
+
+        if (!string.IsNullOrWhiteSpace(normalizedCurrent) &&
+            string.Equals(normalizedRequested, normalizedCurrent, StringComparison.OrdinalIgnoreCase))
+        {
+            return normalizedCurrent;
+        }
+
+        var extension = Path.GetExtension(normalizedRequested);
+        if (string.IsNullOrWhiteSpace(extension))
+        {
+            extension = ".png";
+        }
+
+        Directory.CreateDirectory(DesktopStoragePaths.CompanyLogoDirectory);
+        var destinationPath = Path.Combine(
+            DesktopStoragePaths.CompanyLogoDirectory,
+            $"company-logo{extension.ToLowerInvariant()}");
+
+        File.Copy(normalizedRequested, destinationPath, overwrite: true);
+        CleanupImportedCompanyLogos(destinationPath);
+        return destinationPath;
+    }
+
+    private static void CleanupImportedCompanyLogos(string? exceptPath)
+    {
+        if (!Directory.Exists(DesktopStoragePaths.CompanyLogoDirectory))
+        {
+            return;
+        }
+
+        var normalizedException = NormalizeOptionalFilePath(exceptPath);
+        foreach (var filePath in Directory.EnumerateFiles(
+                     DesktopStoragePaths.CompanyLogoDirectory,
+                     "company-logo.*",
+                     SearchOption.TopDirectoryOnly))
+        {
+            var normalizedFilePath = NormalizeOptionalFilePath(filePath);
+            if (!string.IsNullOrWhiteSpace(normalizedException) &&
+                string.Equals(normalizedFilePath, normalizedException, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            try
+            {
+                File.Delete(filePath);
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
+    }
+
+    private static string? ResolveCompanyLogoPath(
+        string? requestedPath,
+        DesktopAppSettingsStore? desktopAppSettingsStore)
+    {
+        var normalizedRequested = NormalizeOptionalFilePath(requestedPath);
+        if (!string.IsNullOrWhiteSpace(normalizedRequested))
+        {
+            return normalizedRequested;
+        }
+
+        return NormalizeOptionalFilePath(desktopAppSettingsStore?.Load().CompanyLogoPath);
+    }
+
+    private static void OpenExportedPdf(string filePath) =>
+        OpenExportedFile(filePath);
+
+    private static void OpenExportedFile(string filePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+
+        Process.Start(
+            new ProcessStartInfo(filePath)
+            {
+                UseShellExecute = true
+            });
+    }
+
     private static readonly IReadOnlyList<FileDialogFilter> MaterialLibraryFileFilters =
     [
         new FileDialogFilter("Material library files", ["json"]),
@@ -718,11 +1431,11 @@ public static class DesktopBridgeRegistration
     private static string BuildProjectFileName(Project project)
     {
         var rawName = string.IsNullOrWhiteSpace(project.Metadata.ProjectName)
-            ? "panelnester-project"
+            ? "optifab-project"
             : project.Metadata.ProjectName;
         var sanitized = string.Concat(rawName.Select(character =>
             Path.GetInvalidFileNameChars().Contains(character) ? '-' : character)).Trim();
-        var fileName = string.IsNullOrWhiteSpace(sanitized) ? "panelnester-project" : sanitized;
+        var fileName = string.IsNullOrWhiteSpace(sanitized) ? "optifab-project" : sanitized;
 
         return fileName.EndsWith(".pnest", StringComparison.OrdinalIgnoreCase)
             ? fileName
@@ -738,11 +1451,70 @@ public static class DesktopBridgeRegistration
                 : project.Metadata.ProjectName;
         var sanitized = string.Concat(rawName.Select(character =>
             Path.GetInvalidFileNameChars().Contains(character) ? '-' : character)).Trim();
-        var fileName = string.IsNullOrWhiteSpace(sanitized) ? "panelnester-report" : sanitized;
+        var fileName = string.IsNullOrWhiteSpace(sanitized) ? "optifab-report" : sanitized;
 
         return fileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)
             ? fileName
             : $"{fileName}.pdf";
+    }
+
+    private static string BuildExcelFileName(Project project, string? suggestedFileName = null)
+    {
+        var rawName = !string.IsNullOrWhiteSpace(suggestedFileName)
+            ? suggestedFileName
+            : !string.IsNullOrWhiteSpace(project.Settings.ReportSettings.ReportTitle)
+                ? project.Settings.ReportSettings.ReportTitle
+                : project.Metadata.ProjectName;
+        var sanitized = string.Concat(rawName.Select(character =>
+            Path.GetInvalidFileNameChars().Contains(character) ? '-' : character)).Trim();
+        var fileName = string.IsNullOrWhiteSpace(sanitized) ? "optifab-summary" : sanitized;
+
+        return fileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase)
+            ? fileName
+            : $"{fileName}.xlsx";
+    }
+
+    private static string BuildStiffenerPdfFileName(Project project, string? suggestedFileName = null)
+    {
+        var rawName = !string.IsNullOrWhiteSpace(suggestedFileName)
+            ? suggestedFileName
+            : !string.IsNullOrWhiteSpace(project.Metadata.ProjectName)
+                ? $"{project.Metadata.ProjectName} Stiffener Takeoff"
+                : "optifab-stiffener-takeoff";
+        var sanitized = string.Concat(rawName.Select(character =>
+            Path.GetInvalidFileNameChars().Contains(character) ? '-' : character)).Trim();
+        var fileName = string.IsNullOrWhiteSpace(sanitized) ? "optifab-stiffener-takeoff" : sanitized;
+
+        return fileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)
+            ? fileName
+            : $"{fileName}.pdf";
+    }
+
+    private static string BuildExtrusionPdfFileName(Project project, string? suggestedFileName = null) =>
+        BuildExportFileName(project, suggestedFileName, "Extrusion Takeoff", "optifab-extrusion-takeoff", ".pdf");
+
+    private static string BuildExtrusionExcelFileName(Project project, string? suggestedFileName = null) =>
+        BuildExportFileName(project, suggestedFileName, "Extrusion Takeoff", "optifab-extrusion-takeoff", ".xlsx");
+
+    private static string BuildExportFileName(
+        Project project,
+        string? suggestedFileName,
+        string suffix,
+        string fallback,
+        string extension)
+    {
+        var rawName = !string.IsNullOrWhiteSpace(suggestedFileName)
+            ? suggestedFileName
+            : !string.IsNullOrWhiteSpace(project.Metadata.ProjectName)
+                ? $"{project.Metadata.ProjectName} {suffix}"
+                : fallback;
+        var sanitized = string.Concat(rawName.Select(character =>
+            Path.GetInvalidFileNameChars().Contains(character) ? '-' : character)).Trim();
+        var fileName = string.IsNullOrWhiteSpace(sanitized) ? fallback : sanitized;
+
+        return fileName.EndsWith(extension, StringComparison.OrdinalIgnoreCase)
+            ? fileName
+            : $"{fileName}{extension}";
     }
 
     private static string BuildMaterialLibraryFileName(MaterialLibraryLocation location)
@@ -779,6 +1551,19 @@ public static class DesktopBridgeRegistration
 
     private static string? NormalizeFilePath(string? filePath) =>
         string.IsNullOrWhiteSpace(filePath) ? null : filePath.Trim();
+
+    private static string? NormalizeOptionalValue(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string? NormalizeOptionalFilePath(string? filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            return null;
+        }
+
+        return Path.GetFullPath(filePath.Trim());
+    }
 
     private static IReadOnlyList<PartRow> GetParts(IReadOnlyList<PartRow>? parts) =>
         parts ?? Array.Empty<PartRow>();

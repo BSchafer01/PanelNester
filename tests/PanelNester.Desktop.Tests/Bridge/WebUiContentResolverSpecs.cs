@@ -5,7 +5,7 @@ namespace PanelNester.Desktop.Tests.Bridge;
 
 public sealed class WebUiContentResolverSpecs : IDisposable
 {
-    private readonly string _tempRoot = Path.Combine(Path.GetTempPath(), $"panelnester-webui-resolver-{Guid.NewGuid():N}");
+    private readonly string _tempRoot = Path.Combine(Path.GetTempPath(), $"optifab-webui-resolver-{Guid.NewGuid():N}");
 
     [Fact]
     public void Resolve_prefers_the_bundled_webui_build_when_the_output_contains_a_real_bundle()
@@ -42,7 +42,7 @@ public sealed class WebUiContentResolverSpecs : IDisposable
 
         Assert.True(result.IsWebUiBuild);
         Assert.Equal(distDirectory, result.ContentRoot);
-        Assert.Equal(@"Web UI build (src\PanelNester.WebUI\dist)", result.DisplayName);
+        Assert.Equal("OptiFab Web UI build", result.DisplayName);
     }
 
     [Fact]

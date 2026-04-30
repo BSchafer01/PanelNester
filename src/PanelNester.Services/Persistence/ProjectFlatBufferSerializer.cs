@@ -2,6 +2,7 @@ using Google.FlatBuffers;
 using PanelNester.Domain.Models;
 using Fb = PanelNester.Services.Persistence.FlatBuffers;
 using PanelNester.Services.Projects;
+using System.Text.Json;
 
 namespace PanelNester.Services.Persistence;
 
@@ -131,6 +132,8 @@ internal sealed class ProjectFlatBufferSerializer
         var notes = CreateString(builder, metadata.Notes);
         var hasDate = metadata.Date.HasValue;
         var dateTicks = metadata.Date is { } date ? date.ToBinary() : 0;
+        var hasRequiredDate = metadata.RequiredDate.HasValue;
+        var requiredDateTicks = metadata.RequiredDate is { } requiredDate ? requiredDate.ToBinary() : 0;
 
         Fb.ProjectMetadata.StartProjectMetadata(builder);
         Fb.ProjectMetadata.AddProjectName(builder, projectName);
@@ -143,17 +146,51 @@ internal sealed class ProjectFlatBufferSerializer
         Fb.ProjectMetadata.AddHasDate(builder, hasDate);
         Fb.ProjectMetadata.AddRevision(builder, revision);
         Fb.ProjectMetadata.AddNotes(builder, notes);
+        Fb.ProjectMetadata.AddRequiredDateTicks(builder, requiredDateTicks);
+        Fb.ProjectMetadata.AddHasRequiredDate(builder, hasRequiredDate);
         return Fb.ProjectMetadata.EndProjectMetadata(builder);
     }
 
     private static Offset<Fb.ProjectSettings> WriteSettings(FlatBufferBuilder builder, ProjectSettings settings)
     {
         var reportSettings = WriteReportSettings(builder, settings.ReportSettings);
+        var stiffenerTakeoff = WriteStiffenerTakeoffSettings(builder, settings.StiffenerTakeoff);
 
         Fb.ProjectSettings.StartProjectSettings(builder);
         Fb.ProjectSettings.AddKerfWidth(builder, (double)settings.KerfWidth);
         Fb.ProjectSettings.AddReportSettings(builder, reportSettings);
+        Fb.ProjectSettings.AddStiffenerTakeoff(builder, stiffenerTakeoff);
         return Fb.ProjectSettings.EndProjectSettings(builder);
+    }
+
+    private static Offset<Fb.StiffenerTakeoffSettings> WriteStiffenerTakeoffSettings(
+        FlatBufferBuilder builder,
+        StiffenerTakeoffSettings settings)
+    {
+        var reportTitle = CreateString(builder, settings.ReportTitle);
+        var extrusion = CreateString(builder, settings.Extrusion);
+        var releaseId = CreateString(builder, settings.ReleaseId);
+        var poNumber = CreateString(builder, settings.PoNumber);
+        var color = CreateString(builder, settings.Color);
+        var colorNumber = CreateString(builder, settings.ColorNumber);
+        var manufacturer = CreateString(builder, settings.Manufacturer);
+        var status = CreateString(builder, settings.Status);
+
+        Fb.StiffenerTakeoffSettings.StartStiffenerTakeoffSettings(builder);
+        Fb.StiffenerTakeoffSettings.AddEnabled(builder, settings.Enabled);
+        Fb.StiffenerTakeoffSettings.AddMinimumLengthInches(builder, (double)settings.MinimumLengthInches);
+        Fb.StiffenerTakeoffSettings.AddMinimumWidthInches(builder, (double)settings.MinimumWidthInches);
+        Fb.StiffenerTakeoffSettings.AddWidthDeductionInches(builder, (double)settings.WidthDeductionInches);
+        Fb.StiffenerTakeoffSettings.AddStockLengthFeet(builder, (double)settings.StockLengthFeet);
+        Fb.StiffenerTakeoffSettings.AddReportTitle(builder, reportTitle);
+        Fb.StiffenerTakeoffSettings.AddExtrusion(builder, extrusion);
+        Fb.StiffenerTakeoffSettings.AddReleaseId(builder, releaseId);
+        Fb.StiffenerTakeoffSettings.AddPoNumber(builder, poNumber);
+        Fb.StiffenerTakeoffSettings.AddColor(builder, color);
+        Fb.StiffenerTakeoffSettings.AddColorNumber(builder, colorNumber);
+        Fb.StiffenerTakeoffSettings.AddManufacturer(builder, manufacturer);
+        Fb.StiffenerTakeoffSettings.AddStatus(builder, status);
+        return Fb.StiffenerTakeoffSettings.EndStiffenerTakeoffSettings(builder);
     }
 
     private static Offset<Fb.ReportSettings> WriteReportSettings(FlatBufferBuilder builder, ReportSettings settings)
@@ -162,6 +199,8 @@ internal sealed class ProjectFlatBufferSerializer
         var reportTitle = CreateString(builder, settings.ReportTitle);
         var projectJobName = CreateString(builder, settings.ProjectJobName);
         var projectJobNumber = CreateString(builder, settings.ProjectJobNumber);
+        var releaseId = CreateString(builder, settings.ReleaseId);
+        var status = CreateString(builder, settings.Status);
         var notes = CreateString(builder, settings.Notes);
         var hasReportDate = settings.ReportDate.HasValue;
         var reportDateTicks = settings.ReportDate is { } reportDate ? reportDate.ToBinary() : 0;
@@ -171,6 +210,8 @@ internal sealed class ProjectFlatBufferSerializer
         Fb.ReportSettings.AddReportTitle(builder, reportTitle);
         Fb.ReportSettings.AddProjectJobName(builder, projectJobName);
         Fb.ReportSettings.AddProjectJobNumber(builder, projectJobNumber);
+        Fb.ReportSettings.AddReleaseId(builder, releaseId);
+        Fb.ReportSettings.AddStatus(builder, status);
         Fb.ReportSettings.AddReportDateTicks(builder, reportDateTicks);
         Fb.ReportSettings.AddHasReportDate(builder, hasReportDate);
         Fb.ReportSettings.AddNotes(builder, notes);
@@ -221,6 +262,7 @@ internal sealed class ProjectFlatBufferSerializer
     {
         var sourceFilePath = CreateString(builder, state.SourceFilePath);
         var selectedMaterialId = CreateString(builder, state.SelectedMaterialId);
+        var extrusionLayoutJson = CreateString(builder, SerializeExtrusionLayout(state.ExtrusionLayout));
         var parts = WriteParts(builder, state.Parts);
         var lastNestingResult = state.LastNestingResult is null ? default : WriteNestResponse(builder, state.LastNestingResult);
         var lastBatchNestingResult = state.LastBatchNestingResult is null ? default : WriteBatchNestResponse(builder, state.LastBatchNestingResult);
@@ -229,6 +271,7 @@ internal sealed class ProjectFlatBufferSerializer
         Fb.ProjectState.AddSourceFilePath(builder, sourceFilePath);
         Fb.ProjectState.AddParts(builder, parts);
         Fb.ProjectState.AddSelectedMaterialId(builder, selectedMaterialId);
+        Fb.ProjectState.AddExtrusionLayoutJson(builder, extrusionLayoutJson);
         if (state.LastNestingResult is not null)
         {
             Fb.ProjectState.AddLastNestingResult(builder, lastNestingResult);
@@ -497,6 +540,9 @@ internal sealed class ProjectFlatBufferSerializer
 
         var value = metadata.Value;
         var date = value.HasDate ? DateTime.FromBinary(value.DateTicks) : (DateTime?)null;
+        var requiredDate = value.HasRequiredDate
+            ? DateTime.FromBinary(value.RequiredDateTicks)
+            : (DateTime?)null;
 
         return new ProjectMetadata
         {
@@ -507,6 +553,7 @@ internal sealed class ProjectFlatBufferSerializer
             Drafter = value.Drafter,
             Pm = value.Pm,
             Date = date,
+            RequiredDate = requiredDate,
             Revision = value.Revision,
             Notes = value.Notes
         };
@@ -523,12 +570,40 @@ internal sealed class ProjectFlatBufferSerializer
 
         var value = settings.Value;
         var reportSettings = ReadReportSettings(value.ReportSettings);
+        var stiffenerTakeoff = ReadStiffenerTakeoffSettings(value.StiffenerTakeoff);
         var kerfWidth = value.KerfWidth;
 
         return new ProjectSettings
         {
             KerfWidth = kerfWidth > 0 ? (decimal)kerfWidth : DefaultKerfWidth,
-            ReportSettings = reportSettings
+            ReportSettings = reportSettings,
+            StiffenerTakeoff = stiffenerTakeoff
+        };
+    }
+
+    private static StiffenerTakeoffSettings ReadStiffenerTakeoffSettings(Fb.StiffenerTakeoffSettings? settings)
+    {
+        if (settings is null)
+        {
+            return new StiffenerTakeoffSettings();
+        }
+
+        var value = settings.Value;
+        return new StiffenerTakeoffSettings
+        {
+            Enabled = value.Enabled,
+            MinimumLengthInches = (decimal)value.MinimumLengthInches,
+            MinimumWidthInches = (decimal)value.MinimumWidthInches,
+            WidthDeductionInches = (decimal)value.WidthDeductionInches,
+            StockLengthFeet = (decimal)value.StockLengthFeet,
+            ReportTitle = value.ReportTitle,
+            Extrusion = value.Extrusion,
+            ReleaseId = value.ReleaseId,
+            PoNumber = value.PoNumber,
+            Color = value.Color,
+            ColorNumber = value.ColorNumber,
+            Manufacturer = value.Manufacturer,
+            Status = value.Status
         };
     }
 
@@ -548,6 +623,8 @@ internal sealed class ProjectFlatBufferSerializer
             ReportTitle = value.ReportTitle,
             ProjectJobName = value.ProjectJobName,
             ProjectJobNumber = value.ProjectJobNumber,
+            ReleaseId = value.ReleaseId,
+            Status = value.Status,
             ReportDate = reportDate,
             Notes = value.Notes
         };
@@ -601,6 +678,7 @@ internal sealed class ProjectFlatBufferSerializer
         var parts = ReadParts(value);
         var lastNest = value.LastNestingResult is { } lastNesting ? ReadNestResponse(lastNesting) : null;
         var lastBatch = value.LastBatchNestingResult is { } lastBatchResult ? ReadBatchNestResponse(lastBatchResult) : null;
+        var extrusionLayout = DeserializeExtrusionLayout(value.ExtrusionLayoutJson);
 
         return new ProjectState
         {
@@ -608,8 +686,31 @@ internal sealed class ProjectFlatBufferSerializer
             Parts = parts,
             SelectedMaterialId = value.SelectedMaterialId,
             LastNestingResult = lastNest,
-            LastBatchNestingResult = lastBatch
+            LastBatchNestingResult = lastBatch,
+            ExtrusionLayout = extrusionLayout
         };
+    }
+
+    private static string SerializeExtrusionLayout(ExtrusionLayoutState? layout) =>
+        JsonSerializer.Serialize(layout ?? new ExtrusionLayoutState(), ProjectJsonSerializer.CreateOptions());
+
+    private static ExtrusionLayoutState DeserializeExtrusionLayout(string? layoutJson)
+    {
+        if (string.IsNullOrWhiteSpace(layoutJson))
+        {
+            return new ExtrusionLayoutState();
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<ExtrusionLayoutState>(
+                layoutJson,
+                ProjectJsonSerializer.CreateOptions()) ?? new ExtrusionLayoutState();
+        }
+        catch (JsonException)
+        {
+            return new ExtrusionLayoutState();
+        }
     }
 
     private static IReadOnlyList<PartRow> ReadParts(Fb.ProjectState state)

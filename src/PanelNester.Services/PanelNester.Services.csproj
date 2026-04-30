@@ -15,6 +15,9 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AssemblyName>OptiFab.Services</AssemblyName>
+    <Product>OptiFab</Product>
+    <Company>OptiFab</Company>
   </PropertyGroup>
 
 </Project>

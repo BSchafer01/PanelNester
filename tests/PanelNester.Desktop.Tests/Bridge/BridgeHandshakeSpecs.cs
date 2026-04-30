@@ -43,13 +43,13 @@ public sealed class BridgeHandshakeSpecs
             new PartEditorService(DemoMaterialCatalog.All),
             new StubNestingService(),
             () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true),
-            new StubMaterialLibraryLocationService());
+            materialLibraryLocationService: new StubMaterialLibraryLocationService());
         var request = new BridgeMessageEnvelope(
             BridgeMessageTypes.BridgeHandshake,
             "req-handshake-001",
             JsonSerializer.SerializeToElement(
                 new BridgeHandshakeRequest(
-                    "PanelNester.WebUI",
+                    "OptiFab.WebUI",
                     "0.1.0",
                     [
                         BridgeMessageTypes.BridgeHandshake,
@@ -71,7 +71,7 @@ public sealed class BridgeHandshakeSpecs
         var payload = response.Payload.Deserialize<BridgeHandshakeResponse>(SerializerOptions);
         Assert.NotNull(payload);
         Assert.True(payload!.Success);
-        Assert.Equal("PanelNester Desktop Host", payload.HostName);
+        Assert.Equal("OptiFab Desktop Host", payload.HostName);
         Assert.Equal("webview2", payload.BridgeMode);
         Assert.Contains(BridgeMessageTypes.ListMaterials, payload.Capabilities);
         Assert.Contains(Phase02BridgeExpectations.MaterialMessageTypes[1], payload.Capabilities);

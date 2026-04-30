@@ -56,9 +56,19 @@ public sealed class CsvImportService : IImportService
                 []);
         }
 
-        await using var stream = File.OpenRead(request.FilePath);
-        using var reader = new StreamReader(stream);
-        return await ImportAsync(reader, request.Options, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await using var stream = ImportFileAccessGuard.OpenReadShared(request.FilePath);
+            using var reader = new StreamReader(stream);
+            return await ImportAsync(reader, request.Options, cancellationToken).ConfigureAwait(false);
+        }
+        catch (IOException exception)
+        {
+            return PartRowValidator.CreateResponse(
+                [],
+                [ImportFileAccessGuard.CreateCsvReadError(request.FilePath, exception)],
+                []);
+        }
     }
 
     public async Task<ImportResponse> ImportAsync(
@@ -136,7 +146,9 @@ public sealed class CsvImportService : IImportService
             }
 
             var materialPlan = _mappingResolver.ResolveMaterials(rowUpdates, knownMaterials, options, errors);
-            rowUpdates = materialPlan.Updates.ToList();
+            rowUpdates = ImportedPartRowMerger
+                .MergeCompatibleRows(materialPlan.Updates, hasGroupColumn)
+                .ToList();
             materialResolutions = materialPlan.Resolutions;
         }
         catch (HeaderValidationException exception)

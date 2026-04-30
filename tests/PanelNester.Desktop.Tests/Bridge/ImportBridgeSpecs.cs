@@ -285,6 +285,48 @@ public sealed class ImportBridgeSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Import_file_request_returns_an_actionable_error_when_the_selected_file_is_locked()
+    {
+        Directory.CreateDirectory(_workspacePath);
+
+        var csvPath = Path.Combine(_workspacePath, "locked.csv");
+        await File.WriteAllTextAsync(
+            csvPath,
+            """
+            Id,Length,Width,Quantity,Material
+            P-001,20,10,1,Demo Material
+            """);
+
+        var materialFilePath = Path.Combine(_workspacePath, "materials-locked.json");
+        var repository = new JsonMaterialRepository(materialFilePath);
+        var materialService = new MaterialService(repository, idGenerator: () => "locked-material");
+        var validator = new PartRowValidator();
+        var dispatcher = DesktopBridgeRegistration.CreateDefault(
+            new RecordingFileDialogService(),
+            materialService,
+            new ProjectService(materialService, idGenerator: () => "project-locked-import"),
+            new FileImportDispatcher(
+                new CsvImportService(repository, validator),
+                new XlsxImportService(repository, validator)),
+            new PartEditorService(repository, validator),
+            new ShelfNestingService(),
+            () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true));
+
+        using var lockStream = new FileStream(csvPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        var response = await DispatchAsync<ImportFileResponse>(
+            dispatcher,
+            BridgeMessageTypes.ImportFile,
+            new ImportFileRequest { FilePath = csvPath });
+
+        Assert.False(response.Success);
+        Assert.Equal(csvPath, response.FilePath);
+        Assert.Empty(response.Parts);
+        var error = Assert.Single(response.Errors);
+        Assert.Equal("file-in-use", error.Code);
+        Assert.Contains("Close the file and try importing again.", response.Message);
+    }
+
+    [Fact]
     public async Task Import_file_can_create_a_new_material_and_map_import_rows_to_it()
     {
         Directory.CreateDirectory(_workspacePath);

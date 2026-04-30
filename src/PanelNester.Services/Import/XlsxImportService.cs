@@ -64,7 +64,8 @@ public sealed class XlsxImportService : IImportService
 
         try
         {
-            using var workbook = new XLWorkbook(request.FilePath);
+            await using var stream = ImportFileAccessGuard.OpenReadShared(request.FilePath);
+            using var workbook = new XLWorkbook(stream);
             var worksheet = workbook.Worksheets.FirstOrDefault(sheet => sheet.RangeUsed() is not null);
 
             if (worksheet is null)
@@ -140,12 +141,14 @@ public sealed class XlsxImportService : IImportService
             }
 
             var materialPlan = _mappingResolver.ResolveMaterials(rowUpdates, knownMaterials, request.Options, errors);
-            rowUpdates = materialPlan.Updates.ToList();
+            rowUpdates = ImportedPartRowMerger
+                .MergeCompatibleRows(materialPlan.Updates, hasGroupColumn)
+                .ToList();
             materialResolutions = materialPlan.Resolutions;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            errors.Add(new ValidationError("xlsx-read-failed", exception.Message));
+            errors.Add(ImportFileAccessGuard.CreateXlsxReadError(request.FilePath, exception));
         }
 
         return _validator.ValidateRows(rowUpdates, knownMaterials, errors, warnings) with
