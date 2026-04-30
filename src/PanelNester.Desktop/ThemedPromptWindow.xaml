@@ -5,9 +5,9 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="OptiFab"
-        Width="840"
+        Width="600"
         SizeToContent="Height"
-        MinHeight="260"
+        MinHeight="220"
         Background="Transparent"
         AllowsTransparency="True"
         ResizeMode="NoResize"
@@ -72,9 +72,9 @@
         </Style>
 
         <Style x:Key="DialogActionButtonStyle" TargetType="Button">
-            <Setter Property="MinWidth" Value="96" />
-            <Setter Property="Height" Value="42" />
-            <Setter Property="Padding" Value="22,0" />
+            <Setter Property="MinWidth" Value="72" />
+            <Setter Property="Height" Value="40" />
+            <Setter Property="Padding" Value="18,0" />
             <Setter Property="Margin" Value="0,0,0,0" />
             <Setter Property="Foreground" Value="{StaticResource DialogPrimaryTextBrush}" />
             <Setter Property="Background" Value="{StaticResource DialogButtonBrush}" />
@@ -89,7 +89,7 @@
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="14">
+                                CornerRadius="10">
                             <ContentPresenter HorizontalAlignment="Center"
                                               VerticalAlignment="Center" />
                         </Border>
@@ -140,6 +140,7 @@
 
                 <Button Grid.Column="1"
                         Click="CloseButton_Click"
+                        Visibility="Collapsed"
                         Style="{StaticResource CloseTitleBarButtonStyle}"
                         ToolTip="Close">
                     <TextBlock FontFamily="Segoe MDL2 Assets"
@@ -161,16 +162,16 @@
                         Margin="0,18,0,0">
                 <TextBlock x:Name="HeadlineTextBlock"
                            Foreground="{StaticResource DialogPrimaryTextBrush}"
-                           FontSize="24"
+                           FontSize="16"
                            FontWeight="SemiBold"
                            Text="Save before continuing?"
                            TextWrapping="Wrap" />
                 <TextBlock x:Name="MessageTextBlock"
                            Margin="0,26,0,0"
                            Foreground="{StaticResource DialogSecondaryTextBrush}"
-                           FontSize="16"
+                           FontSize="13"
                            FontWeight="SemiBold"
-                           LineHeight="24"
+                           LineHeight="20"
                            Text="Dialog message."
                            TextWrapping="Wrap" />
             </StackPanel>

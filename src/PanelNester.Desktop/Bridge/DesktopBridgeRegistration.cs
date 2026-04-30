@@ -1269,7 +1269,6 @@ public static class DesktopBridgeRegistration
             exportedPdfOpener);
 
     private static bool IsMaterialInUse(DeleteMaterialRequest request, Material material) =>
-        string.Equals(request.SelectedMaterialId, material.MaterialId, StringComparison.Ordinal) ||
         request.ImportedMaterialNames?.Any(name =>
             string.Equals(name, material.Name, StringComparison.Ordinal)) == true;
 

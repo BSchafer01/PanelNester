@@ -167,6 +167,7 @@ export function MaterialsPage({
   const [draft, setDraft] = useState<MaterialDraft>(() => createEmptyDraft());
   const [mode, setMode] = useState<'create' | 'edit'>('create');
   const [editorBusy, setEditorBusy] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<Material | null>(null);
   const [editorMessage, setEditorMessage] = useState(
     'Create a reusable material or load one for editing.',
   );
@@ -262,20 +263,49 @@ export function MaterialsPage({
     }
   };
 
-  const handleDelete = async (materialId: string, materialName: string) => {
-    if (!window.confirm(`Delete "${materialName}" from the library?`)) {
+  const handleSaveAsNewMaterial = async () => {
+    const validationMessage = validateDraft(draft);
+    if (validationMessage) {
+      setEditorMessage(validationMessage);
       return;
     }
 
     setEditorBusy(true);
 
     try {
-      await onDeleteMaterial(materialId);
-      if (draft.materialId === materialId) {
+      const savedMaterial = await onCreateMaterial({
+        ...draft,
+        materialId: undefined,
+      });
+
+      setMode('edit');
+      setDraft(draftFromMaterial(savedMaterial));
+      setEditorMessage(`${savedMaterial.name} was saved as a new material.`);
+      onSelectMaterial(savedMaterial.materialId);
+    } catch (error) {
+      setEditorMessage(
+        error instanceof Error ? error.message : 'Material could not be saved as new.',
+      );
+    } finally {
+      setEditorBusy(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!pendingDelete) {
+      return;
+    }
+
+    setEditorBusy(true);
+
+    try {
+      await onDeleteMaterial(pendingDelete.materialId);
+      if (draft.materialId === pendingDelete.materialId) {
         setMode('create');
         setDraft(createEmptyDraft());
       }
-      setEditorMessage(`${materialName} was removed from the library.`);
+      setEditorMessage(`${pendingDelete.name} was removed from the library.`);
+      setPendingDelete(null);
     } catch (error) {
       setEditorMessage(
         error instanceof Error ? error.message : 'Material could not be deleted.',
@@ -465,6 +495,16 @@ export function MaterialsPage({
           >
             {editorBusy ? 'Saving…' : mode === 'edit' ? 'Save changes' : 'Add material'}
           </button>
+          {mode === 'edit' ? (
+            <button
+              className="secondary-button materials-editor__submit"
+              disabled={editorBusy || materialsBusy}
+              onClick={() => void handleSaveAsNewMaterial()}
+              type="button"
+            >
+              Save as New Material
+            </button>
+          ) : null}
         </div>
       </section>
 
@@ -552,8 +592,7 @@ export function MaterialsPage({
         </div>
 
         <p className="section-note">
-          Delete is blocked while the current import or active selector still
-          references a material.
+          Delete is blocked while the current import still references a material.
         </p>
 
         {materials.length > 0 ? (
@@ -604,9 +643,7 @@ export function MaterialsPage({
                           <button
                             className="module-table-action module-table-action--danger"
                             disabled={editorBusy}
-                            onClick={() =>
-                              void handleDelete(material.materialId, material.name)
-                            }
+                            onClick={() => setPendingDelete(material)}
                             type="button"
                           >
                             Delete
@@ -627,6 +664,39 @@ export function MaterialsPage({
         )}
       </section>
       </div>
+      {pendingDelete ? (
+        <div
+          aria-labelledby="material-delete-dialog-title"
+          aria-modal="true"
+          className="material-delete-dialog"
+          role="dialog"
+        >
+          <div className="material-delete-dialog__panel">
+            <h3 id="material-delete-dialog-title">Delete material?</h3>
+            <p>
+              Delete <strong>{pendingDelete.name}</strong> from the material library?
+            </p>
+            <div className="material-delete-dialog__actions">
+              <button
+                className="secondary-button"
+                disabled={editorBusy}
+                onClick={() => setPendingDelete(null)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="primary-button material-delete-dialog__danger"
+                disabled={editorBusy}
+                onClick={() => void handleDelete()}
+                type="button"
+              >
+                {editorBusy ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
