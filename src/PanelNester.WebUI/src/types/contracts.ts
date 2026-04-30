@@ -464,7 +464,17 @@ export interface ExtrusionLayoutState {
   edgeExtrusionName: string;
   panelToPanelStickLengthFeet?: number;
   edgeStickLengthFeet?: number;
+  additionalLineItems: ExtrusionAdditionalLineItem[];
   groups: ExtrusionGroupLayout[];
+}
+
+export type ExtrusionLineItemQuantityBasis = 'panel-to-panel' | 'edge' | 'both';
+
+export interface ExtrusionAdditionalLineItem {
+  id: string;
+  name: string;
+  quantityBasis: ExtrusionLineItemQuantityBasis;
+  stickLengthFeet?: number;
 }
 
 export interface ExtrusionGroupLayout {
@@ -920,6 +930,7 @@ export const defaultExtrusionLayoutState: ExtrusionLayoutState = {
   edgeExtrusionName: 'Perimeter Edge',
   panelToPanelStickLengthFeet: 20,
   edgeStickLengthFeet: 20,
+  additionalLineItems: [],
   groups: [],
 };
 

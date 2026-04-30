@@ -145,6 +145,7 @@ public sealed class ExtrusionTakeoffService : IExtrusionTakeoffService
             EdgeExtrusionName = NormalizeName(layout.EdgeExtrusionName, "Perimeter Edge"),
             PanelToPanelStickLengthFeet = NormalizeStickLength(layout.PanelToPanelStickLengthFeet),
             EdgeStickLengthFeet = NormalizeStickLength(layout.EdgeStickLengthFeet),
+            AdditionalLineItems = NormalizeAdditionalLineItems(layout.AdditionalLineItems),
             Groups = groups.Concat(staleGroups).ToArray()
         };
     }
@@ -398,8 +399,9 @@ public sealed class ExtrusionTakeoffService : IExtrusionTakeoffService
 
     private static IReadOnlyList<ExtrusionLengthSummary> BuildLengthSummaries(
         IReadOnlyList<ExtrusionSegmentDetail> segments,
-        ExtrusionLayoutState layout) =>
-        segments
+        ExtrusionLayoutState layout)
+    {
+        var baseSummaries = segments
             .GroupBy(segment => new
             {
                 segment.Category,
@@ -426,6 +428,65 @@ public sealed class ExtrusionTakeoffService : IExtrusionTakeoffService
                 };
             })
             .ToArray();
+
+        var additionalSummaries = layout.AdditionalLineItems
+            .Select(item => BuildAdditionalLineItemSummary(item, segments))
+            .Where(summary => summary is not null)
+            .Select(summary => summary!)
+            .ToArray();
+
+        return baseSummaries.Concat(additionalSummaries).ToArray();
+    }
+
+    private static ExtrusionLengthSummary? BuildAdditionalLineItemSummary(
+        ExtrusionAdditionalLineItem item,
+        IReadOnlyList<ExtrusionSegmentDetail> segments)
+    {
+        var matching = segments
+            .Where(segment => IncludesCategory(item.QuantityBasis, segment.Category))
+            .ToArray();
+        var totalLengthInches = matching.Sum(segment => segment.LengthInches);
+        var totalLinearFeet = totalLengthInches / 12m;
+        var stickLengthFeet = NormalizeStickLength(item.StickLengthFeet);
+
+        return new ExtrusionLengthSummary
+        {
+            Category = ExtrusionCategories.AdditionalLineItem,
+            ExtrusionName = item.Name,
+            TotalLengthInches = totalLengthInches,
+            SegmentCount = matching.Length,
+            TotalLinearFeet = totalLinearFeet,
+            StickLengthFeet = stickLengthFeet,
+            RequiredStickCount = totalLinearFeet <= 0 ? 0 : (int)Math.Ceiling(totalLinearFeet / stickLengthFeet)
+        };
+    }
+
+    private static bool IncludesCategory(string quantityBasis, string category) =>
+        string.Equals(quantityBasis, ExtrusionLineItemQuantityBases.Both, StringComparison.Ordinal) ||
+        (string.Equals(quantityBasis, ExtrusionLineItemQuantityBases.Edge, StringComparison.Ordinal) &&
+            string.Equals(category, ExtrusionCategories.Edge, StringComparison.Ordinal)) ||
+        (string.Equals(quantityBasis, ExtrusionLineItemQuantityBases.PanelToPanel, StringComparison.Ordinal) &&
+            string.Equals(category, ExtrusionCategories.PanelToPanel, StringComparison.Ordinal));
+
+    private static IReadOnlyList<ExtrusionAdditionalLineItem> NormalizeAdditionalLineItems(
+        IReadOnlyList<ExtrusionAdditionalLineItem>? items) =>
+        (items ?? Array.Empty<ExtrusionAdditionalLineItem>())
+            .Select((item, index) => new ExtrusionAdditionalLineItem
+            {
+                Id = NormalizeName(item.Id, $"line-item-{index + 1}"),
+                Name = NormalizeName(item.Name, $"Line Item {index + 1}"),
+                QuantityBasis = NormalizeQuantityBasis(item.QuantityBasis),
+                StickLengthFeet = NormalizeStickLength(item.StickLengthFeet)
+            })
+            .Where(item => !string.IsNullOrWhiteSpace(item.Name))
+            .ToArray();
+
+    private static string NormalizeQuantityBasis(string? value) =>
+        string.Equals(value, ExtrusionLineItemQuantityBases.PanelToPanel, StringComparison.Ordinal)
+            ? ExtrusionLineItemQuantityBases.PanelToPanel
+            : string.Equals(value, ExtrusionLineItemQuantityBases.Edge, StringComparison.Ordinal)
+                ? ExtrusionLineItemQuantityBases.Edge
+                : ExtrusionLineItemQuantityBases.Both;
 
     private static IEnumerable<ExtrusionPanelInstance> SortPanelsForRows(IEnumerable<ExtrusionPanelInstance> panels) =>
         panels

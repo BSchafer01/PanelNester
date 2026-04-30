@@ -4,6 +4,14 @@ public static class ExtrusionCategories
 {
     public const string PanelToPanel = "Panel-to-panel";
     public const string Edge = "Edge";
+    public const string AdditionalLineItem = "Additional line item";
+}
+
+public static class ExtrusionLineItemQuantityBases
+{
+    public const string PanelToPanel = "panel-to-panel";
+    public const string Edge = "edge";
+    public const string Both = "both";
 }
 
 public static class ExtrusionEdgeNames
@@ -24,7 +32,20 @@ public sealed record ExtrusionLayoutState
 
     public decimal EdgeStickLengthFeet { get; init; } = 20m;
 
+    public IReadOnlyList<ExtrusionAdditionalLineItem> AdditionalLineItems { get; init; } = Array.Empty<ExtrusionAdditionalLineItem>();
+
     public IReadOnlyList<ExtrusionGroupLayout> Groups { get; init; } = Array.Empty<ExtrusionGroupLayout>();
+}
+
+public sealed record ExtrusionAdditionalLineItem
+{
+    public string Id { get; init; } = string.Empty;
+
+    public string Name { get; init; } = string.Empty;
+
+    public string QuantityBasis { get; init; } = ExtrusionLineItemQuantityBases.Both;
+
+    public decimal StickLengthFeet { get; init; } = 20m;
 }
 
 public sealed record ExtrusionGroupLayout

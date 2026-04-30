@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
+  ExtrusionAdditionalLineItem,
   ExtrusionEdgeAssignment,
   ExtrusionGroupLayout,
   ExtrusionLayoutState,
+  ExtrusionLineItemQuantityBasis,
   ExtrusionPanelInstance,
   ExtrusionSegmentDetail,
   PartRow,
@@ -50,6 +52,7 @@ export function ExtrusionsPage({
   );
   const activeSummary = summarizeSegments(
     segments.filter((segment) => segment.groupName === activeGroup?.groupName),
+    normalizedLayout.additionalLineItems,
   );
 
   useEffect(() => {
@@ -81,6 +84,18 @@ export function ExtrusionsPage({
       ...normalizedLayout,
       groups: normalizedLayout.groups.map((group) =>
         group.groupName === nextGroup.groupName ? nextGroup : group,
+      ),
+    });
+  };
+
+  const updateAdditionalLineItem = (
+    id: string,
+    changes: Partial<ExtrusionAdditionalLineItem>,
+  ) => {
+    updateLayout({
+      ...normalizedLayout,
+      additionalLineItems: normalizedLayout.additionalLineItems.map((item) =>
+        item.id === id ? { ...item, ...changes } : item,
       ),
     });
   };
@@ -183,6 +198,92 @@ export function ExtrusionsPage({
                 }
               />
             </label>
+          </div>
+          <div className="extrusions-line-items">
+            <div className="results-sidebar__section-head">
+              <span>Additional Line Items</span>
+              <button
+                className="secondary-button extrusions-add-line-item-button"
+                onClick={() =>
+                  updateLayout({
+                    ...normalizedLayout,
+                    additionalLineItems: [
+                      ...normalizedLayout.additionalLineItems,
+                      {
+                        id: `line-item-${Date.now()}`,
+                        name: '',
+                        quantityBasis: 'both',
+                        stickLengthFeet: 20,
+                      },
+                    ],
+                  })
+                }
+                type="button"
+              >
+                Add row
+              </button>
+            </div>
+            {normalizedLayout.additionalLineItems.length > 0 ? (
+              <div className="extrusions-line-item-list">
+                {normalizedLayout.additionalLineItems.map((item) => (
+                  <div className="extrusions-line-item-row" key={item.id}>
+                    <label className="field">
+                      <span>Name</span>
+                      <input
+                        onChange={(event) =>
+                          updateAdditionalLineItem(item.id, { name: event.target.value })
+                        }
+                        placeholder="Line item name"
+                        value={item.name}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Based on</span>
+                      <select
+                        onChange={(event) =>
+                          updateAdditionalLineItem(item.id, {
+                            quantityBasis: event.target.value as ExtrusionLineItemQuantityBasis,
+                          })
+                        }
+                        value={item.quantityBasis}
+                      >
+                        <option value="panel-to-panel">Panel-to-panel</option>
+                        <option value="edge">Edge</option>
+                        <option value="both">Both</option>
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>Stick ft</span>
+                      <input
+                        min={1}
+                        onChange={(event) =>
+                          updateAdditionalLineItem(item.id, {
+                            stickLengthFeet: Math.max(1, Number(event.target.value) || 20),
+                          })
+                        }
+                        step={0.5}
+                        type="number"
+                        value={item.stickLengthFeet ?? 20}
+                      />
+                    </label>
+                    <button
+                      className="secondary-button extrusions-remove-line-item-button"
+                      onClick={() =>
+                        updateLayout({
+                          ...normalizedLayout,
+                          additionalLineItems: normalizedLayout.additionalLineItems.filter(
+                            (candidate) => candidate.id !== item.id,
+                          ),
+                        })
+                      }
+                      type="button"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
           <div className="form-actions">
             <button
@@ -739,6 +840,7 @@ function normalizeLayout(
     edgeExtrusionName: layout.edgeExtrusionName || 'Perimeter Edge',
     panelToPanelStickLengthFeet: normalizeStickLength(layout.panelToPanelStickLengthFeet),
     edgeStickLengthFeet: normalizeStickLength(layout.edgeStickLengthFeet),
+    additionalLineItems: normalizeAdditionalLineItems(layout.additionalLineItems),
     groups: groups.map((groupName) => normalizeGroup(groupName, panels, existing.get(groupName))),
   };
 }
@@ -1112,7 +1214,10 @@ function buildJointId(first: string, second: string): string {
   return first.localeCompare(second) <= 0 ? `${first}|${second}` : `${second}|${first}`;
 }
 
-function summarizeSegments(segments: ExtrusionSegmentDetail[]) {
+function summarizeSegments(
+  segments: ExtrusionSegmentDetail[],
+  additionalLineItems: ExtrusionAdditionalLineItem[] = [],
+) {
   const map = new Map<string, { key: string; category: string; extrusionName: string; totalLengthInches: number; segmentCount: number }>();
   segments.forEach((segment) => {
     const key = `${segment.category}|${segment.extrusionName}`;
@@ -1130,7 +1235,46 @@ function summarizeSegments(segments: ExtrusionSegmentDetail[]) {
       });
     }
   });
-  return Array.from(map.values());
+  const rows = Array.from(map.values());
+  additionalLineItems.forEach((item) => {
+    const matching = segments.filter((segment) => includesLineItemCategory(item.quantityBasis, segment.category));
+    rows.push({
+      key: `additional|${item.id}`,
+      category: 'Additional line item',
+      extrusionName: item.name || 'Additional line item',
+      totalLengthInches: matching.reduce((total, segment) => total + segment.lengthInches, 0),
+      segmentCount: matching.length,
+    });
+  });
+  return rows;
+}
+
+function normalizeAdditionalLineItems(
+  items: ExtrusionAdditionalLineItem[] | undefined,
+): ExtrusionAdditionalLineItem[] {
+  return (items ?? []).map((item, index) => ({
+    id: item.id || `line-item-${index + 1}`,
+    name: item.name ?? '',
+    quantityBasis: normalizeQuantityBasis(item.quantityBasis),
+    stickLengthFeet: normalizeStickLength(item.stickLengthFeet),
+  }));
+}
+
+function normalizeQuantityBasis(
+  value: ExtrusionLineItemQuantityBasis | undefined,
+): ExtrusionLineItemQuantityBasis {
+  return value === 'panel-to-panel' || value === 'edge' ? value : 'both';
+}
+
+function includesLineItemCategory(
+  quantityBasis: ExtrusionLineItemQuantityBasis,
+  category: string,
+): boolean {
+  return (
+    quantityBasis === 'both' ||
+    (quantityBasis === 'edge' && category === 'Edge') ||
+    (quantityBasis === 'panel-to-panel' && category === 'Panel-to-panel')
+  );
 }
 
 function normalizeStickLength(value: number | undefined): number {
