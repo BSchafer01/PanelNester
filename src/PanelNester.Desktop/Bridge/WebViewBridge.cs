@@ -2,6 +2,7 @@ using System.IO;
 using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
+using PanelNester.Domain.Models;
 
 namespace PanelNester.Desktop.Bridge;
 
@@ -110,19 +111,26 @@ public sealed class WebViewBridge
 
         var script = """
             (async () => {
-                const desktopHost = window.panelNesterDesktopHost;
-                if (!desktopHost?.saveProjectBeforeClose) {
+                try {
+                    const desktopHost = window.panelNesterDesktopHost;
+                    if (!desktopHost?.saveProjectBeforeClose) {
+                        return {
+                            status: 'failed',
+                            message: 'Project save before close is unavailable.'
+                        };
+                    }
+
+                    const result = await desktopHost.saveProjectBeforeClose();
+                    return result ?? {
+                        status: 'failed',
+                        message: 'Project save before close did not return a result.'
+                    };
+                } catch (error) {
                     return {
                         status: 'failed',
-                        message: 'Project save before close is unavailable.'
+                        message: error instanceof Error ? error.message : 'Project save before close failed.'
                     };
                 }
-
-                const result = await desktopHost.saveProjectBeforeClose();
-                return result ?? {
-                    status: 'failed',
-                    message: 'Project save before close did not return a result.'
-                };
             })();
             """;
         var result = await ExecuteScriptAsync(script, cancellationToken).ConfigureAwait(true);
@@ -131,6 +139,38 @@ public sealed class WebViewBridge
         return saveResult ?? new DesktopCloseSaveResult(
             "failed",
             "Project save before close returned an empty result.");
+    }
+
+    public async Task<DesktopCloseProjectSavePayload> PrepareProjectSaveBeforeCloseAsync(CancellationToken cancellationToken = default)
+    {
+        await WaitForHostReadyAsync(cancellationToken).ConfigureAwait(true);
+
+        var script = """
+            (async () => {
+                const desktopHost = window.panelNesterDesktopHost;
+                if (!desktopHost?.prepareProjectSaveBeforeClose) {
+                    return {
+                        status: 'failed',
+                        message: 'Project save before close is unavailable.'
+                    };
+                }
+
+                const result = await desktopHost.prepareProjectSaveBeforeClose();
+                return result ?? {
+                    status: 'failed',
+                    message: 'Project save before close did not return a project payload.'
+                };
+            })();
+            """;
+        var result = await ExecuteScriptAsync(script, cancellationToken).ConfigureAwait(true);
+        var payload = JsonSerializer.Deserialize<DesktopCloseProjectSavePayload>(result, BridgeJson.SerializerOptions);
+
+        return payload ?? new DesktopCloseProjectSavePayload(
+            "failed",
+            null,
+            null,
+            null,
+            "Project save before close returned an empty project payload.");
     }
 
     public Task WaitForHostReadyAsync(CancellationToken cancellationToken = default) =>
@@ -258,4 +298,15 @@ public sealed record DesktopCloseSaveResult(string Status, string? Message)
 
     public bool Failed =>
         string.Equals(Status, "failed", StringComparison.Ordinal);
+}
+
+public sealed record DesktopCloseProjectSavePayload(
+    string Status,
+    Project? Project,
+    string? FilePath,
+    string? SuggestedFileName,
+    string? Message)
+{
+    public bool Ready =>
+        string.Equals(Status, "ready", StringComparison.Ordinal);
 }

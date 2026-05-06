@@ -122,6 +122,9 @@ public sealed class CsvImportService : IImportService
 
              var rowIndex = 0;
              var hasGroupColumn = columnPlan.FieldToSource.TryGetValue(ImportFieldNames.Group, out var groupSourceColumn);
+             var hasSheetNumberColumn = columnPlan.FieldToSource.TryGetValue(ImportFieldNames.SheetNumber, out var sheetNumberSourceColumn);
+             var hasRowNumberColumn = columnPlan.FieldToSource.TryGetValue(ImportFieldNames.RowNumber, out var rowNumberSourceColumn);
+             var hasColumnNumberColumn = columnPlan.FieldToSource.TryGetValue(ImportFieldNames.ColumnNumber, out var columnNumberSourceColumn);
 
              while (await csv.ReadAsync().ConfigureAwait(false))
              {
@@ -136,7 +139,10 @@ public sealed class CsvImportService : IImportService
                      Width = csv.GetField(columnPlan.FieldToSource[ImportFieldNames.Width]) ?? string.Empty,
                      Quantity = csv.GetField(columnPlan.FieldToSource[ImportFieldNames.Quantity]) ?? string.Empty,
                      MaterialName = csv.GetField(columnPlan.FieldToSource[ImportFieldNames.Material]) ?? string.Empty,
-                     Group = hasGroupColumn ? csv.GetField(groupSourceColumn!) : null
+                     Group = hasGroupColumn ? csv.GetField(groupSourceColumn!) : null,
+                     SheetNumber = hasSheetNumberColumn ? csv.GetField(sheetNumberSourceColumn!) : null,
+                     RowNumber = hasRowNumberColumn ? csv.GetField(rowNumberSourceColumn!) : null,
+                     ColumnNumber = hasColumnNumberColumn ? csv.GetField(columnNumberSourceColumn!) : null
                  });
              }
 
@@ -147,7 +153,7 @@ public sealed class CsvImportService : IImportService
 
             var materialPlan = _mappingResolver.ResolveMaterials(rowUpdates, knownMaterials, options, errors);
             rowUpdates = ImportedPartRowMerger
-                .MergeCompatibleRows(materialPlan.Updates, hasGroupColumn)
+                .MergeCompatibleRows(materialPlan.Updates, hasGroupColumn, hasSheetNumberColumn, hasRowNumberColumn, hasColumnNumberColumn)
                 .ToList();
             materialResolutions = materialPlan.Resolutions;
         }

@@ -94,6 +94,9 @@ table PartRow {
   validation_status:string;
   validation_messages:[string];
   group:string;
+  sheet_number:string;
+  row_number:int;
+  column_number:int;
 }
 
 table NestResponse {

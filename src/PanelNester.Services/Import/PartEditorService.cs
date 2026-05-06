@@ -154,7 +154,10 @@ public sealed partial class PartEditorService : IPartEditorService
             Width = row.WidthText ?? row.Width.ToString(CultureInfo.InvariantCulture),
             Quantity = row.QuantityText ?? row.Quantity.ToString(CultureInfo.InvariantCulture),
             MaterialName = row.MaterialName,
-            Group = row.Group
+            Group = row.Group,
+            SheetNumber = row.SheetNumber,
+            RowNumber = row.RowNumber?.ToString(CultureInfo.InvariantCulture),
+            ColumnNumber = row.ColumnNumber?.ToString(CultureInfo.InvariantCulture)
         };
 
     private static string CreateNextRowId(IReadOnlyList<PartRow> parts)

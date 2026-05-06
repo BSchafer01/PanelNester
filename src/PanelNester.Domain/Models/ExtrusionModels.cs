@@ -22,8 +22,16 @@ public static class ExtrusionEdgeNames
     public const string Left = "left";
 }
 
+public static class ExtrusionGroupingModes
+{
+    public const string Group = "group";
+    public const string SheetNumber = "sheet-number";
+}
+
 public sealed record ExtrusionLayoutState
 {
+    public string GroupingMode { get; init; } = string.Empty;
+
     public string PanelToPanelExtrusionName { get; init; } = "Panel Joint";
 
     public string EdgeExtrusionName { get; init; } = "Perimeter Edge";
@@ -79,6 +87,14 @@ public sealed record ExtrusionPanelInstance
 
     public string GroupName { get; init; } = string.Empty;
 
+    public string SheetGroupName { get; init; } = string.Empty;
+
+    public string? SheetNumber { get; init; }
+
+    public int? RowNumber { get; init; }
+
+    public int? ColumnNumber { get; init; }
+
     public decimal Length { get; init; }
 
     public decimal Width { get; init; }
@@ -102,6 +118,8 @@ public sealed record ExtrusionEdgeAssignment
     public string Edge { get; init; } = string.Empty;
 
     public string ExtrusionName { get; init; } = "Perimeter Edge";
+
+    public bool IsIgnored { get; init; }
 }
 
 public sealed record ExtrusionJointAssignment

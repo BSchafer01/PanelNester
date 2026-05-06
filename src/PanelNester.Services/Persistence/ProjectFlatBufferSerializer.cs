@@ -312,6 +312,7 @@ internal sealed class ProjectFlatBufferSerializer
         var validationStatus = CreateString(builder, part.ValidationStatus);
         var validationMessages = WriteValidationMessages(builder, part.ValidationMessages);
         var group = CreateString(builder, part.Group);
+        var sheetNumber = CreateString(builder, part.SheetNumber);
 
         Fb.PartRow.StartPartRow(builder);
         Fb.PartRow.AddRowId(builder, rowId);
@@ -326,6 +327,17 @@ internal sealed class ProjectFlatBufferSerializer
         Fb.PartRow.AddValidationStatus(builder, validationStatus);
         Fb.PartRow.AddValidationMessages(builder, validationMessages);
         Fb.PartRow.AddGroup(builder, group);
+        Fb.PartRow.AddSheetNumber(builder, sheetNumber);
+        if (part.RowNumber is { } rowNumber)
+        {
+            Fb.PartRow.AddRowNumber(builder, rowNumber);
+        }
+
+        if (part.ColumnNumber is { } columnNumber)
+        {
+            Fb.PartRow.AddColumnNumber(builder, columnNumber);
+        }
+
         return Fb.PartRow.EndPartRow(builder);
     }
 
@@ -744,6 +756,9 @@ internal sealed class ProjectFlatBufferSerializer
                 Quantity = value.Quantity,
                 MaterialName = value.MaterialName ?? string.Empty,
                 Group = string.IsNullOrWhiteSpace(value.Group) ? null : value.Group,
+                SheetNumber = string.IsNullOrWhiteSpace(value.SheetNumber) ? null : value.SheetNumber,
+                RowNumber = value.RowNumber <= 0 ? null : value.RowNumber,
+                ColumnNumber = value.ColumnNumber <= 0 ? null : value.ColumnNumber,
                 ValidationStatus = value.ValidationStatus ?? ValidationStatuses.Valid,
                 ValidationMessages = messages
             });

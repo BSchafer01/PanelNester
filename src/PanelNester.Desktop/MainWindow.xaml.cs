@@ -291,7 +291,7 @@ public partial class MainWindow : Window
                     var saveResult = await SaveProjectBeforeCloseAsync();
                     if (saveResult.Saved)
                     {
-                        CloseWithoutPrompt();
+                        ScheduleCloseWithoutPrompt();
                         return;
                     }
 
@@ -300,11 +300,16 @@ public partial class MainWindow : Window
                         ShowSaveFailedDialog(
                             saveResult.Message ?? "The project could not be saved before closing.");
                     }
+                    else if (saveResult.Cancelled)
+                    {
+                        ShowSaveFailedDialog(
+                            saveResult.Message ?? "Close was canceled because the project was not saved.");
+                    }
 
                     return;
                 }
                 case ThemedPromptResult.Secondary:
-                    CloseWithoutPrompt();
+                    ScheduleCloseWithoutPrompt();
                     return;
                 default:
                     return;
@@ -566,7 +571,13 @@ public partial class MainWindow : Window
                 "Project save before close is unavailable because the web shell is not ready.");
         }
 
-        return await _bridge.SaveProjectBeforeCloseAsync();
+        var saveResult = await _bridge.SaveProjectBeforeCloseAsync().ConfigureAwait(true);
+        if (saveResult.Saved)
+        {
+            _hasUnsavedProjectChanges = false;
+        }
+
+        return saveResult;
     }
 
     private void ShowSaveFailedDialog(string message)
@@ -584,14 +595,24 @@ public partial class MainWindow : Window
             });
     }
 
-    private void CloseWithoutPrompt()
+    private void ScheduleCloseWithoutPrompt()
     {
+        _allowCloseWithoutPrompt = true;
+        _hasUnsavedProjectChanges = false;
+        _closePromptActive = false;
+
         _ = Dispatcher.BeginInvoke(
-            DispatcherPriority.Background,
+            DispatcherPriority.ApplicationIdle,
             new Action(() =>
             {
                 _allowCloseWithoutPrompt = true;
+                _hasUnsavedProjectChanges = false;
                 Close();
+
+                if (IsVisible)
+                {
+                    Application.Current.Shutdown();
+                }
             }));
     }
 

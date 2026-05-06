@@ -87,6 +87,10 @@ public sealed class ExtrusionTakeoffService : IExtrusionTakeoffService
                         Label = $"{baseLabel}#{index}",
                         MaterialName = part.MaterialName,
                         GroupName = NormalizeGroupName(part.Group),
+                        SheetGroupName = NormalizeSheetGroupName(part.SheetNumber),
+                        SheetNumber = part.SheetNumber,
+                        RowNumber = part.RowNumber,
+                        ColumnNumber = part.ColumnNumber,
                         Length = part.Length,
                         Width = part.Width
                     });
@@ -108,12 +112,13 @@ public sealed class ExtrusionTakeoffService : IExtrusionTakeoffService
     {
         layout ??= new ExtrusionLayoutState();
         var panelIds = panels.Select(panel => panel.InstanceId).ToHashSet(StringComparer.Ordinal);
+        var groupingMode = NormalizeGroupingMode(layout.GroupingMode, panels);
         var existingGroups = layout.Groups
             .GroupBy(group => NormalizeGroupName(group.GroupName), StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.Last(), StringComparer.Ordinal);
 
         var groups = panels
-            .GroupBy(panel => panel.GroupName, StringComparer.Ordinal)
+            .GroupBy(panel => GetPanelGroupName(panel, groupingMode), StringComparer.Ordinal)
             .OrderBy(group => DisplayGroupName(group.Key), StringComparer.OrdinalIgnoreCase)
             .Select(group => NormalizeGroupLayout(
                 group.Key,
@@ -133,7 +138,9 @@ public sealed class ExtrusionTakeoffService : IExtrusionTakeoffService
                     .Where(edge => panelIds.Contains(edge.InstanceId))
                     .ToArray(),
                 JointAssignments = group.JointAssignments
-                    .Where(joint => panelIds.Contains(joint.FirstInstanceId) && panelIds.Contains(joint.SecondInstanceId))
+                    .Where(joint =>
+                        panelIds.Contains(joint.FirstInstanceId) &&
+                        (string.IsNullOrWhiteSpace(joint.SecondInstanceId) || panelIds.Contains(joint.SecondInstanceId)))
                     .ToArray()
             })
             .Where(group => group.Cells.Count > 0)
@@ -141,6 +148,7 @@ public sealed class ExtrusionTakeoffService : IExtrusionTakeoffService
 
         return layout with
         {
+            GroupingMode = groupingMode,
             PanelToPanelExtrusionName = NormalizeName(layout.PanelToPanelExtrusionName, "Panel Joint"),
             EdgeExtrusionName = NormalizeName(layout.EdgeExtrusionName, "Perimeter Edge"),
             PanelToPanelStickLengthFeet = NormalizeStickLength(layout.PanelToPanelStickLengthFeet),
@@ -160,6 +168,12 @@ public sealed class ExtrusionTakeoffService : IExtrusionTakeoffService
         var defaultRows = Math.Max(1, (int)Math.Ceiling(panels.Count / (decimal)defaultColumns));
         var rows = Math.Max(existing?.Rows ?? defaultRows, 1);
         var columns = Math.Max(existing?.Columns ?? defaultColumns, 1);
+        var maximumImportedRowNumber = panels
+            .Where(panel => panel.RowNumber is not null)
+            .Select(panel => panel.RowNumber!.Value)
+            .DefaultIfEmpty(0)
+            .Max();
+        rows = Math.Max(rows, maximumImportedRowNumber);
         var occupied = new HashSet<string>(StringComparer.Ordinal);
         var cells = new List<ExtrusionGridCell>();
 
@@ -185,6 +199,25 @@ public sealed class ExtrusionTakeoffService : IExtrusionTakeoffService
 
         foreach (var panel in SortPanelsForRows(panels.Where(panel => cells.All(cell => cell.InstanceId != panel.InstanceId))))
         {
+            if (panel.RowNumber is { } rowNumber && panel.ColumnNumber is { } columnNumber)
+            {
+                var row = rows - rowNumber;
+                var column = columnNumber - 1;
+                var key = CellKey(row, column);
+                if (occupied.Add(key))
+                {
+                    rows = Math.Max(rows, row + 1);
+                    columns = Math.Max(columns, column + 1);
+                    cells.Add(new ExtrusionGridCell
+                    {
+                        InstanceId = panel.InstanceId,
+                        Row = row,
+                        Column = column
+                    });
+                    continue;
+                }
+            }
+
             var placed = false;
             for (var row = 0; row < rows && !placed; row++)
             {
@@ -228,7 +261,9 @@ public sealed class ExtrusionTakeoffService : IExtrusionTakeoffService
             .Distinct()
             .ToArray();
         var joints = (existing?.JointAssignments ?? Array.Empty<ExtrusionJointAssignment>())
-            .Where(joint => panelIds.Contains(joint.FirstInstanceId) && panelIds.Contains(joint.SecondInstanceId))
+            .Where(joint =>
+                panelIds.Contains(joint.FirstInstanceId) &&
+                (string.IsNullOrWhiteSpace(joint.SecondInstanceId) || panelIds.Contains(joint.SecondInstanceId)))
             .Select(joint => joint with { ExtrusionName = NormalizeName(joint.ExtrusionName, layout.PanelToPanelExtrusionName) })
             .Distinct()
             .ToArray();
@@ -333,7 +368,8 @@ public sealed class ExtrusionTakeoffService : IExtrusionTakeoffService
                     isDisabledJoint = assignment is { IsEnabled: false };
                 }
 
-                if (!hasNeighbor || isDisabledJoint || explicitEdges.Contains(EdgeLocationKey(cell.InstanceId, edge)))
+                var explicitEdge = explicitEdges.Contains(EdgeLocationKey(cell.InstanceId, edge));
+                if ((!hasNeighbor || isDisabledJoint || explicitEdge) && !IsIgnoredEdge(group, cell.InstanceId, edge))
                 {
                     yield return new ExtrusionEdgeAssignment
                     {
@@ -378,7 +414,8 @@ public sealed class ExtrusionTakeoffService : IExtrusionTakeoffService
 
                 var jointId = BuildJointId(first.InstanceId, second.InstanceId);
                 assignmentByJoint.TryGetValue(jointId, out var assignment);
-                if (assignment is { IsEnabled: false })
+                if (assignment is { IsEnabled: false } ||
+                    IsIgnoredJoint(group, first.InstanceId, second.InstanceId, edge))
                 {
                     continue;
                 }
@@ -394,6 +431,27 @@ public sealed class ExtrusionTakeoffService : IExtrusionTakeoffService
                         : Math.Min(first.Length, second.Length)
                 };
             }
+        }
+
+        foreach (var assignment in group.JointAssignments)
+        {
+            if (assignment.IsEnabled == false ||
+                !string.IsNullOrWhiteSpace(assignment.SecondInstanceId) ||
+                !IsKnownEdge(assignment.Edge) ||
+                !panelById.TryGetValue(assignment.FirstInstanceId, out var panel) ||
+                IsIgnoredEdge(group, assignment.FirstInstanceId, assignment.Edge))
+            {
+                continue;
+            }
+
+            yield return new ExtrusionSegmentDetail
+            {
+                GroupName = group.GroupName,
+                Category = ExtrusionCategories.PanelToPanel,
+                ExtrusionName = NormalizeName(assignment.ExtrusionName, defaultName),
+                Location = $"{panel.Label} {assignment.Edge}",
+                LengthInches = IsHorizontal(assignment.Edge) ? panel.Length : panel.Width
+            };
         }
     }
 
@@ -497,6 +555,23 @@ public sealed class ExtrusionTakeoffService : IExtrusionTakeoffService
     private static string NormalizeGroupName(string? value) =>
         string.IsNullOrWhiteSpace(value) ? Ungrouped : value.Trim();
 
+    private static string NormalizeSheetGroupName(string? sheetNumber) =>
+        string.IsNullOrWhiteSpace(sheetNumber) ? Ungrouped : $"Sheet {sheetNumber.Trim()}";
+
+    private static string NormalizeGroupingMode(string? value, IReadOnlyList<ExtrusionPanelInstance> panels) =>
+        string.Equals(value, ExtrusionGroupingModes.Group, StringComparison.Ordinal)
+            ? ExtrusionGroupingModes.Group
+            : string.Equals(value, ExtrusionGroupingModes.SheetNumber, StringComparison.Ordinal)
+                ? ExtrusionGroupingModes.SheetNumber
+                : panels.Any(panel => panel.SheetNumber is not null)
+                    ? ExtrusionGroupingModes.SheetNumber
+                    : ExtrusionGroupingModes.Group;
+
+    private static string GetPanelGroupName(ExtrusionPanelInstance panel, string groupingMode) =>
+        string.Equals(groupingMode, ExtrusionGroupingModes.SheetNumber, StringComparison.Ordinal)
+            ? panel.SheetGroupName
+            : panel.GroupName;
+
     private static string DisplayGroupName(string? value) =>
         string.IsNullOrWhiteSpace(value) ? Ungrouped : value.Trim();
 
@@ -512,6 +587,26 @@ public sealed class ExtrusionTakeoffService : IExtrusionTakeoffService
     private static bool IsHorizontal(string edge) =>
         string.Equals(edge, ExtrusionEdgeNames.Top, StringComparison.Ordinal) ||
         string.Equals(edge, ExtrusionEdgeNames.Bottom, StringComparison.Ordinal);
+
+    private static bool IsIgnoredEdge(ExtrusionGroupLayout group, string instanceId, string edge) =>
+        group.EdgeAssignments.Any(assignment =>
+            string.Equals(assignment.InstanceId, instanceId, StringComparison.Ordinal) &&
+            string.Equals(assignment.Edge, edge, StringComparison.Ordinal) &&
+            assignment.IsIgnored);
+
+    private static bool IsIgnoredJoint(ExtrusionGroupLayout group, string firstInstanceId, string secondInstanceId, string firstEdge)
+    {
+        var secondEdge = firstEdge switch
+        {
+            ExtrusionEdgeNames.Right => ExtrusionEdgeNames.Left,
+            ExtrusionEdgeNames.Bottom => ExtrusionEdgeNames.Top,
+            ExtrusionEdgeNames.Left => ExtrusionEdgeNames.Right,
+            _ => ExtrusionEdgeNames.Bottom
+        };
+
+        return IsIgnoredEdge(group, firstInstanceId, firstEdge) ||
+               IsIgnoredEdge(group, secondInstanceId, secondEdge);
+    }
 
     private static IEnumerable<(string Edge, int Row, int Column)> NeighborPositions(ExtrusionGridCell cell)
     {

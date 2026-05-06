@@ -3640,6 +3640,44 @@ td {
   overflow: auto;
 }
 
+.extrusions-groups .segmented-control {
+  align-self: flex-start;
+  background: #1d1d1d;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(72px, 1fr));
+  gap: 4px;
+  padding: 4px;
+}
+
+.extrusions-groups .segmented-control button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-weight: 800;
+  min-height: 34px;
+  padding: 6px 14px;
+}
+
+.extrusions-groups .segmented-control button.is-active {
+  background: #47d8ff;
+  border-color: #47d8ff;
+  box-shadow: 0 0 0 2px rgba(71, 216, 255, 0.22);
+  color: #061016;
+}
+
+.extrusions-groups .segmented-control button:not(.is-active):hover:not(:disabled) {
+  background: #2a2a2a;
+  color: var(--text);
+}
+
+.extrusions-groups .segmented-control button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .extrusions-group-button {
   align-items: flex-start;
   background: var(--surface);
@@ -3704,6 +3742,14 @@ td {
 
 .extrusions-viewer-scroll.is-panning {
   cursor: grabbing;
+}
+
+.extrusions-selection-box {
+  background: rgba(37, 99, 235, 0.14);
+  border: 1px solid rgba(37, 99, 235, 0.85);
+  pointer-events: none;
+  position: absolute;
+  z-index: 3;
 }
 
 .extrusions-viewer-grid {
@@ -3784,6 +3830,10 @@ td {
 
 .extrusions-panel-edge--joint {
   background: #2563eb;
+}
+
+.extrusions-panel-edge--ignored {
+  background: #8a8f98;
 }
 
 .extrusions-panel-edge--top,
@@ -3946,6 +3996,12 @@ td {
   background: #eaf2ff;
   border-color: #2563eb;
   color: #1d4ed8;
+}
+
+.extrusions-edge-kind--ignored {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+  color: #4b5563;
 }
 
 .extrusions-summary-list {

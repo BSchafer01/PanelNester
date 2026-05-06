@@ -57,6 +57,14 @@ interface DesktopCloseSaveResult {
   message?: string;
 }
 
+interface DesktopCloseProjectSavePayload {
+  status: 'ready' | 'failed';
+  project?: ProjectRecord | null;
+  filePath?: string | null;
+  suggestedFileName?: string | null;
+  message?: string;
+}
+
 type UnsavedPromptChoice = 'save' | 'discard' | 'cancel';
 
 declare global {
@@ -64,9 +72,10 @@ declare global {
     panelNesterDesktopHost?: {
       createNewProject: () => void | Promise<void>;
       openProject: (request: OpenProjectRequest) => void | Promise<void>;
-      saveProject: () => void | Promise<void>;
-      saveProjectAs: () => void | Promise<void>;
+      saveProject: () => void | Promise<void | DesktopCloseSaveResult>;
+      saveProjectAs: () => void | Promise<void | DesktopCloseSaveResult>;
       saveProjectBeforeClose: () => Promise<DesktopCloseSaveResult>;
+      prepareProjectSaveBeforeClose: () => Promise<DesktopCloseProjectSavePayload>;
     };
   }
 }
@@ -222,6 +231,7 @@ type AppAction =
   | { type: 'stiffener-operation-failed'; message: string }
   | { type: 'stiffener-operation-cleared'; message: string }
   | { type: 'extrusion-layout-changed'; layout: ExtrusionLayoutState; message: string }
+  | { type: 'extrusion-layout-synced'; layout: ExtrusionLayoutState }
   | { type: 'extrusion-operation-started'; message: string }
   | {
       type: 'extrusion-operation-finished';
@@ -1547,6 +1557,11 @@ function reducer(state: AppState, action: AppAction): AppState {
         },
         action.message,
       );
+    case 'extrusion-layout-synced':
+      return {
+        ...state,
+        extrusionLayout: action.layout,
+      };
     case 'extrusion-operation-started':
       return {
         ...state,
@@ -1589,9 +1604,21 @@ export default function App() {
   const startupProjectOpenRef = useRef<(request: OpenProjectRequest) => void | Promise<void>>(
     () => undefined,
   );
-  const saveProjectRef = useRef<() => Promise<void>>(async () => undefined);
-  const saveProjectAsRef = useRef<() => Promise<void>>(async () => undefined);
+  const saveProjectRef = useRef<() => Promise<DesktopCloseSaveResult>>(async () => ({
+    status: 'failed',
+    message: 'Project save is not ready yet.',
+  }));
+  const saveProjectAsRef = useRef<() => Promise<DesktopCloseSaveResult>>(async () => ({
+    status: 'failed',
+    message: 'Project save is not ready yet.',
+  }));
   const saveProjectBeforeCloseRef = useRef<() => Promise<DesktopCloseSaveResult>>(
+    async () => ({
+      status: 'failed',
+      message: 'Project save is not ready yet.',
+    }),
+  );
+  const prepareProjectSaveBeforeCloseRef = useRef<() => Promise<DesktopCloseProjectSavePayload>>(
     async () => ({
       status: 'failed',
       message: 'Project save is not ready yet.',
@@ -1854,13 +1881,10 @@ export default function App() {
       openProject: (request: OpenProjectRequest) => {
         void startupProjectOpenRef.current(request);
       },
-      saveProject: () => {
-        void saveProjectRef.current();
-      },
-      saveProjectAs: () => {
-        void saveProjectAsRef.current();
-      },
+      saveProject: () => saveProjectRef.current(),
+      saveProjectAs: () => saveProjectAsRef.current(),
       saveProjectBeforeClose: () => saveProjectBeforeCloseRef.current(),
+      prepareProjectSaveBeforeClose: () => prepareProjectSaveBeforeCloseRef.current(),
     };
 
     window.panelNesterDesktopHost = desktopHost;
@@ -2480,13 +2504,19 @@ export default function App() {
   };
   createNewProjectRef.current = createNewProject;
   saveProjectBeforeCloseRef.current = async () => saveProject();
+  prepareProjectSaveBeforeCloseRef.current = async () => ({
+    status: 'ready',
+    project: buildProjectRecord(state),
+    filePath: state.projectFilePath ?? null,
+    suggestedFileName: `${state.projectMetadata.projectName
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'optifab-project'}.pnest`,
+  });
   startupProjectOpenRef.current = openProject;
-  saveProjectRef.current = async () => {
-    await saveProject();
-  };
-  saveProjectAsRef.current = async () => {
-    await saveProject({ saveAs: true });
-  };
+  saveProjectRef.current = () => saveProject();
+  saveProjectAsRef.current = () => saveProject({ saveAs: true });
 
   const importFile = async () => {
     dispatch({
@@ -3627,6 +3657,12 @@ export default function App() {
               layout,
               message:
                 'Extrusion layout changed. Save the project to persist these assignments.',
+            })
+          }
+          onLayoutSync={(layout) =>
+            dispatch({
+              type: 'extrusion-layout-synced',
+              layout,
             })
           }
           onExportPdf={exportExtrusionPdfReport}

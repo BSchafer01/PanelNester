@@ -84,6 +84,106 @@ public sealed class ExtrusionTakeoffServiceSpecs
         Assert.Equal(4, groupATrim.RequiredStickCount);
     }
 
+    [Fact]
+    public async Task Sheet_numbers_default_layout_grouping_and_row_column_seed_cells()
+    {
+        var service = new ExtrusionTakeoffService();
+        var project = new Project
+        {
+            State = new ProjectState
+            {
+                Parts =
+                [
+                    CreatePart("row-1", "A-1", "A", 120m, 24m) with
+                    {
+                        SheetNumber = "A2",
+                        RowNumber = 2,
+                        ColumnNumber = 3
+                    },
+                    CreatePart("row-2", "A-2", "A", 60m, 36m) with
+                    {
+                        SheetNumber = "A2",
+                        RowNumber = 1,
+                        ColumnNumber = 1
+                    }
+                ]
+            }
+        };
+
+        var layout = await service.BuildLayoutAsync(new ExtrusionLayoutRequest { Project = project });
+
+        Assert.Equal(ExtrusionGroupingModes.SheetNumber, layout.GroupingMode);
+        var sheet = Assert.Single(layout.Groups);
+        Assert.Equal("Sheet A2", sheet.GroupName);
+        Assert.Contains(sheet.Cells, cell => cell.InstanceId == "row-1#1" && cell.Row == 0 && cell.Column == 2);
+        Assert.Contains(sheet.Cells, cell => cell.InstanceId == "row-2#1" && cell.Row == 1 && cell.Column == 0);
+    }
+
+    [Fact]
+    public async Task Edge_assignments_can_ignore_or_create_boundary_panel_joints()
+    {
+        var service = new ExtrusionTakeoffService();
+        var project = new Project
+        {
+            State = new ProjectState
+            {
+                Parts =
+                [
+                    CreatePart("row-1", "A-1", "A", 120m, 24m),
+                    CreatePart("row-2", "A-2", "A", 60m, 36m)
+                ],
+                ExtrusionLayout = new ExtrusionLayoutState
+                {
+                    GroupingMode = ExtrusionGroupingModes.Group,
+                    Groups =
+                    [
+                        new ExtrusionGroupLayout
+                        {
+                            GroupName = "A",
+                            Rows = 1,
+                            Columns = 2,
+                            Cells =
+                            [
+                                new ExtrusionGridCell { InstanceId = "row-1#1", Row = 0, Column = 0 },
+                                new ExtrusionGridCell { InstanceId = "row-2#1", Row = 0, Column = 1 }
+                            ],
+                            EdgeAssignments =
+                            [
+                                new ExtrusionEdgeAssignment
+                                {
+                                    InstanceId = "row-1#1",
+                                    Edge = ExtrusionEdgeNames.Right,
+                                    IsIgnored = true
+                                }
+                            ],
+                            JointAssignments =
+                            [
+                                new ExtrusionJointAssignment
+                                {
+                                    JointId = "row-1#1|top|boundary",
+                                    FirstInstanceId = "row-1#1",
+                                    SecondInstanceId = string.Empty,
+                                    Edge = ExtrusionEdgeNames.Top,
+                                    ExtrusionName = "Boundary Joint",
+                                    IsEnabled = true
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        };
+
+        var report = await service.BuildReportAsync(new ExtrusionReportRequest { Project = project });
+
+        Assert.DoesNotContain(report.Segments, segment => segment.Location == "A-1#1 / A-2#1");
+        Assert.Contains(report.Segments, segment =>
+            segment.Category == ExtrusionCategories.PanelToPanel &&
+            segment.ExtrusionName == "Boundary Joint" &&
+            segment.Location == "A-1#1 top" &&
+            segment.LengthInches == 120m);
+    }
+
     private static PartRow CreatePart(
         string rowId,
         string importedId,

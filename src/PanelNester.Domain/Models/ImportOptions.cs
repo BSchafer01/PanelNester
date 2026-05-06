@@ -8,6 +8,9 @@ public static class ImportFieldNames
     public const string Quantity = "Quantity";
     public const string Material = "Material";
     public const string Group = "Group";
+    public const string SheetNumber = "Sheet Number";
+    public const string RowNumber = "Row Number";
+    public const string ColumnNumber = "Column Number";
 
     public static readonly IReadOnlyList<string> Required =
     [
@@ -20,7 +23,10 @@ public static class ImportFieldNames
 
     public static readonly IReadOnlyList<string> Optional =
     [
-        Group
+        Group,
+        SheetNumber,
+        RowNumber,
+        ColumnNumber
     ];
 
     public static readonly IReadOnlyList<string> All =

@@ -15,4 +15,10 @@ public sealed record PartRowUpdate
     public string MaterialName { get; init; } = string.Empty;
 
     public string? Group { get; init; }
+
+    public string? SheetNumber { get; init; }
+
+    public string? RowNumber { get; init; }
+
+    public string? ColumnNumber { get; init; }
 }

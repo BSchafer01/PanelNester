@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   ExtrusionAdditionalLineItem,
   ExtrusionEdgeAssignment,
+  ExtrusionGridCell,
   ExtrusionGroupLayout,
   ExtrusionLayoutState,
   ExtrusionLineItemQuantityBasis,
@@ -18,11 +19,13 @@ interface ExtrusionsPageProps {
   canExportPdf: boolean;
   canExportExcel: boolean;
   onLayoutChange: (layout: ExtrusionLayoutState) => void;
+  onLayoutSync: (layout: ExtrusionLayoutState) => void;
   onExportPdf: () => Promise<void>;
   onExportExcel: () => Promise<void>;
 }
 
 const edges = ['top', 'right', 'bottom', 'left'] as const;
+type ExtrusionGroupingMode = 'group' | 'sheet-number';
 
 export function ExtrusionsPage({
   importedRows,
@@ -32,6 +35,7 @@ export function ExtrusionsPage({
   canExportPdf,
   canExportExcel,
   onLayoutChange,
+  onLayoutSync,
   onExportPdf,
   onExportExcel,
 }: ExtrusionsPageProps) {
@@ -40,12 +44,18 @@ export function ExtrusionsPage({
     () => normalizeLayout(layout, panels),
     [layout, panels],
   );
+  const hasSheetNumbers = panels.some((panel) => panel.sheetNumber != null);
   const [activeGroupName, setActiveGroupName] = useState<string>();
   const activeGroup =
     normalizedLayout.groups.find((group) => group.groupName === activeGroupName) ??
     normalizedLayout.groups[0];
-  const [selectedInstanceId, setSelectedInstanceId] = useState<string>();
-  const activePanels = panels.filter((panel) => panel.groupName === activeGroup?.groupName);
+  const [selectedInstanceIds, setSelectedInstanceIds] = useState<string[]>([]);
+  const activePanels = panels.filter(
+    (panel) =>
+      activeGroup &&
+      getPanelGroupName(panel, normalizedLayout.groupingMode as ExtrusionGroupingMode) ===
+        activeGroup.groupName,
+  );
   const segments = useMemo(
     () => buildSegments(normalizedLayout, panels),
     [normalizedLayout, panels],
@@ -71,9 +81,9 @@ export function ExtrusionsPage({
 
   useEffect(() => {
     if (JSON.stringify(layout) !== JSON.stringify(normalizedLayout)) {
-      onLayoutChange(normalizedLayout);
+      onLayoutSync(normalizedLayout);
     }
-  }, [layout, normalizedLayout, onLayoutChange]);
+  }, [layout, normalizedLayout, onLayoutSync]);
 
   const updateLayout = (next: ExtrusionLayoutState) => {
     onLayoutChange(normalizeLayout(next, panels));
@@ -100,16 +110,39 @@ export function ExtrusionsPage({
     });
   };
 
+  const selectedInstanceId = selectedInstanceIds[0];
   const selectedPanel = panels.find((panel) => panel.instanceId === selectedInstanceId);
+  const selectedPanels = panels.filter((panel) => selectedInstanceIds.includes(panel.instanceId));
   const selectedCell = activeGroup?.cells.find((cell) => cell.instanceId === selectedInstanceId);
   const selectedEdges =
     activeGroup?.edgeAssignments.filter(
-      (assignment) => assignment.instanceId === selectedInstanceId,
+      (assignment) => selectedInstanceIds.includes(assignment.instanceId),
     ) ?? [];
   const selectedSides =
     selectedPanel && activeGroup
       ? getPanelSides(activeGroup, selectedPanel.instanceId)
       : [];
+
+  useEffect(() => {
+    const activeIds = new Set(activePanels.map((panel) => panel.instanceId));
+    setSelectedInstanceIds((current) => current.filter((instanceId) => activeIds.has(instanceId)));
+  }, [activePanels]);
+
+  const replaceSelection = (instanceId: string) => {
+    setSelectedInstanceIds([instanceId]);
+  };
+
+  const toggleSelection = (instanceId: string) => {
+    setSelectedInstanceIds((current) =>
+      current.includes(instanceId)
+        ? current.filter((selectedId) => selectedId !== instanceId)
+        : [...current, instanceId],
+    );
+  };
+
+  const setSelection = (instanceIds: string[]) => {
+    setSelectedInstanceIds(Array.from(new Set(instanceIds)));
+  };
 
   const movePanel = (instanceId: string, row: number, column: number) => {
     if (!activeGroup) {
@@ -117,21 +150,165 @@ export function ExtrusionsPage({
     }
 
     const sourceCell = activeGroup.cells.find((cell) => cell.instanceId === instanceId);
-    const targetCell = activeGroup.cells.find(
-      (cell) => cell.row === row && cell.column === column,
+    if (!sourceCell) {
+      return;
+    }
+
+    const idsToMove =
+      selectedInstanceIds.includes(instanceId) && selectedInstanceIds.length > 1
+        ? selectedInstanceIds
+        : [instanceId];
+    const selectedIdSet = new Set(idsToMove);
+    const rowDelta = row - sourceCell.row;
+    const columnDelta = column - sourceCell.column;
+    const nextPositions = new Map<string, { row: number; column: number }>();
+    for (const cell of activeGroup.cells) {
+      if (!selectedIdSet.has(cell.instanceId)) {
+        continue;
+      }
+
+      const nextRow = cell.row + rowDelta;
+      const nextColumn = cell.column + columnDelta;
+      if (
+        nextRow < 0 ||
+        nextColumn < 0 ||
+        nextRow >= activeGroup.rows ||
+        nextColumn >= activeGroup.columns
+      ) {
+        return;
+      }
+
+      nextPositions.set(cell.instanceId, { row: nextRow, column: nextColumn });
+    }
+
+    const originalSelectedPositions = new Set(
+      activeGroup.cells
+        .filter((cell) => selectedIdSet.has(cell.instanceId))
+        .map((cell) => `${cell.row}:${cell.column}`),
+    );
+    const nextSelectedPositions = new Set(
+      Array.from(nextPositions.values()).map((position) => `${position.row}:${position.column}`),
+    );
+    const displacedPositions = new Set<string>();
+    const blocked = activeGroup.cells.some((cell) => {
+      if (selectedIdSet.has(cell.instanceId)) {
+        return false;
+      }
+
+      if (!nextSelectedPositions.has(`${cell.row}:${cell.column}`)) {
+        return false;
+      }
+
+      const displacedPosition = {
+        row: cell.row - rowDelta,
+        column: cell.column - columnDelta,
+      };
+      const displacedKey = `${displacedPosition.row}:${displacedPosition.column}`;
+      if (
+        displacedPosition.row < 0 ||
+        displacedPosition.column < 0 ||
+        displacedPosition.row >= activeGroup.rows ||
+        displacedPosition.column >= activeGroup.columns ||
+        !originalSelectedPositions.has(displacedKey) ||
+        displacedPositions.has(displacedKey)
+      ) {
+        return true;
+      }
+
+      displacedPositions.add(displacedKey);
+      nextPositions.set(cell.instanceId, displacedPosition);
+      return false;
+    });
+    if (blocked) {
+      return;
+    }
+
+    updateActiveGroup({
+      ...activeGroup,
+      cells: activeGroup.cells.map((cell) => {
+        const nextPosition = nextPositions.get(cell.instanceId);
+        return nextPosition ? { ...cell, ...nextPosition } : cell;
+      }),
+    });
+  };
+
+  const applySelectedSideMode = (side: PanelSide, mode: 'edge' | 'joint' | 'ignore') => {
+    if (!activeGroup) {
+      return;
+    }
+
+    const sides = selectedPanels.flatMap((panel) =>
+      getPanelSides(activeGroup, panel.instanceId).filter((candidate) => candidate.edge === side.edge),
     );
     updateActiveGroup({
       ...activeGroup,
-      cells: activeGroup.cells.map((cell) =>
-        cell.instanceId === instanceId
-          ? { ...cell, row, column }
-          : targetCell && sourceCell && cell.instanceId === targetCell.instanceId
-            ? {
-                ...cell,
-                row: sourceCell.row,
-                column: sourceCell.column,
-              }
-            : cell,
+      edgeAssignments: sides.reduce(
+        (assignments, candidate) =>
+          mode === 'joint'
+            ? assignments.filter(
+                (item) =>
+                  !(item.instanceId === candidate.firstInstanceId && item.edge === candidate.edge),
+              )
+            : setEdgeExtrusionName(
+                assignments,
+                candidate.firstInstanceId,
+                candidate.edge,
+                normalizedLayout.edgeExtrusionName,
+                normalizedLayout.edgeExtrusionName,
+                mode === 'ignore',
+              ),
+        activeGroup.edgeAssignments,
+      ),
+      jointAssignments: sides.reduce(
+        (assignments, candidate) =>
+          setJointEnabled(
+            assignments,
+            candidate,
+            mode === 'joint',
+            normalizedLayout.panelToPanelExtrusionName,
+          ),
+        activeGroup.jointAssignments,
+      ),
+    });
+  };
+
+  const applySelectedExtrusionName = (side: PanelSide, extrusionName: string) => {
+    if (!activeGroup) {
+      return;
+    }
+
+    const sides = selectedPanels.flatMap((panel) =>
+      getPanelSides(activeGroup, panel.instanceId).filter((candidate) => candidate.edge === side.edge),
+    );
+    updateActiveGroup({
+      ...activeGroup,
+      edgeAssignments: sides.reduce(
+        (assignments, candidate) => {
+          const mode = getSideMode(activeGroup, candidate);
+          return mode === 'edge'
+            ? setEdgeExtrusionName(
+                assignments,
+                candidate.firstInstanceId,
+                candidate.edge,
+                extrusionName,
+                normalizedLayout.edgeExtrusionName,
+                false,
+              )
+            : assignments;
+        },
+        activeGroup.edgeAssignments,
+      ),
+      jointAssignments: sides.reduce(
+        (assignments, candidate) =>
+          getSideMode(activeGroup, candidate) === 'joint'
+            ? setJointExtrusionName(
+                assignments,
+                candidate,
+                extrusionName,
+                normalizedLayout.panelToPanelExtrusionName,
+              )
+            : assignments,
+        activeGroup.jointAssignments,
       ),
     });
   };
@@ -310,8 +487,41 @@ export function ExtrusionsPage({
             <span>Groups</span>
             <small>{panels.length} panels</small>
           </div>
+          <div className="segmented-control" aria-label="Extrusion grouping">
+            <button
+              className={normalizedLayout.groupingMode !== 'sheet-number' ? 'is-active' : undefined}
+              onClick={() =>
+                updateLayout({
+                  ...normalizedLayout,
+                  groupingMode: 'group',
+                  groups: [],
+                })
+              }
+              type="button"
+            >
+              Group
+            </button>
+            <button
+              className={normalizedLayout.groupingMode === 'sheet-number' ? 'is-active' : undefined}
+              disabled={!hasSheetNumbers}
+              onClick={() =>
+                updateLayout({
+                  ...normalizedLayout,
+                  groupingMode: 'sheet-number',
+                  groups: [],
+                })
+              }
+              type="button"
+            >
+              Sheet
+            </button>
+          </div>
           {normalizedLayout.groups.map((group) => {
-            const count = panels.filter((panel) => panel.groupName === group.groupName).length;
+            const count = panels.filter(
+              (panel) =>
+                getPanelGroupName(panel, normalizedLayout.groupingMode as ExtrusionGroupingMode) ===
+                group.groupName,
+            ).length;
             return (
               <button
                 className={
@@ -388,28 +598,38 @@ export function ExtrusionsPage({
                 <ExtrusionViewer
                   group={activeGroup}
                   panels={activePanels}
-                  selectedInstanceId={selectedInstanceId}
+                  selectedInstanceIds={selectedInstanceIds}
                   onMove={movePanel}
-                  onSelect={setSelectedInstanceId}
+                  onReplaceSelection={replaceSelection}
+                  onSelectMany={setSelection}
+                  onToggleSelection={toggleSelection}
                 />
               </div>
 
               <aside className="module-panel extrusions-inspector">
                 <div className="results-sidebar__section-head">
                   <span>Panel Inspector</span>
-                  <small>{selectedPanel?.label ?? 'No selection'}</small>
+                  <small>
+                    {selectedPanels.length > 1
+                      ? `${selectedPanels.length} selected`
+                      : selectedPanel?.label ?? 'No selection'}
+                  </small>
                 </div>
                 {selectedPanel ? (
                   <>
                     <div className="extrusions-panel-meta">
-                      <strong>{selectedPanel.label}</strong>
+                      <strong>
+                        {selectedPanels.length > 1
+                          ? `${selectedPanels.length} panels selected`
+                          : selectedPanel.label}
+                      </strong>
                       <span>
                         {formatDimension(selectedPanel.length)} x{' '}
                         {formatDimension(selectedPanel.width)}
                       </span>
                       {selectedCell ? (
                         <span>
-                          Row {selectedCell.row + 1}, column {selectedCell.column + 1}
+                          Row {getBuildingRowNumber(activeGroup, selectedCell)}, column {selectedCell.column + 1}
                         </span>
                       ) : null}
                     </div>
@@ -455,24 +675,51 @@ export function ExtrusionsPage({
                     ) : null}
                     <div className="extrusions-edge-editor">
                       {selectedSides.map((side) => {
-                        const assignment = selectedEdges.find((item) => item.edge === side.edge);
+                        const sideStates = selectedPanels.map((panel) => {
+                          const matchingSide = getPanelSides(activeGroup, panel.instanceId).find(
+                            (candidate) => candidate.edge === side.edge,
+                          ) ?? side;
+                          return getSideEditorState(
+                            activeGroup,
+                            matchingSide,
+                            normalizedLayout.edgeExtrusionName,
+                            normalizedLayout.panelToPanelExtrusionName,
+                          );
+                        });
+                        const modeValue = getMixedValue(sideStates.map((state) => state.mode));
+                        const extrusionValue = getMixedValue(
+                          sideStates
+                            .filter((state) => state.mode !== 'ignore')
+                            .map((state) => state.extrusionName),
+                        );
+                        const assignment = selectedEdges.find(
+                          (item) => item.instanceId === selectedPanel.instanceId && item.edge === side.edge,
+                        );
                         const jointAssignment = activeGroup.jointAssignments.find(
                           (item) => item.jointId === side.jointId,
                         );
+                        const isIgnored = assignment?.isIgnored === true;
                         const isPanelJoint =
+                          !isIgnored &&
                           side.category === 'Panel-to-panel' &&
-                          jointAssignment?.isEnabled !== false;
-                        const currentName = isPanelJoint
-                          ? (jointAssignment?.extrusionName ??
-                            normalizedLayout.panelToPanelExtrusionName)
-                          : (assignment?.extrusionName ?? normalizedLayout.edgeExtrusionName);
-                        const displayedCategory = isPanelJoint ? 'Panel-to-panel' : 'Edge';
+                          (side.secondInstanceId
+                            ? jointAssignment?.isEnabled !== false
+                            : jointAssignment?.isEnabled === true);
+                        const displayedCategory = modeValue === 'varies'
+                          ? 'Varies'
+                          : modeValue === 'ignore'
+                            ? 'Ignore'
+                            : modeValue === 'joint'
+                              ? 'Panel-to-panel'
+                              : 'Edge';
                         return (
                           <div className="extrusions-edge-row" key={side.edge}>
                             <strong>{side.edge}</strong>
                             <span
                               className={
-                                isPanelJoint
+                                isIgnored
+                                  ? 'extrusions-edge-kind extrusions-edge-kind--ignored'
+                                  : isPanelJoint
                                   ? 'extrusions-edge-kind extrusions-edge-kind--joint'
                                   : 'extrusions-edge-kind'
                               }
@@ -481,88 +728,41 @@ export function ExtrusionsPage({
                             </span>
                             <div className="extrusions-side-mode">
                               <button
-                                className={!isPanelJoint ? 'is-active' : undefined}
-                                onClick={() =>
-                                  updateActiveGroup({
-                                    ...activeGroup,
-                                    edgeAssignments: setEdgeExtrusionName(
-                                      activeGroup.edgeAssignments,
-                                      selectedPanel.instanceId,
-                                      side.edge,
-                                      assignment?.extrusionName ?? normalizedLayout.edgeExtrusionName,
-                                      normalizedLayout.edgeExtrusionName,
-                                    ),
-                                    jointAssignments: side.jointId
-                                      ? setJointEnabled(
-                                          activeGroup.jointAssignments,
-                                          side,
-                                          false,
-                                          normalizedLayout.panelToPanelExtrusionName,
-                                        )
-                                      : activeGroup.jointAssignments,
-                                  })
-                                }
+                                className={modeValue === 'edge' ? 'is-active' : undefined}
+                                onClick={() => applySelectedSideMode(side, 'edge')}
                                 type="button"
                               >
                                 Edge
                               </button>
                               <button
-                                className={isPanelJoint ? 'is-active' : undefined}
-                                disabled={!side.secondInstanceId}
-                                onClick={() =>
-                                  updateActiveGroup({
-                                    ...activeGroup,
-                                    edgeAssignments: activeGroup.edgeAssignments.filter(
-                                      (item) =>
-                                        !(
-                                          item.instanceId === selectedPanel.instanceId &&
-                                          item.edge === side.edge
-                                        ),
-                                    ),
-                                    jointAssignments: setJointEnabled(
-                                      activeGroup.jointAssignments,
-                                      side,
-                                      true,
-                                      normalizedLayout.panelToPanelExtrusionName,
-                                    ),
-                                  })
-                                }
+                                className={modeValue === 'joint' ? 'is-active' : undefined}
+                                onClick={() => applySelectedSideMode(side, 'joint')}
                                 type="button"
                               >
                                 Joint
                               </button>
+                              <button
+                                className={modeValue === 'ignore' ? 'is-active' : undefined}
+                                onClick={() => applySelectedSideMode(side, 'ignore')}
+                                type="button"
+                              >
+                                Ignore
+                              </button>
                             </div>
-                            <input
-                              onChange={(event) =>
-                                updateActiveGroup({
-                                  ...activeGroup,
-                                  edgeAssignments: isPanelJoint
-                                    ? activeGroup.edgeAssignments
-                                    : setEdgeExtrusionName(
-                                        activeGroup.edgeAssignments,
-                                        selectedPanel.instanceId,
-                                        side.edge,
-                                        event.target.value,
-                                        normalizedLayout.edgeExtrusionName,
-                                      ),
-                                  jointAssignments: isPanelJoint
-                                    ? setJointExtrusionName(
-                                        activeGroup.jointAssignments,
-                                        side,
-                                        event.target.value,
-                                        normalizedLayout.panelToPanelExtrusionName,
-                                      )
-                                    : activeGroup.jointAssignments,
-                                })
-                              }
+                            {modeValue !== 'ignore' ? (
+                              <input
+                              onChange={(event) => applySelectedExtrusionName(side, event.target.value)}
                               placeholder={
-                                isPanelJoint
+                                extrusionValue === 'varies'
+                                  ? 'varies'
+                                  : modeValue === 'joint'
                                   ? normalizedLayout.panelToPanelExtrusionName
                                   : normalizedLayout.edgeExtrusionName
                               }
                               type="text"
-                              value={currentName}
-                            />
+                              value={extrusionValue === 'varies' ? '' : extrusionValue}
+                              />
+                            ) : null}
                           </div>
                         );
                       })}
@@ -612,12 +812,14 @@ export function ExtrusionsPage({
                       return (
                         <tr
                           className={
-                            panel.instanceId === selectedInstanceId
+                            selectedInstanceIds.includes(panel.instanceId)
                               ? 'table-row--active'
                               : undefined
                           }
                           key={panel.instanceId}
-                          onClick={() => setSelectedInstanceId(panel.instanceId)}
+                          onClick={(event) =>
+                            event.shiftKey ? toggleSelection(panel.instanceId) : replaceSelection(panel.instanceId)
+                          }
                         >
                           <td>{panel.label}</td>
                           <td>{panel.materialName}</td>
@@ -625,7 +827,7 @@ export function ExtrusionsPage({
                             {formatDimension(panel.length)} x {formatDimension(panel.width)}
                           </td>
                           <td>
-                            {cell ? `${cell.row + 1}, ${cell.column + 1}` : 'Unplaced'}
+                            {cell ? `${getBuildingRowNumber(activeGroup, cell)}, ${cell.column + 1}` : 'Unplaced'}
                           </td>
                         </tr>
                       );
@@ -651,19 +853,31 @@ export function ExtrusionsPage({
 function ExtrusionViewer({
   group,
   panels,
-  selectedInstanceId,
+  selectedInstanceIds,
   onMove,
-  onSelect,
+  onReplaceSelection,
+  onSelectMany,
+  onToggleSelection,
 }: {
   group: ExtrusionGroupLayout;
   panels: ExtrusionPanelInstance[];
-  selectedInstanceId?: string;
+  selectedInstanceIds: string[];
   onMove: (instanceId: string, row: number, column: number) => void;
-  onSelect: (instanceId: string) => void;
+  onReplaceSelection: (instanceId: string) => void;
+  onSelectMany: (instanceIds: string[]) => void;
+  onToggleSelection: (instanceId: string) => void;
 }) {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const panDragRef = useRef<{ pointerId: number; x: number; y: number; panX: number; panY: number } | null>(null);
+  const selectionDragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    additive: boolean;
+    baseSelection: string[];
+  } | null>(null);
+  const [selectionBox, setSelectionBox] = useState<{ left: number; top: number; width: number; height: number }>();
   const panelById = useMemo(
     () => new Map(panels.map((panel) => [panel.instanceId, panel])),
     [panels],
@@ -687,6 +901,31 @@ function ExtrusionViewer({
         className="extrusions-viewer-scroll"
         onContextMenu={(event) => event.preventDefault()}
         onPointerDown={(event) => {
+          if (event.button === 0) {
+            const target = event.target as HTMLElement;
+            if (target.closest('.extrusions-panel-tile')) {
+              return;
+            }
+
+            event.preventDefault();
+            const rect = event.currentTarget.getBoundingClientRect();
+            selectionDragRef.current = {
+              pointerId: event.pointerId,
+              startX: event.clientX,
+              startY: event.clientY,
+              additive: event.shiftKey,
+              baseSelection: selectedInstanceIds,
+            };
+            setSelectionBox({
+              left: event.clientX - rect.left,
+              top: event.clientY - rect.top,
+              width: 0,
+              height: 0,
+            });
+            event.currentTarget.setPointerCapture(event.pointerId);
+            return;
+          }
+
           if (event.button !== 1 && event.button !== 2) {
             return;
           }
@@ -703,6 +942,18 @@ function ExtrusionViewer({
           event.currentTarget.classList.add('is-panning');
         }}
         onPointerMove={(event) => {
+          const selectionDrag = selectionDragRef.current;
+          if (selectionDrag?.pointerId === event.pointerId) {
+            event.preventDefault();
+            const rect = event.currentTarget.getBoundingClientRect();
+            const left = Math.min(selectionDrag.startX, event.clientX) - rect.left;
+            const top = Math.min(selectionDrag.startY, event.clientY) - rect.top;
+            const width = Math.abs(event.clientX - selectionDrag.startX);
+            const height = Math.abs(event.clientY - selectionDrag.startY);
+            setSelectionBox({ left, top, width, height });
+            return;
+          }
+
           const drag = panDragRef.current;
           if (!drag || drag.pointerId !== event.pointerId) {
             return;
@@ -715,12 +966,29 @@ function ExtrusionViewer({
           });
         }}
         onPointerUp={(event) => {
+          const selectionDrag = selectionDragRef.current;
+          if (selectionDrag?.pointerId === event.pointerId) {
+            const selectedByBox = collectPanelIdsInBox(event.currentTarget, selectionBox);
+            const nextSelection = selectionDrag.additive
+              ? Array.from(new Set([...selectionDrag.baseSelection, ...selectedByBox]))
+              : selectedByBox;
+            onSelectMany(nextSelection);
+            selectionDragRef.current = null;
+            setSelectionBox(undefined);
+            return;
+          }
+
           if (panDragRef.current?.pointerId === event.pointerId) {
             panDragRef.current = null;
             event.currentTarget.classList.remove('is-panning');
           }
         }}
         onPointerCancel={(event) => {
+          if (selectionDragRef.current?.pointerId === event.pointerId) {
+            selectionDragRef.current = null;
+            setSelectionBox(undefined);
+          }
+
           if (panDragRef.current?.pointerId === event.pointerId) {
             panDragRef.current = null;
             event.currentTarget.classList.remove('is-panning');
@@ -756,7 +1024,7 @@ function ExtrusionViewer({
         const sides = panel ? getPanelSides(group, panel.instanceId) : [];
         return (
           <div
-            className={panel?.instanceId === selectedInstanceId ? 'extrusions-cell is-selected' : 'extrusions-cell'}
+            className={panel && selectedInstanceIds.includes(panel.instanceId) ? 'extrusions-cell is-selected' : 'extrusions-cell'}
             key={`${row}:${column}`}
             onDragOver={(event) => event.preventDefault()}
             onDrop={(event) => {
@@ -768,13 +1036,18 @@ function ExtrusionViewer({
           >
             {panel ? (
               <button
+                data-instance-id={panel.instanceId}
                 className="extrusions-panel-tile"
                 draggable
-                onClick={() => onSelect(panel.instanceId)}
+                onClick={(event) =>
+                  event.shiftKey ? onToggleSelection(panel.instanceId) : onReplaceSelection(panel.instanceId)
+                }
                 onDragStart={(event) => {
                   event.dataTransfer.effectAllowed = 'move';
                   event.dataTransfer.setData('text/plain', panel.instanceId);
-                  onSelect(panel.instanceId);
+                  if (!selectedInstanceIds.includes(panel.instanceId)) {
+                    onReplaceSelection(panel.instanceId);
+                  }
                 }}
                 style={{
                   aspectRatio: `${Math.max(panel.length, 1)} / ${Math.max(panel.width, 1)}`,
@@ -786,12 +1059,7 @@ function ExtrusionViewer({
                 {sides.map((side) => (
                   <span
                     aria-hidden="true"
-                    className={
-                      side.category === 'Panel-to-panel' &&
-                      group.jointAssignments.find((item) => item.jointId === side.jointId)?.isEnabled !== false
-                        ? `extrusions-panel-edge extrusions-panel-edge--${side.edge} extrusions-panel-edge--joint`
-                        : `extrusions-panel-edge extrusions-panel-edge--${side.edge}`
-                    }
+                    className={getPanelEdgeClassName(group, side)}
                     key={side.edge}
                   />
                 ))}
@@ -802,6 +1070,7 @@ function ExtrusionViewer({
         );
           })}
         </div>
+        {selectionBox ? <div className="extrusions-selection-box" style={selectionBox} /> : null}
       </div>
     </div>
   );
@@ -812,6 +1081,7 @@ function expandPanels(parts: PartRow[]): ExtrusionPanelInstance[] {
     .filter((part) => part.validationStatus !== 'error' && part.quantity > 0 && part.length > 0 && part.width > 0)
     .flatMap((part, partIndex) => {
       const groupName = part.group?.trim() || 'Ungrouped';
+      const sheetGroupName = part.sheetNumber?.trim() ? `Sheet ${part.sheetNumber.trim()}` : 'Ungrouped';
       const sourceRowId = part.rowId || part.importedId || `panel-${partIndex + 1}`;
       const labelBase = part.importedId || part.rowId || `Panel ${partIndex + 1}`;
       return Array.from({ length: part.quantity }, (_, index) => ({
@@ -822,6 +1092,10 @@ function expandPanels(parts: PartRow[]): ExtrusionPanelInstance[] {
         label: `${labelBase}#${index + 1}`,
         materialName: part.materialName,
         groupName,
+        sheetGroupName,
+        sheetNumber: part.sheetNumber ?? null,
+        rowNumber: part.rowNumber ?? null,
+        columnNumber: part.columnNumber ?? null,
         length: part.length,
         width: part.width,
         isStale: false,
@@ -833,26 +1107,38 @@ function normalizeLayout(
   layout: ExtrusionLayoutState,
   panels: ExtrusionPanelInstance[],
 ): ExtrusionLayoutState {
+  const groupingMode = normalizeGroupingMode(layout.groupingMode, panels);
   const existing = new Map(layout.groups.map((group) => [group.groupName, group]));
-  const groups = Array.from(new Set(panels.map((panel) => panel.groupName))).sort();
+  const groups = Array.from(new Set(panels.map((panel) => getPanelGroupName(panel, groupingMode)))).sort();
   return {
+    groupingMode,
     panelToPanelExtrusionName: layout.panelToPanelExtrusionName || 'Panel Joint',
     edgeExtrusionName: layout.edgeExtrusionName || 'Perimeter Edge',
     panelToPanelStickLengthFeet: normalizeStickLength(layout.panelToPanelStickLengthFeet),
     edgeStickLengthFeet: normalizeStickLength(layout.edgeStickLengthFeet),
     additionalLineItems: normalizeAdditionalLineItems(layout.additionalLineItems),
-    groups: groups.map((groupName) => normalizeGroup(groupName, panels, existing.get(groupName))),
+    groups: groups.map((groupName) =>
+      normalizeGroup(groupName, panels, groupingMode, existing.get(groupName)),
+    ),
   };
 }
 
 function normalizeGroup(
   groupName: string,
   panels: ExtrusionPanelInstance[],
+  groupingMode: ExtrusionGroupingMode,
   existing?: ExtrusionGroupLayout,
 ): ExtrusionGroupLayout {
-  const groupPanels = panels.filter((panel) => panel.groupName === groupName);
+  const groupPanels = panels.filter(
+    (panel) => getPanelGroupName(panel, groupingMode) === groupName,
+  );
   const columns = Math.max(existing?.columns ?? Math.ceil(Math.sqrt(groupPanels.length || 1)), 1);
-  const rows = Math.max(existing?.rows ?? Math.ceil((groupPanels.length || 1) / columns), 1);
+  let rows = Math.max(existing?.rows ?? Math.ceil((groupPanels.length || 1) / columns), 1);
+  const maximumImportedRowNumber = Math.max(
+    0,
+    ...groupPanels.map((panel) => panel.rowNumber ?? 0),
+  );
+  rows = Math.max(rows, maximumImportedRowNumber);
   const cells = [...(existing?.cells ?? [])].filter((cell) =>
     groupPanels.some((panel) => panel.instanceId === cell.instanceId),
   );
@@ -860,6 +1146,20 @@ function normalizeGroup(
     if (cells.some((cell) => cell.instanceId === panel.instanceId)) {
       return;
     }
+    if (panel.rowNumber != null && panel.columnNumber != null) {
+      const row = rows - panel.rowNumber;
+      const column = panel.columnNumber - 1;
+      const occupied = cells.some((cell) => cell.row === row && cell.column === column);
+      if (!occupied) {
+        cells.push({
+          instanceId: panel.instanceId,
+          row,
+          column,
+        });
+        return;
+      }
+    }
+
     const index = cells.length;
     cells.push({
       instanceId: panel.instanceId,
@@ -878,6 +1178,25 @@ function normalizeGroup(
     ),
     jointAssignments: existing?.jointAssignments ?? [],
   };
+}
+
+function getBuildingRowNumber(group: ExtrusionGroupLayout, cell: ExtrusionGridCell): number {
+  return Math.max(1, group.rows - cell.row);
+}
+
+function normalizeGroupingMode(
+  value: ExtrusionLayoutState['groupingMode'],
+  panels: ExtrusionPanelInstance[],
+): ExtrusionGroupingMode {
+  if (value === 'group' || value === 'sheet-number') {
+    return value;
+  }
+
+  return panels.some((panel) => panel.sheetNumber != null) ? 'sheet-number' : 'group';
+}
+
+function getPanelGroupName(panel: ExtrusionPanelInstance, groupingMode: ExtrusionGroupingMode): string {
+  return groupingMode === 'sheet-number' ? panel.sheetGroupName : panel.groupName;
 }
 
 function sortPanelsForRows(panels: ExtrusionPanelInstance[]): ExtrusionPanelInstance[] {
@@ -968,12 +1287,132 @@ function getPanelVisualHeight(panel: ExtrusionPanelInstance): number {
   return Math.max(panel.width, 1);
 }
 
+function collectPanelIdsInBox(
+  container: HTMLElement,
+  box?: { left: number; top: number; width: number; height: number },
+): string[] {
+  if (!box || (box.width < 4 && box.height < 4)) {
+    return [];
+  }
+
+  const containerRect = container.getBoundingClientRect();
+  const selectionRect = {
+    left: containerRect.left + box.left,
+    top: containerRect.top + box.top,
+    right: containerRect.left + box.left + box.width,
+    bottom: containerRect.top + box.top + box.height,
+  };
+
+  return Array.from(container.querySelectorAll<HTMLElement>('.extrusions-panel-tile'))
+    .filter((element) => {
+      const rect = element.getBoundingClientRect();
+      return (
+        rect.left <= selectionRect.right &&
+        rect.right >= selectionRect.left &&
+        rect.top <= selectionRect.bottom &&
+        rect.bottom >= selectionRect.top
+      );
+    })
+    .map((element) => element.dataset.instanceId)
+    .filter((instanceId): instanceId is string => Boolean(instanceId));
+}
+
 interface PanelSide {
   edge: ExtrusionEdgeAssignment['edge'];
   category: 'Edge' | 'Panel-to-panel';
   firstInstanceId: string;
   secondInstanceId?: string;
   jointId?: string;
+}
+
+type SideMode = 'edge' | 'joint' | 'ignore';
+
+interface SideEditorState {
+  extrusionName: string;
+  mode: SideMode;
+}
+
+function getMixedValue<T extends string>(values: T[]): T | 'varies' {
+  const uniqueValues = Array.from(new Set(values));
+  return uniqueValues.length === 1 ? uniqueValues[0] : 'varies';
+}
+
+function getSideMode(group: ExtrusionGroupLayout, side: PanelSide): SideMode {
+  const edgeAssignment = group.edgeAssignments.find(
+    (assignment) =>
+      assignment.instanceId === side.firstInstanceId && assignment.edge === side.edge,
+  );
+  if (edgeAssignment?.isIgnored === true) {
+    return 'ignore';
+  }
+
+  if (side.category !== 'Panel-to-panel' || !side.jointId) {
+    return 'edge';
+  }
+
+  const jointAssignment = group.jointAssignments.find(
+    (assignment) => assignment.jointId === side.jointId,
+  );
+  const isPanelJoint = side.secondInstanceId
+    ? jointAssignment?.isEnabled !== false && edgeAssignment === undefined
+    : jointAssignment?.isEnabled === true;
+  return isPanelJoint ? 'joint' : 'edge';
+}
+
+function getSideEditorState(
+  group: ExtrusionGroupLayout,
+  side: PanelSide,
+  edgeFallbackName: string,
+  jointFallbackName: string,
+): SideEditorState {
+  const mode = getSideMode(group, side);
+  if (mode === 'ignore') {
+    return { extrusionName: '', mode };
+  }
+
+  if (mode === 'joint') {
+    const jointAssignment = group.jointAssignments.find(
+      (assignment) => assignment.jointId === side.jointId,
+    );
+    return {
+      extrusionName: jointAssignment?.extrusionName ?? jointFallbackName,
+      mode,
+    };
+  }
+
+  const edgeAssignment = group.edgeAssignments.find(
+    (assignment) =>
+      assignment.instanceId === side.firstInstanceId && assignment.edge === side.edge,
+  );
+  return {
+    extrusionName: edgeAssignment?.extrusionName ?? edgeFallbackName,
+    mode,
+  };
+}
+
+function getPanelEdgeClassName(group: ExtrusionGroupLayout, side: PanelSide): string {
+  const baseClassName = `extrusions-panel-edge extrusions-panel-edge--${side.edge}`;
+  const edgeAssignment = group.edgeAssignments.find(
+    (assignment) =>
+      assignment.instanceId === side.firstInstanceId && assignment.edge === side.edge,
+  );
+
+  if (edgeAssignment?.isIgnored === true) {
+    return `${baseClassName} extrusions-panel-edge--ignored`;
+  }
+
+  if (side.category !== 'Panel-to-panel' || !side.jointId) {
+    return baseClassName;
+  }
+
+  const jointAssignment = group.jointAssignments.find(
+    (assignment) => assignment.jointId === side.jointId,
+  );
+  const isPanelJoint = side.secondInstanceId
+    ? jointAssignment?.isEnabled !== false && edgeAssignment === undefined
+    : jointAssignment?.isEnabled === true;
+
+  return isPanelJoint ? `${baseClassName} extrusions-panel-edge--joint` : baseClassName;
 }
 
 function getPanelSides(group: ExtrusionGroupLayout, instanceId: string): PanelSide[] {
@@ -1003,8 +1442,9 @@ function getPanelSides(group: ExtrusionGroupLayout, instanceId: string): PanelSi
     if (!neighbor) {
       return {
         edge,
-        category: 'Edge',
+        category: 'Panel-to-panel',
         firstInstanceId: instanceId,
+        jointId: buildBoundaryJointId(instanceId, edge),
       };
     }
 
@@ -1024,7 +1464,7 @@ function setJointExtrusionName(
   extrusionName: string,
   fallbackName: string,
 ): ExtrusionGroupLayout['jointAssignments'] {
-  if (!side.secondInstanceId || !side.jointId) {
+  if (!side.jointId) {
     return assignments;
   }
 
@@ -1036,7 +1476,7 @@ function setJointExtrusionName(
       {
         jointId: side.jointId,
         firstInstanceId: side.firstInstanceId,
-        secondInstanceId: side.secondInstanceId,
+        secondInstanceId: side.secondInstanceId ?? '',
         edge: side.edge,
         extrusionName: nextName,
         isEnabled: true,
@@ -1057,7 +1497,7 @@ function setJointEnabled(
   isEnabled: boolean,
   fallbackName: string,
 ): ExtrusionGroupLayout['jointAssignments'] {
-  if (!side.secondInstanceId || !side.jointId) {
+  if (!side.jointId) {
     return assignments;
   }
 
@@ -1068,7 +1508,7 @@ function setJointEnabled(
       {
         jointId: side.jointId,
         firstInstanceId: side.firstInstanceId,
-        secondInstanceId: side.secondInstanceId,
+        secondInstanceId: side.secondInstanceId ?? '',
         edge: side.edge,
         extrusionName: fallbackName,
         isEnabled,
@@ -1087,6 +1527,7 @@ function setEdgeExtrusionName(
   edge: ExtrusionEdgeAssignment['edge'],
   extrusionName: string,
   fallbackName: string,
+  isIgnored = false,
 ): ExtrusionEdgeAssignment[] {
   const exists = assignments.some(
     (assignment) => assignment.instanceId === instanceId && assignment.edge === edge,
@@ -1099,13 +1540,14 @@ function setEdgeExtrusionName(
         instanceId,
         edge,
         extrusionName: extrusionName.trim() || fallbackName,
+        isIgnored,
       },
     ];
   }
 
   return assignments.map((assignment) =>
     assignment.instanceId === instanceId && assignment.edge === edge
-      ? { ...assignment, extrusionName }
+      ? { ...assignment, extrusionName, isIgnored }
       : assignment,
   );
 }
@@ -1135,12 +1577,13 @@ function buildSegments(
     ...detectJoints(group).flatMap((joint) => {
       const first = panelById.get(joint.first);
       const second = panelById.get(joint.second);
-      if (!first || !second) {
+      if (!first || (!second && !joint.isBoundary)) {
         return [];
       }
       const jointId = buildJointId(joint.first, joint.second);
-      const assignment = group.jointAssignments.find((item) => item.jointId === jointId);
-      if (assignment?.isEnabled === false) {
+      const normalizedJointId = joint.isBoundary ? buildBoundaryJointId(joint.first, joint.edge) : jointId;
+      const assignment = group.jointAssignments.find((item) => item.jointId === normalizedJointId);
+      if (assignment?.isEnabled === false || isIgnoredJoint(group, joint.first, joint.second, joint.edge)) {
         return [];
       }
 
@@ -1148,10 +1591,10 @@ function buildSegments(
         groupName: group.groupName,
         category: 'Panel-to-panel',
         extrusionName: assignment?.extrusionName || layout.panelToPanelExtrusionName,
-        location: `${first.label} / ${second.label}`,
+        location: second ? `${first.label} / ${second.label}` : `${first.label} ${joint.edge}`,
         lengthInches: joint.edge === 'right'
-          ? Math.min(first.width, second.width)
-          : Math.min(first.length, second.length),
+          ? second ? Math.min(first.width, second.width) : first.width
+          : second ? Math.min(first.length, second.length) : first.length,
       }];
     }),
   ]);
@@ -1180,15 +1623,17 @@ function detectVisibleEdges(
               ? `${cell.row + 1}:${cell.column}`
               : `${cell.row}:${cell.column - 1}`;
       const neighbor = byPosition.get(neighborPosition);
-      const jointId = neighbor ? buildJointId(cell.instanceId, neighbor.instanceId) : undefined;
+      const jointId = neighbor
+        ? buildJointId(cell.instanceId, neighbor.instanceId)
+        : buildBoundaryJointId(cell.instanceId, edge);
       const disabledJoint = Boolean(
         jointId && group.jointAssignments.find((item) => item.jointId === jointId)?.isEnabled === false,
       );
-      const explicitEdge = group.edgeAssignments.some(
+      const explicitEdge = group.edgeAssignments.find(
         (item) => item.instanceId === cell.instanceId && item.edge === edge,
       );
       const key = `${cell.instanceId}|${edge}`;
-      if ((neighbor && !disabledJoint && !explicitEdge) || seen.has(key)) {
+      if (explicitEdge?.isIgnored || (neighbor && !disabledJoint && !explicitEdge) || seen.has(key)) {
         return [];
       }
 
@@ -1198,20 +1643,67 @@ function detectVisibleEdges(
   });
 }
 
-function detectJoints(group: ExtrusionGroupLayout): Array<{ first: string; second: string; edge: string }> {
+function detectJoints(group: ExtrusionGroupLayout): Array<{ first: string; second: string; edge: string; isBoundary?: boolean }> {
   const byPosition = new Map(group.cells.map((cell) => [`${cell.row}:${cell.column}`, cell]));
-  return group.cells.flatMap((cell) => {
+  const adjacencyJoints = group.cells.flatMap((cell) => {
     const right = byPosition.get(`${cell.row}:${cell.column + 1}`);
     const bottom = byPosition.get(`${cell.row + 1}:${cell.column}`);
     return [
       right ? { first: cell.instanceId, second: right.instanceId, edge: 'right' } : null,
       bottom ? { first: cell.instanceId, second: bottom.instanceId, edge: 'bottom' } : null,
     ].filter((item): item is { first: string; second: string; edge: string } => Boolean(item));
-  });
+  }).filter((joint) => !isIgnoredJoint(group, joint.first, joint.second, joint.edge));
+  const boundaryJoints = group.jointAssignments
+    .filter((assignment) => assignment.isEnabled !== false && assignment.secondInstanceId.trim().length === 0)
+    .map((assignment) => ({
+      first: assignment.firstInstanceId,
+      second: '',
+      edge: assignment.edge,
+      isBoundary: true,
+    }));
+  return [...adjacencyJoints, ...boundaryJoints];
 }
 
 function buildJointId(first: string, second: string): string {
   return first.localeCompare(second) <= 0 ? `${first}|${second}` : `${second}|${first}`;
+}
+
+function buildBoundaryJointId(instanceId: string, edge: string): string {
+  return `${instanceId}|${edge}|boundary`;
+}
+
+function isIgnoredEdge(group: ExtrusionGroupLayout, instanceId: string, edge: string): boolean {
+  return group.edgeAssignments.some(
+    (assignment) =>
+      assignment.instanceId === instanceId &&
+      assignment.edge === edge &&
+      assignment.isIgnored === true,
+  );
+}
+
+function isIgnoredJoint(
+  group: ExtrusionGroupLayout,
+  firstInstanceId: string,
+  secondInstanceId: string,
+  firstEdge: string,
+): boolean {
+  if (isIgnoredEdge(group, firstInstanceId, firstEdge)) {
+    return true;
+  }
+
+  if (!secondInstanceId) {
+    return false;
+  }
+
+  const secondEdge =
+    firstEdge === 'right'
+      ? 'left'
+      : firstEdge === 'bottom'
+        ? 'top'
+        : firstEdge === 'left'
+          ? 'right'
+          : 'bottom';
+  return isIgnoredEdge(group, secondInstanceId, secondEdge);
 }
 
 function summarizeSegments(

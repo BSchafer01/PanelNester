@@ -925,7 +925,34 @@ public struct PartRow : IFlatbufferObject
         }
     }
 
-    public static void StartPartRow(FlatBufferBuilder builder) => builder.StartTable(12);
+    public string? SheetNumber
+    {
+        get
+        {
+            var o = __p.__offset(28);
+            return o != 0 ? __p.__string(o + __p.bb_pos) : null;
+        }
+    }
+
+    public int RowNumber
+    {
+        get
+        {
+            var o = __p.__offset(30);
+            return o != 0 ? __p.bb.GetInt(o + __p.bb_pos) : 0;
+        }
+    }
+
+    public int ColumnNumber
+    {
+        get
+        {
+            var o = __p.__offset(32);
+            return o != 0 ? __p.bb.GetInt(o + __p.bb_pos) : 0;
+        }
+    }
+
+    public static void StartPartRow(FlatBufferBuilder builder) => builder.StartTable(15);
     public static void AddRowId(FlatBufferBuilder builder, StringOffset rowIdOffset) => builder.AddOffset(0, rowIdOffset.Value, 0);
     public static void AddImportedId(FlatBufferBuilder builder, StringOffset importedIdOffset) => builder.AddOffset(1, importedIdOffset.Value, 0);
     public static void AddLengthText(FlatBufferBuilder builder, StringOffset lengthTextOffset) => builder.AddOffset(2, lengthTextOffset.Value, 0);
@@ -938,6 +965,9 @@ public struct PartRow : IFlatbufferObject
     public static void AddValidationStatus(FlatBufferBuilder builder, StringOffset validationStatusOffset) => builder.AddOffset(9, validationStatusOffset.Value, 0);
     public static void AddValidationMessages(FlatBufferBuilder builder, VectorOffset validationMessagesOffset) => builder.AddOffset(10, validationMessagesOffset.Value, 0);
     public static void AddGroup(FlatBufferBuilder builder, StringOffset groupOffset) => builder.AddOffset(11, groupOffset.Value, 0);
+    public static void AddSheetNumber(FlatBufferBuilder builder, StringOffset sheetNumberOffset) => builder.AddOffset(12, sheetNumberOffset.Value, 0);
+    public static void AddRowNumber(FlatBufferBuilder builder, int rowNumber) => builder.AddInt(13, rowNumber, 0);
+    public static void AddColumnNumber(FlatBufferBuilder builder, int columnNumber) => builder.AddInt(14, columnNumber, 0);
 
     public static VectorOffset CreateValidationMessagesVector(FlatBufferBuilder builder, StringOffset[] data)
     {

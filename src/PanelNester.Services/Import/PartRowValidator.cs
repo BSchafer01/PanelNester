@@ -67,6 +67,9 @@ public sealed class PartRowValidator
         var quantityText = update.Quantity?.Trim() ?? string.Empty;
         var materialName = update.MaterialName?.Trim() ?? string.Empty;
         var group = NormalizeOptional(update.Group);
+        var sheetNumber = NormalizeOptional(update.SheetNumber);
+        var rowNumber = ParseOptionalPositiveInt(update.RowNumber, "Row Number", "row-number", rowId, rowErrors, errors);
+        var columnNumber = ParseOptionalPositiveInt(update.ColumnNumber, "Column Number", "column-number", rowId, rowErrors, errors);
 
         if (string.IsNullOrWhiteSpace(importedId))
         {
@@ -146,6 +149,9 @@ public sealed class PartRowValidator
             Quantity = quantity,
             MaterialName = materialName,
             Group = group,
+            SheetNumber = sheetNumber,
+            RowNumber = rowNumber,
+            ColumnNumber = columnNumber,
             ValidationStatus = validationStatus,
             ValidationMessages = validationMessages
         };
@@ -178,6 +184,35 @@ public sealed class PartRowValidator
 
     private static bool TryParseInt(string rawValue, out int value) =>
         int.TryParse(rawValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
+
+    private static int? ParseOptionalPositiveInt(
+        string? rawValue,
+        string label,
+        string codePrefix,
+        string rowId,
+        ICollection<string> rowErrors,
+        ICollection<ValidationError> errors)
+    {
+        var text = rawValue?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        if (!TryParseInt(text, out var value))
+        {
+            AddError($"invalid-{codePrefix}", $"{label} must be an integer value.", rowId, rowErrors, errors);
+            return null;
+        }
+
+        if (value <= 0)
+        {
+            AddError($"{codePrefix}-out-of-range", $"{label} must be greater than zero.", rowId, rowErrors, errors);
+            return null;
+        }
+
+        return value;
+    }
 
     private static string? NormalizeOptional(string? value)
     {

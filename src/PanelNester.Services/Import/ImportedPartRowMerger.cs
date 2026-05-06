@@ -7,7 +7,10 @@ internal static class ImportedPartRowMerger
 {
     public static IReadOnlyList<PartRowUpdate> MergeCompatibleRows(
         IReadOnlyList<PartRowUpdate> updates,
-        bool useGroupKey)
+        bool useGroupKey,
+        bool useSheetNumberKey,
+        bool useRowNumberKey,
+        bool useColumnNumberKey)
     {
         ArgumentNullException.ThrowIfNull(updates);
 
@@ -23,7 +26,14 @@ internal static class ImportedPartRowMerger
         {
             ArgumentNullException.ThrowIfNull(update);
 
-            if (!TryCreateMergeKey(update, useGroupKey, out var mergeKey, out var quantity))
+            if (!TryCreateMergeKey(
+                    update,
+                    useGroupKey,
+                    useSheetNumberKey,
+                    useRowNumberKey,
+                    useColumnNumberKey,
+                    out var mergeKey,
+                    out var quantity))
             {
                 mergedUpdates.Add(update);
                 continue;
@@ -37,6 +47,9 @@ internal static class ImportedPartRowMerger
                     ImportedId = update.ImportedId.Trim(),
                     MaterialName = update.MaterialName.Trim(),
                     Group = NormalizeOptional(update.Group),
+                    SheetNumber = NormalizeOptional(update.SheetNumber),
+                    RowNumber = NormalizeOptional(update.RowNumber),
+                    ColumnNumber = NormalizeOptional(update.ColumnNumber),
                     Quantity = quantity.ToString(CultureInfo.InvariantCulture)
                 });
                 continue;
@@ -57,12 +70,18 @@ internal static class ImportedPartRowMerger
     private static bool TryCreateMergeKey(
         PartRowUpdate update,
         bool useGroupKey,
+        bool useSheetNumberKey,
+        bool useRowNumberKey,
+        bool useColumnNumberKey,
         out MergeKey mergeKey,
         out long quantity)
     {
         var importedId = update.ImportedId?.Trim() ?? string.Empty;
         var materialName = update.MaterialName?.Trim() ?? string.Empty;
         var group = NormalizeOptional(update.Group);
+        var sheetNumber = NormalizeOptional(update.SheetNumber);
+        var rowNumber = NormalizeOptional(update.RowNumber);
+        var columnNumber = NormalizeOptional(update.ColumnNumber);
 
         quantity = 0;
         mergeKey = default;
@@ -76,7 +95,19 @@ internal static class ImportedPartRowMerger
             return false;
         }
 
-        mergeKey = new MergeKey(importedId, length, width, materialName, useGroupKey ? group : null, useGroupKey);
+        mergeKey = new MergeKey(
+            importedId,
+            length,
+            width,
+            materialName,
+            useGroupKey ? group : null,
+            useGroupKey,
+            useSheetNumberKey ? sheetNumber : null,
+            useSheetNumberKey,
+            useRowNumberKey ? rowNumber : null,
+            useRowNumberKey,
+            useColumnNumberKey ? columnNumber : null,
+            useColumnNumberKey);
         return true;
     }
 
@@ -116,5 +147,11 @@ internal static class ImportedPartRowMerger
         decimal Width,
         string MaterialName,
         string? Group,
-        bool UsesGroupKey);
+        bool UsesGroupKey,
+        string? SheetNumber,
+        bool UsesSheetNumberKey,
+        string? RowNumber,
+        bool UsesRowNumberKey,
+        string? ColumnNumber,
+        bool UsesColumnNumberKey);
 }

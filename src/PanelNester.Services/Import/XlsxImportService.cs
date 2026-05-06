@@ -112,6 +112,9 @@ public sealed class XlsxImportService : IImportService
 
             var rowIndex = 0;
             var hasGroupColumn = columnPlan.FieldToSource.TryGetValue(ImportFieldNames.Group, out var groupSourceColumn);
+            var hasSheetNumberColumn = columnPlan.FieldToSource.TryGetValue(ImportFieldNames.SheetNumber, out var sheetNumberSourceColumn);
+            var hasRowNumberColumn = columnPlan.FieldToSource.TryGetValue(ImportFieldNames.RowNumber, out var rowNumberSourceColumn);
+            var hasColumnNumberColumn = columnPlan.FieldToSource.TryGetValue(ImportFieldNames.ColumnNumber, out var columnNumberSourceColumn);
 
             foreach (var row in usedRows.Skip(1))
             {
@@ -131,7 +134,10 @@ public sealed class XlsxImportService : IImportService
                     Width = GetCellText(row.Cell(headerMap[columnPlan.FieldToSource[ImportFieldNames.Width]])),
                     Quantity = GetCellText(row.Cell(headerMap[columnPlan.FieldToSource[ImportFieldNames.Quantity]])),
                     MaterialName = GetCellText(row.Cell(headerMap[columnPlan.FieldToSource[ImportFieldNames.Material]])),
-                    Group = hasGroupColumn ? GetCellText(row.Cell(headerMap[groupSourceColumn!])) : null
+                    Group = hasGroupColumn ? GetCellText(row.Cell(headerMap[groupSourceColumn!])) : null,
+                    SheetNumber = hasSheetNumberColumn ? GetCellText(row.Cell(headerMap[sheetNumberSourceColumn!])) : null,
+                    RowNumber = hasRowNumberColumn ? GetCellText(row.Cell(headerMap[rowNumberSourceColumn!])) : null,
+                    ColumnNumber = hasColumnNumberColumn ? GetCellText(row.Cell(headerMap[columnNumberSourceColumn!])) : null
                 });
             }
 
@@ -142,7 +148,7 @@ public sealed class XlsxImportService : IImportService
 
             var materialPlan = _mappingResolver.ResolveMaterials(rowUpdates, knownMaterials, request.Options, errors);
             rowUpdates = ImportedPartRowMerger
-                .MergeCompatibleRows(materialPlan.Updates, hasGroupColumn)
+                .MergeCompatibleRows(materialPlan.Updates, hasGroupColumn, hasSheetNumberColumn, hasRowNumberColumn, hasColumnNumberColumn)
                 .ToList();
             materialResolutions = materialPlan.Resolutions;
         }

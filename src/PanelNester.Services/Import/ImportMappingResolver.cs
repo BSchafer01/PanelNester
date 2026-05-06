@@ -58,6 +58,28 @@ internal sealed class ImportMappingResolver
                 "nestgroup",
                 "batch",
                 "batchgroup"
+            ],
+            [ImportFieldNames.SheetNumber] =
+            [
+                "sheetnumber",
+                "sheet",
+                "sheetno",
+                "sheetnum"
+            ],
+            [ImportFieldNames.RowNumber] =
+            [
+                "rownumber",
+                "row",
+                "rowno",
+                "rownum"
+            ],
+            [ImportFieldNames.ColumnNumber] =
+            [
+                "columnnumber",
+                "column",
+                "col",
+                "colno",
+                "colnum"
             ]
         };
 

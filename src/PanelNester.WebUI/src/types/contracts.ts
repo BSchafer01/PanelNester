@@ -119,6 +119,9 @@ export interface PartRow {
   quantity: number;
   materialName: string;
   group?: string | null;
+  sheetNumber?: string | null;
+  rowNumber?: number | null;
+  columnNumber?: number | null;
   validationStatus: ValidationStatus;
   validationMessages: string[];
 }
@@ -135,7 +138,12 @@ export const requiredImportFieldNames = [
   'Material',
 ] as const;
 
-export const optionalImportFieldNames = ['Group'] as const;
+export const optionalImportFieldNames = [
+  'Group',
+  'Sheet Number',
+  'Row Number',
+  'Column Number',
+] as const;
 
 export const importFieldNames = [
   ...requiredImportFieldNames,
@@ -216,6 +224,9 @@ export interface PartRowUpdate {
   quantity: string;
   materialName: string;
   group?: string | null;
+  sheetNumber?: string | null;
+  rowNumber?: string | null;
+  columnNumber?: string | null;
 }
 
 export interface AddPartRowRequest {
@@ -460,6 +471,7 @@ export interface GetStiffenerTakeoffRequest {
 }
 
 export interface ExtrusionLayoutState {
+  groupingMode?: 'group' | 'sheet-number' | '';
   panelToPanelExtrusionName: string;
   edgeExtrusionName: string;
   panelToPanelStickLengthFeet?: number;
@@ -494,6 +506,10 @@ export interface ExtrusionPanelInstance {
   label: string;
   materialName: string;
   groupName: string;
+  sheetGroupName: string;
+  sheetNumber?: string | null;
+  rowNumber?: number | null;
+  columnNumber?: number | null;
   length: number;
   width: number;
   isStale: boolean;
@@ -509,6 +525,7 @@ export interface ExtrusionEdgeAssignment {
   instanceId: string;
   edge: 'top' | 'right' | 'bottom' | 'left';
   extrusionName: string;
+  isIgnored?: boolean;
 }
 
 export interface ExtrusionJointAssignment {
@@ -926,6 +943,7 @@ export const defaultStiffenerTakeoffSettings: StiffenerTakeoffSettings = {
 };
 
 export const defaultExtrusionLayoutState: ExtrusionLayoutState = {
+  groupingMode: '',
   panelToPanelExtrusionName: 'Panel Joint',
   edgeExtrusionName: 'Perimeter Edge',
   panelToPanelStickLengthFeet: 20,

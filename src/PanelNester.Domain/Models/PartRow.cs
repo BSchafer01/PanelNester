@@ -22,6 +22,12 @@ public sealed record PartRow
 
     public string? Group { get; init; }
 
+    public string? SheetNumber { get; init; }
+
+    public int? RowNumber { get; init; }
+
+    public int? ColumnNumber { get; init; }
+
     public string ValidationStatus { get; init; } = ValidationStatuses.Valid;
 
     public IReadOnlyList<string> ValidationMessages { get; init; } = Array.Empty<string>();
@@ -48,6 +54,9 @@ public sealed record PartRow
                Quantity == other.Quantity &&
                string.Equals(MaterialName, other.MaterialName, StringComparison.Ordinal) &&
                string.Equals(Group, other.Group, StringComparison.Ordinal) &&
+               SheetNumber == other.SheetNumber &&
+               RowNumber == other.RowNumber &&
+               ColumnNumber == other.ColumnNumber &&
                string.Equals(ValidationStatus, other.ValidationStatus, StringComparison.Ordinal) &&
                ValidationMessages.SequenceEqual(other.ValidationMessages, StringComparer.Ordinal);
     }
@@ -65,6 +74,9 @@ public sealed record PartRow
         hash.Add(Quantity);
         hash.Add(MaterialName, StringComparer.Ordinal);
         hash.Add(Group, StringComparer.Ordinal);
+        hash.Add(SheetNumber);
+        hash.Add(RowNumber);
+        hash.Add(ColumnNumber);
         hash.Add(ValidationStatus, StringComparer.Ordinal);
 
         foreach (var validationMessage in ValidationMessages)
