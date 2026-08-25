@@ -24,6 +24,7 @@ public sealed class BatchNestingService : IBatchNestingService
         var optimizationGroups = request.OptimizationGroups ?? Array.Empty<OptimizationGroupNestRequest>();
         if (optimizationGroups.Count > 0)
         {
+            ValidateOptimizationGroupIds(optimizationGroups);
             return await NestOptimizationGroupsAsync(request, optimizationGroups, executionId, cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -50,9 +51,7 @@ public sealed class BatchNestingService : IBatchNestingService
         foreach (var group in optimizationGroups.OrderBy(group => group.Order))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var groupId = string.IsNullOrWhiteSpace(group.OptimizationGroupId)
-                ? $"group-{group.Order}"
-                : group.OptimizationGroupId;
+            var groupId = group.OptimizationGroupId;
             var resultId = $"{executionId}:{groupId}";
             var groupParts = group.Parts ?? Array.Empty<PartRow>();
             var ownedPartRowIds = group.OwnedPartRowIds?.Count > 0
@@ -74,6 +73,9 @@ public sealed class BatchNestingService : IBatchNestingService
                 var legacyResult = ResolveLegacyResult(
                     materialResults,
                     ResolveSelectedMaterialName(request.Materials ?? Array.Empty<Material>(), request.SelectedMaterialId));
+                var groupSucceeded =
+                    materialResults.Length > 0 &&
+                    materialResults.All(result => result.Result.Success);
 
                 groupResults.Add(
                     new OptimizationGroupNestResult
@@ -82,8 +84,8 @@ public sealed class BatchNestingService : IBatchNestingService
                         OptimizationGroupId = groupId,
                         Name = group.Name,
                         Order = group.Order,
-                        Success = batch.Success,
-                        FailureMessage = batch.Success ? null : DescribeGroupFailure(batch),
+                        Success = groupSucceeded,
+                        FailureMessage = groupSucceeded ? null : DescribeGroupFailure(batch),
                         InputPartRowIds = groupParts.Select(part => part.RowId).ToArray(),
                         OwnedPartRowIds = ownedPartRowIds,
                         LegacyResult = legacyResult,
@@ -204,7 +206,25 @@ public sealed class BatchNestingService : IBatchNestingService
         return string.IsNullOrWhiteSpace(generated) ? Guid.NewGuid().ToString("N") : generated;
     }
 
+    private static void ValidateOptimizationGroupIds(
+        IReadOnlyList<OptimizationGroupNestRequest> optimizationGroups)
+    {
+        var ids = optimizationGroups.Select(group => group.OptimizationGroupId).ToArray();
+        if (ids.Any(string.IsNullOrWhiteSpace) ||
+            ids.Distinct(StringComparer.Ordinal).Count() != ids.Length)
+        {
+            throw new ArgumentException(
+                "Every Optimization Group run requires a stable unique Optimization Group ID.",
+                nameof(optimizationGroups));
+        }
+    }
+
     private static string DescribeGroupFailure(BatchNestResponse batch) =>
+        batch.MaterialResults
+            .Where(result => !result.Result.Success)
+            .SelectMany(result => result.Result.UnplacedItems)
+            .FirstOrDefault()
+            ?.ReasonDescription ??
         batch.LegacyResult?.UnplacedItems.FirstOrDefault()?.ReasonDescription ??
         "The Optimization Group did not produce a successful layout.";
 

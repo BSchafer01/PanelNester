@@ -384,7 +384,9 @@ export function ResultsPage({
         result.optimizationGroupId === activeOptimizationGroup.optimizationGroupId,
     )?.failureMessage;
   const completedOptimizationGroups = orderedOptimizationGroups.filter(
-    (group) => group.lastBatchNestingResult || group.lastNestingResult,
+    (group) =>
+      group.resultStatus === 'valid' &&
+      (group.lastBatchNestingResult || group.lastNestingResult),
   );
   const projectSheetCount = completedOptimizationGroups.reduce((total, group) => {
     const batchSheets = group.lastBatchNestingResult?.materialResults.reduce(
@@ -766,7 +768,14 @@ export function ResultsPage({
             <p className="eyebrow">Batch Explorer</p>
             <h2>{activeOptimizationGroup?.name ?? 'Explore sheets'}</h2>
             <p className="section-note">{statusMessage}</p>
-            {activeOptimizationGroupFailure ? (
+            {activeOptimizationGroup?.resultStatus === 'stale' ? (
+              <p className="section-note">
+                Stored panels for {activeOptimizationGroup.name} are stale and hidden.
+                Re-run this Optimization Group to inspect current results.
+              </p>
+            ) : null}
+            {activeOptimizationGroup?.resultStatus !== 'stale' &&
+            activeOptimizationGroupFailure ? (
               <p className="section-note">
                 {activeOptimizationGroup.name} failed: {activeOptimizationGroupFailure}
               </p>

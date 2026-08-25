@@ -7,6 +7,26 @@ namespace PanelNester.Services.Tests.Nesting;
 public sealed class OptimizationGroupNestingSpecs
 {
     [Fact]
+    public async Task Group_runs_require_stable_unique_optimization_group_ids()
+    {
+        var material = CreateMaterial();
+        var service = new BatchNestingService(new ShelfNestingService());
+
+        var exception = await Assert.ThrowsAsync<ArgumentException>(() =>
+            service.NestBatchAsync(
+                new BatchNestRequest
+                {
+                    OptimizationGroups =
+                    [
+                        CreateGroup(string.Empty, "Missing", 0, "MISSING-1", material.Name)
+                    ],
+                    Materials = [material]
+                }));
+
+        Assert.Contains("stable unique", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Run_all_keeps_groups_isolated_in_explicit_order_with_unique_identities()
     {
         var material = CreateMaterial();
@@ -92,6 +112,44 @@ public sealed class OptimizationGroupNestingSpecs
         Assert.Contains("simulated group failure", response.OptimizationGroupResults[1].FailureMessage);
         Assert.Single(response.OptimizationGroupResults[0].MaterialResults);
         Assert.Single(response.OptimizationGroupResults[2].MaterialResults);
+    }
+
+    [Fact]
+    public async Task A_group_fails_when_any_owned_material_fails()
+    {
+        var material = CreateMaterial();
+        var group = CreateGroup("mixed", "Mixed", 0, "GOOD-1", material.Name) with
+        {
+            Parts =
+            [
+                .. CreateGroup("mixed", "Mixed", 0, "GOOD-1", material.Name).Parts,
+                new PartRow
+                {
+                    RowId = "missing-material",
+                    ImportedId = "MISSING-1",
+                    Length = 24m,
+                    Width = 12m,
+                    Quantity = 1,
+                    MaterialName = "Unavailable",
+                    ValidationStatus = ValidationStatuses.Valid
+                }
+            ]
+        };
+        var service = new BatchNestingService(new ShelfNestingService(), () => "run-mixed");
+
+        var response = await service.NestBatchAsync(
+            new BatchNestRequest
+            {
+                OptimizationGroups = [group],
+                Materials = [material]
+            });
+
+        Assert.False(response.Success);
+        var groupResult = Assert.Single(response.OptimizationGroupResults);
+        Assert.False(groupResult.Success);
+        Assert.NotNull(groupResult.FailureMessage);
+        Assert.Single(groupResult.MaterialResults, result => result.Result.Success);
+        Assert.Single(groupResult.MaterialResults, result => !result.Result.Success);
     }
 
     private static OptimizationGroupNestRequest CreateGroup(
