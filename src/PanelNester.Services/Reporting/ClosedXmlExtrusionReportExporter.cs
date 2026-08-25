@@ -26,7 +26,7 @@ public sealed class ClosedXmlExtrusionReportExporter : IExtrusionExcelReportExpo
 
         using var workbook = new XLWorkbook();
         WriteSummary(workbook.Worksheets.Add("Overall Summary"), report.OverallLengths);
-        WriteByGroup(workbook.Worksheets.Add("By Group"), report.Groups);
+        WriteByGroup(workbook.Worksheets.Add("Optimization-Part Groups"), report.Groups);
         WriteSegments(workbook.Worksheets.Add("Segments"), report.Segments);
         workbook.SaveAs(filePath);
 

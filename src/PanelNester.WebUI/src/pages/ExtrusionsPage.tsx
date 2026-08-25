@@ -56,10 +56,14 @@ export function ExtrusionsPage({
     () => normalizeLayout(layout, panels),
     [layout, panels],
   );
-  const hasSheetNumbers = panels.some((panel) => panel.sheetNumber != null);
   const [selectedOptimizationGroupId, setSelectedOptimizationGroupId] = useState(
     activeOptimizationGroupId ?? orderedOptimizationGroups[0]?.optimizationGroupId ?? '',
   );
+  const visiblePanels = panels.filter(
+    (panel) =>
+      !selectedOptimizationGroupId || panel.optimizationGroupId === selectedOptimizationGroupId,
+  );
+  const hasSheetNumbers = visiblePanels.some((panel) => panel.sheetNumber != null);
   const visibleGroups = normalizedLayout.groups.filter(
     (group) =>
       !selectedOptimizationGroupId ||
@@ -539,7 +543,7 @@ export function ExtrusionsPage({
           ) : null}
           <div className="results-sidebar__section-head">
             <span>Part Groups</span>
-            <small>{panels.length} panels</small>
+            <small>{visiblePanels.length} panels</small>
           </div>
           <div className="segmented-control" aria-label="Extrusion grouping">
             <button

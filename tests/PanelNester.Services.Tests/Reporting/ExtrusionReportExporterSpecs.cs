@@ -50,7 +50,7 @@ public sealed class ExtrusionReportExporterSpecs : IDisposable
         await new ClosedXmlExtrusionReportExporter().ExportAsync(report, filePath);
 
         using var workbook = new XLWorkbook(filePath);
-        var worksheet = workbook.Worksheet("By Group");
+        var worksheet = workbook.Worksheet("Optimization-Part Groups");
         Assert.Equal("Optimization Group", worksheet.Cell("A3").GetString());
         Assert.Equal("Part Group", worksheet.Cell("B3").GetString());
         Assert.Equal("First", worksheet.Cell("A4").GetString());
