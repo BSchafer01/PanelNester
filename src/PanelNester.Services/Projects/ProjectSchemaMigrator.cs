@@ -139,7 +139,43 @@ internal static class ProjectSchemaMigrator
         NestResponse? nestingResult,
         BatchNestResponse? batchResult)
     {
-        if (nestingResult is not null && !IsNestResultConsistent(parts, nestingResult))
+        var optimizationGroupResults = batchResult?.OptimizationGroupResults ??
+            Array.Empty<OptimizationGroupNestResult>();
+        var resultParts = parts;
+        if (optimizationGroupResults.Count > 0)
+        {
+            if (optimizationGroupResults.Count != 1)
+            {
+                return false;
+            }
+
+            var groupResult = optimizationGroupResults[0];
+            var ownedPartRowIds = (groupResult.OwnedPartRowIds ?? Array.Empty<string>())
+                .ToHashSet(StringComparer.Ordinal);
+            var currentPartRowIds = parts.Select(part => part.RowId).ToHashSet(StringComparer.Ordinal);
+            if (!currentPartRowIds.SetEquals(ownedPartRowIds))
+            {
+                return false;
+            }
+
+            var inputPartRowIds = (groupResult.InputPartRowIds ?? Array.Empty<string>())
+                .ToHashSet(StringComparer.Ordinal);
+            resultParts = parts.Where(part => inputPartRowIds.Contains(part.RowId)).ToArray();
+            if (resultParts.Count != inputPartRowIds.Count)
+            {
+                return false;
+            }
+
+            if (!groupResult.Success &&
+                groupResult.MaterialResults.Count == 0 &&
+                batchResult!.MaterialResults.Count == 0 &&
+                batchResult.LegacyResult is null)
+            {
+                return !string.IsNullOrWhiteSpace(groupResult.FailureMessage);
+            }
+        }
+
+        if (nestingResult is not null && !IsNestResultConsistent(resultParts, nestingResult))
         {
             return false;
         }
@@ -149,20 +185,21 @@ internal static class ProjectSchemaMigrator
             return true;
         }
 
-        if (batchResult.LegacyResult is not null && !IsNestResultConsistent(parts, batchResult.LegacyResult))
+        if (batchResult.LegacyResult is not null &&
+            !IsNestResultConsistent(resultParts, batchResult.LegacyResult))
         {
             return false;
         }
 
-        var materialNames = parts.Select(part => part.MaterialName).ToHashSet(StringComparer.Ordinal);
+        var materialNames = resultParts.Select(part => part.MaterialName).ToHashSet(StringComparer.Ordinal);
         if (batchResult.MaterialResults.Any(result =>
                 !materialNames.Contains(result.MaterialName) ||
-                !IsNestResultConsistent(parts, result.Result)))
+                !IsNestResultConsistent(resultParts, result.Result)))
         {
             return false;
         }
 
-        var expectedPartIds = ExpandResultPartIds(parts).Keys.ToHashSet(StringComparer.Ordinal);
+        var expectedPartIds = ExpandResultPartIds(resultParts).Keys.ToHashSet(StringComparer.Ordinal);
         var batchPartIds = batchResult.MaterialResults
             .SelectMany(result => GetReferencedPartIds(result.Result))
             .ToArray();

@@ -72,6 +72,7 @@ interface ImportPageProps {
   canDeleteRows: boolean;
   batchNestingEnabled: boolean;
   canRunNesting: boolean;
+  canRunAllNesting: boolean;
   readyPartCount: number;
   readyMaterialCount: number;
   onImportFile: () => Promise<void>;
@@ -83,6 +84,7 @@ interface ImportPageProps {
   onUpdatePartRow: (part: PartRowUpdate) => Promise<void>;
   onDeletePartRow: (rowId: string) => Promise<void>;
   onRunNesting: () => Promise<void>;
+  onRunAllNesting: () => Promise<void>;
   optimizationGroups: OptimizationGroup[];
   activeOptimizationGroupId?: string;
   onActivateOptimizationGroup: (optimizationGroupId: string) => void;
@@ -562,6 +564,7 @@ export function ImportPage({
   canDeleteRows,
   batchNestingEnabled,
   canRunNesting,
+  canRunAllNesting,
   readyPartCount,
   readyMaterialCount,
   onImportFile,
@@ -573,6 +576,7 @@ export function ImportPage({
   onUpdatePartRow,
   onDeletePartRow,
   onRunNesting,
+  onRunAllNesting,
   optimizationGroups,
   activeOptimizationGroupId,
   onActivateOptimizationGroup,
@@ -1001,10 +1005,21 @@ export function ImportPage({
               {nestingBusy
                 ? 'Nesting…'
                 : batchNestingEnabled
-                  ? 'Run batch nesting'
+                  ? 'Run active group'
                   : 'Run nesting'}
             </span>
           </button>
+          {batchNestingEnabled ? (
+            <button
+              className="secondary-button module-action-button"
+              disabled={!bridge.connected || !canRunAllNesting || nestingBusy || busy}
+              onClick={() => void onRunAllNesting()}
+              type="button"
+            >
+              <ImportGlyph icon="batch" />
+              <span>{nestingBusy ? 'Nesting…' : 'Run All'}</span>
+            </button>
+          ) : null}
         </div>
       </section>
 

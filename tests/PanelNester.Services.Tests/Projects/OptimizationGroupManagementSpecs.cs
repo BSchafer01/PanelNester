@@ -246,6 +246,199 @@ public sealed class OptimizationGroupManagementSpecs : IDisposable
         Assert.Equal("optimization-group-not-empty", Assert.Single(guarded.Errors).Code);
     }
 
+    [Fact]
+    public async Task Moving_owned_content_invalidates_only_the_old_and_new_optimization_groups()
+    {
+        var sample = Phase03ProjectPersistenceSpec.CreateSampleProject();
+        var movedPart = CreatePart("manual-move", "MOVE-1", "Casework");
+        var targetPart = CreatePart("manual-target", "TARGET-1", "Casework");
+        var untouchedPart = CreatePart("manual-untouched", "UNTOUCHED-1", "Casework");
+        var sourceResults = CreateSavedResults(movedPart, "source");
+        var targetResults = CreateSavedResults(targetPart, "target");
+        var untouchedResults = CreateSavedResults(untouchedPart, "untouched");
+        var project = sample with
+        {
+            State = sample.State with
+            {
+                OptimizationGroups =
+                [
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "source",
+                        Name = "Source",
+                        Order = 0,
+                        Parts = [movedPart],
+                        LastNestingResult = sourceResults.Nest,
+                        LastBatchNestingResult = sourceResults.Batch,
+                        ResultStatus = OptimizationResultStatus.Valid
+                    },
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "target",
+                        Name = "Target",
+                        Order = 1,
+                        Parts = [targetPart],
+                        LastNestingResult = targetResults.Nest,
+                        LastBatchNestingResult = targetResults.Batch,
+                        ResultStatus = OptimizationResultStatus.Valid
+                    },
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "untouched",
+                        Name = "Untouched",
+                        Order = 2,
+                        Parts = [untouchedPart],
+                        LastNestingResult = untouchedResults.Nest,
+                        LastBatchNestingResult = untouchedResults.Batch,
+                        ResultStatus = OptimizationResultStatus.Valid
+                    }
+                ],
+                Parts = [movedPart, targetPart, untouchedPart]
+            }
+        };
+        var service = new ProjectService(new FakeMaterialService());
+
+        var result = await service.UpdateOptimizationGroupsAsync(
+            project,
+            new OptimizationGroupChange
+            {
+                Type = OptimizationGroupChangeType.MovePart,
+                PartRowId = movedPart.RowId,
+                TargetOptimizationGroupId = "target"
+            });
+
+        Assert.True(result.Success);
+        Assert.Equal(
+            [OptimizationResultStatus.Stale, OptimizationResultStatus.Stale, OptimizationResultStatus.Valid],
+            result.Project!.State.OptimizationGroups.Select(group => group.ResultStatus));
+        Assert.Empty(result.Project.State.OptimizationGroups[0].Parts);
+        Assert.Equal([targetPart, movedPart], result.Project.State.OptimizationGroups[1].Parts);
+        Assert.Same(untouchedResults.Batch, result.Project.State.OptimizationGroups[2].LastBatchNestingResult);
+    }
+
+    [Fact]
+    public async Task Failed_group_diagnostics_remain_current_and_inspectable_after_save_and_reopen()
+    {
+        var failedPart = CreatePart("manual-failed", "FAIL-1", "Casework");
+        var excludedPart = CreatePart("manual-excluded", "EXCLUDED-1", "Casework") with
+        {
+            ValidationStatus = ValidationStatuses.Error,
+            ValidationMessages = ["Length is required."]
+        };
+        var failedGroupResult = new OptimizationGroupNestResult
+        {
+            OptimizationResultId = "run-001:failed",
+            OptimizationGroupId = "failed",
+            Name = "Failed",
+            Order = 0,
+            Success = false,
+            FailureMessage = "The nesting engine rejected this Optimization Group.",
+            InputPartRowIds = [failedPart.RowId],
+            OwnedPartRowIds = [failedPart.RowId, excludedPart.RowId]
+        };
+        var failedBatch = new BatchNestResponse
+        {
+            ExecutionId = "run-001",
+            Success = false,
+            OptimizationGroupResults = [failedGroupResult]
+        };
+        var project = new Project
+        {
+            ProjectId = "project-failure",
+            State = new ProjectState
+            {
+                OptimizationGroups =
+                [
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "failed",
+                        Name = "Failed",
+                        Order = 0,
+                        Parts = [failedPart, excludedPart],
+                        LastBatchNestingResult = failedBatch,
+                        ResultStatus = OptimizationResultStatus.Valid
+                    },
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "untouched",
+                        Name = "Untouched",
+                        Order = 1
+                    }
+                ],
+                Parts = [failedPart, excludedPart]
+            }
+        };
+        var service = new ProjectService(new FakeMaterialService());
+        var filePath = Path.Combine(_workspacePath, "failed-group.pnest");
+
+        Assert.True((await service.SaveAsync(project, filePath)).Success);
+        var reopened = await service.LoadAsync(filePath);
+
+        Assert.True(reopened.Success);
+        var failedGroup = reopened.Project!.State.OptimizationGroups[0];
+        Assert.Equal(OptimizationResultStatus.Valid, failedGroup.ResultStatus);
+        var reopenedFailure = Assert.Single(
+            failedGroup.LastBatchNestingResult!.OptimizationGroupResults);
+        Assert.False(reopenedFailure.Success);
+        Assert.Equal(failedGroupResult.FailureMessage, reopenedFailure.FailureMessage);
+        Assert.Equal(OptimizationResultStatus.None,
+            reopened.Project.State.OptimizationGroups[1].ResultStatus);
+    }
+
+    private static (NestResponse Nest, BatchNestResponse Batch) CreateSavedResults(
+        PartRow part,
+        string identity)
+    {
+        var nest = new NestResponse
+        {
+            Success = true,
+            Sheets =
+            [
+                new NestSheet
+                {
+                    SheetId = $"{identity}-sheet",
+                    SheetNumber = 1,
+                    MaterialName = part.MaterialName,
+                    SheetLength = 96m,
+                    SheetWidth = 48m
+                }
+            ],
+            Placements =
+            [
+                new NestPlacement
+                {
+                    PlacementId = $"{identity}-placement",
+                    SheetId = $"{identity}-sheet",
+                    PartId = part.ImportedId,
+                    Width = part.Width,
+                    Height = part.Length
+                }
+            ],
+            Summary = new MaterialSummary
+            {
+                TotalSheets = 1,
+                TotalPlaced = 1,
+                TotalUnplaced = 0
+            }
+        };
+
+        return (
+            nest,
+            new BatchNestResponse
+            {
+                Success = true,
+                LegacyResult = nest,
+                MaterialResults =
+                [
+                    new MaterialNestResult
+                    {
+                        MaterialName = part.MaterialName,
+                        Result = nest
+                    }
+                ]
+            });
+    }
+
     private static PartRow CreatePart(string rowId, string importedId, string partGroup) =>
         new()
         {

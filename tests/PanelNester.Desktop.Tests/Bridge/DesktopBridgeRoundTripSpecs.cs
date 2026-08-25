@@ -213,6 +213,73 @@ public sealed class DesktopBridgeRoundTripSpecs : IDisposable
         }
     }
 
+    [Fact]
+    public async Task Run_all_round_trip_preserves_group_isolation_order_and_result_identities()
+    {
+        var materialFilePath = Path.Combine(_workspacePath, "run-all-materials.json");
+        var repository = new JsonMaterialRepository(materialFilePath);
+        var materialService = new MaterialService(repository);
+        var validator = new PartRowValidator();
+        var nestingService = new ShelfNestingService();
+        var dispatcher = DesktopBridgeRegistration.CreateDefault(
+            new StubFileDialogService(_workspacePath),
+            materialService,
+            new ProjectService(materialService),
+            new FileImportDispatcher(
+                new CsvImportService(repository, validator),
+                new XlsxImportService(repository, validator)),
+            new PartEditorService(repository, validator),
+            nestingService,
+            new BatchNestingService(nestingService, () => "bridge-run-001"),
+            new ReportDataService(),
+            new QuestPdfReportExporter(),
+            new ClosedXmlExcelReportExporter(),
+            () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true));
+        var material = new Material
+        {
+            MaterialId = "mat-maple",
+            Name = "Maple",
+            SheetLength = 96m,
+            SheetWidth = 48m,
+            AllowRotation = true,
+            DefaultSpacing = 0m,
+            DefaultEdgeMargin = 0m
+        };
+
+        var response = await DispatchAsync<BatchNestResponse>(
+            dispatcher,
+            BridgeMessageTypes.RunBatchNesting,
+            new BatchNestRequest
+            {
+                OptimizationGroups =
+                [
+                    CreateRunGroup("group-b", "Group B", 1, "B-001", material.Name),
+                    CreateRunGroup("group-a", "Group A", 0, "A-001", material.Name)
+                ],
+                Materials = [material],
+                KerfWidth = 0m
+            });
+
+        Assert.True(response.Success);
+        Assert.Equal("bridge-run-001", response.ExecutionId);
+        Assert.Equal(["group-a", "group-b"],
+            response.OptimizationGroupResults.Select(result => result.OptimizationGroupId));
+        Assert.Equal(2, response.OptimizationGroupResults
+            .SelectMany(group => group.MaterialResults)
+            .SelectMany(result => result.Result.Sheets)
+            .Select(sheet => sheet.SheetId)
+            .Distinct(StringComparer.Ordinal)
+            .Count());
+        Assert.All(response.OptimizationGroupResults, group =>
+        {
+            var materialResult = Assert.Single(group.MaterialResults);
+            Assert.All(materialResult.Result.Sheets,
+                sheet => Assert.StartsWith(group.OptimizationResultId, sheet.SheetId, StringComparison.Ordinal));
+            Assert.All(materialResult.Result.Placements,
+                placement => Assert.StartsWith(group.OptimizationResultId, placement.PlacementId, StringComparison.Ordinal));
+        });
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_workspacePath))
@@ -237,6 +304,32 @@ public sealed class DesktopBridgeRoundTripSpecs : IDisposable
         Assert.NotNull(typed);
         return typed!;
     }
+
+    private static OptimizationGroupNestRequest CreateRunGroup(
+        string id,
+        string name,
+        int order,
+        string partId,
+        string materialName) =>
+        new()
+        {
+            OptimizationGroupId = id,
+            Name = name,
+            Order = order,
+            Parts =
+            [
+                new PartRow
+                {
+                    RowId = partId,
+                    ImportedId = partId,
+                    Length = 24m,
+                    Width = 12m,
+                    Quantity = 1,
+                    MaterialName = materialName,
+                    ValidationStatus = ValidationStatuses.Valid
+                }
+            ]
+        };
 
     private sealed class StubFileDialogService(string filePath) : IFileDialogService
     {

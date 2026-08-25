@@ -20,6 +20,7 @@ import type {
   BatchNestResponse,
   Material,
   NestResponse,
+  OptimizationGroup,
   ProjectMaterialSnapshot,
   ReportSettings,
   StiffenerTakeoffReportData,
@@ -28,6 +29,8 @@ import type {
 } from '../types/contracts';
 
 interface ResultsPageProps {
+  optimizationGroups: OptimizationGroup[];
+  activeOptimizationGroupId?: string;
   material?: Material;
   selectedMaterialId?: string;
   companyLogoPath?: string | null;
@@ -63,6 +66,7 @@ interface ResultsPageProps {
   onExportStiffenerReport: (
     overrides?: StiffenerExportOverrides,
   ) => Promise<void>;
+  onSelectOptimizationGroup: (optimizationGroupId: string) => void;
 }
 
 interface MaterialResultView {
@@ -334,6 +338,8 @@ function itemLabel(partId: string): string {
 }
 
 export function ResultsPage({
+  optimizationGroups,
+  activeOptimizationGroupId,
   material,
   selectedMaterialId,
   companyLogoPath,
@@ -362,7 +368,31 @@ export function ResultsPage({
   onExportReport,
   onExportExcelReport,
   onExportStiffenerReport,
+  onSelectOptimizationGroup,
 }: ResultsPageProps) {
+  const orderedOptimizationGroups = useMemo(
+    () => [...optimizationGroups].sort((left, right) => left.order - right.order),
+    [optimizationGroups],
+  );
+  const activeOptimizationGroup =
+    orderedOptimizationGroups.find(
+      (group) => group.optimizationGroupId === activeOptimizationGroupId,
+    ) ?? orderedOptimizationGroups[0];
+  const activeOptimizationGroupFailure =
+    activeOptimizationGroup?.lastBatchNestingResult?.optimizationGroupResults?.find(
+      (result) =>
+        result.optimizationGroupId === activeOptimizationGroup.optimizationGroupId,
+    )?.failureMessage;
+  const completedOptimizationGroups = orderedOptimizationGroups.filter(
+    (group) => group.lastBatchNestingResult || group.lastNestingResult,
+  );
+  const projectSheetCount = completedOptimizationGroups.reduce((total, group) => {
+    const batchSheets = group.lastBatchNestingResult?.materialResults.reduce(
+      (groupTotal, result) => groupTotal + result.result.summary.totalSheets,
+      0,
+    );
+    return total + (batchSheets ?? group.lastNestingResult?.summary.totalSheets ?? 0);
+  }, 0);
   const materialResults = useMemo(
     () => buildMaterialResults(batchNestResponse, material, nestResponse),
     [batchNestResponse, material, nestResponse],
@@ -734,11 +764,34 @@ export function ResultsPage({
         <aside className="results-sidebar">
           <div className="results-sidebar__header">
             <p className="eyebrow">Batch Explorer</p>
-            <h2>Explore sheets</h2>
+            <h2>{activeOptimizationGroup?.name ?? 'Explore sheets'}</h2>
             <p className="section-note">{statusMessage}</p>
+            {activeOptimizationGroupFailure ? (
+              <p className="section-note">
+                {activeOptimizationGroup.name} failed: {activeOptimizationGroupFailure}
+              </p>
+            ) : null}
+            <p className="section-note">
+              Project summary: {completedOptimizationGroups.length} of{' '}
+              {orderedOptimizationGroups.length} Optimization Group(s) have results with{' '}
+              {projectSheetCount} isolated sheet(s). Panels are never shared between groups.
+            </p>
           </div>
 
           <div className="results-sidebar__filters">
+            <label className="field">
+              <span>Optimization Group</span>
+              <ThemedSelect
+                ariaLabel="Select Optimization Group results"
+                disabled={orderedOptimizationGroups.length === 0}
+                onChange={onSelectOptimizationGroup}
+                options={orderedOptimizationGroups.map((group) => ({
+                  value: group.optimizationGroupId,
+                  label: `${group.order + 1}. ${group.name}`,
+                }))}
+                value={activeOptimizationGroup?.optimizationGroupId ?? ''}
+              />
+            </label>
             <label className="field">
               <span>Filter by material</span>
               <ThemedSelect

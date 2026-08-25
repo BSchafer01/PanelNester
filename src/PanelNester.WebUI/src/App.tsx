@@ -38,6 +38,7 @@ import {
   type NestResponse,
   type OpenFileDialogResponse,
   type OptimizationGroup,
+  type OptimizationGroupNestResult,
   type OptimizationGroupChange,
   type OpenProjectRequest,
   type PartRow,
@@ -193,6 +194,7 @@ type AppAction =
       type: 'nesting-finished';
       response: NestResponse;
       batchResponse: BatchNestResponse;
+      optimizationGroupResults?: OptimizationGroupNestResult[];
       message: string;
       material?: Material;
     }
@@ -1002,6 +1004,48 @@ function describeBatchNestingResult(response: BatchNestResponse): string {
   return `${response.materialResults.length} material(s): ${totals.sheets} sheet(s), ${totals.placed} placed part(s), and ${totals.unplaced} unplaced item(s).`;
 }
 
+function describeOptimizationGroupRun(response: BatchNestResponse): string {
+  const groupResults = response.optimizationGroupResults ?? [];
+  if (groupResults.length === 0) {
+    return describeBatchNestingResult(response);
+  }
+
+  const succeeded = groupResults.filter((result) => result.success).length;
+  const failed = groupResults.length - succeeded;
+  const sheets = groupResults.reduce(
+    (total, group) =>
+      total +
+      group.materialResults.reduce(
+        (groupTotal, materialResult) =>
+          groupTotal + materialResult.result.summary.totalSheets,
+        0,
+      ),
+    0,
+  );
+
+  return failed > 0
+    ? `Run All completed with partial success: ${succeeded} Optimization Group(s) succeeded, ${failed} failed, and ${sheets} isolated sheet(s) were retained.`
+    : `${succeeded} Optimization Group(s) completed in order with ${sheets} isolated sheet(s).`;
+}
+
+function batchForOptimizationGroup(
+  response: BatchNestResponse,
+  result: OptimizationGroupNestResult | undefined,
+): BatchNestResponse {
+  if (!result) {
+    return response;
+  }
+
+  return {
+    executionId: response.executionId,
+    success: result.success,
+    partialSuccess: false,
+    legacyResult: result.legacyResult ?? null,
+    materialResults: result.materialResults,
+    optimizationGroupResults: [result],
+  };
+}
+
 function getNestableParts(importResponse: ImportResponse, material?: Material): ImportResponse['parts'] {
   if (!material) {
     return [];
@@ -1519,7 +1563,11 @@ function reducer(state: AppState, action: AppAction): AppState {
         nestingBusy: true,
         nestingMessage: action.message,
       };
-    case 'nesting-finished':
+    case 'nesting-finished': {
+      const groupResults = action.optimizationGroupResults ?? [];
+      const resultsByGroupId = new Map(
+        groupResults.map((result) => [result.optimizationGroupId, result]),
+      );
       return markProjectDirty(
         {
           ...state,
@@ -1528,19 +1576,38 @@ function reducer(state: AppState, action: AppAction): AppState {
           batchNestResponse: action.batchResponse,
           lastNestMaterial: action.material,
           nestingMessage: action.message,
-          optimizationGroups: state.optimizationGroups.map((group) =>
-            group.optimizationGroupId === state.activeOptimizationGroupId
+          optimizationGroups: state.optimizationGroups.map((group) => {
+            const groupResult = resultsByGroupId.get(group.optimizationGroupId);
+            if (groupResult) {
+              return {
+                ...group,
+                lastNestingResult: groupResult.legacyResult ?? null,
+                lastBatchNestingResult: {
+                  executionId: action.batchResponse.executionId,
+                  success: groupResult.success,
+                  partialSuccess: false,
+                  legacyResult: groupResult.legacyResult ?? null,
+                  materialResults: groupResult.materialResults,
+                  optimizationGroupResults: [groupResult],
+                },
+                resultStatus: 'valid',
+              };
+            }
+
+            return groupResults.length === 0 &&
+              group.optimizationGroupId === state.activeOptimizationGroupId
               ? {
                   ...group,
                   lastNestingResult: action.response,
                   lastBatchNestingResult: action.batchResponse,
-                  resultStatus: 'valid',
+                  resultStatus: 'valid' as const,
                 }
-              : group,
-          ),
+              : group;
+          }),
         },
         'Nesting results changed. Save the project to keep this layout with its material snapshot.',
       );
+    }
     case 'nesting-failed':
       return {
         ...state,
@@ -3348,34 +3415,70 @@ export default function App() {
   );
   const canRunBatchNesting = hasCapability(bridgeMessageTypes.runBatchNesting);
 
-  const runNesting = async () => {
+  const runNesting = async (scope: 'active' | 'all' = 'active') => {
     if (canRunBatchNesting) {
-      if (readyParts.length === 0) {
+      const requestedGroups = (scope === 'all'
+        ? [...state.optimizationGroups].sort(
+            (left, right) => left.order - right.order,
+          )
+        : activeOptimizationGroup
+          ? [activeOptimizationGroup]
+          : []
+      ).map((group) => ({
+        optimizationGroupId: group.optimizationGroupId,
+        name: group.name,
+        order: group.order,
+        ownedPartRowIds: group.parts.map((part) => part.rowId),
+        parts: group.parts.filter((part) => part.validationStatus !== 'error'),
+      }));
+      const requestedPartCount = requestedGroups.reduce(
+        (total, group) => total + group.parts.length,
+        0,
+      );
+
+      if (requestedPartCount === 0) {
         dispatch({
           type: 'nesting-failed',
-          message: 'No ready rows are available in the active Optimization Group.',
+          message:
+            scope === 'all'
+              ? 'No ready rows are available in any Optimization Group.'
+              : 'No ready rows are available in the active Optimization Group.',
         });
         return;
       }
 
       dispatch({
         type: 'nesting-started',
-        message: `Running ${activeOptimizationGroup?.name ?? 'the active Optimization Group'} for ${readyParts.length} row(s) across ${readyMaterialCount} material(s)…`,
+        message:
+          scope === 'all'
+            ? `Running all ${requestedGroups.length} Optimization Groups in explicit order…`
+            : `Running ${activeOptimizationGroup?.name ?? 'the active Optimization Group'} for ${readyParts.length} row(s) across ${readyMaterialCount} material(s)…`,
       });
 
       try {
         const batchResponse = await hostBridge.runBatchNesting({
-          parts: readyParts,
+          optimizationGroups: requestedGroups,
+          parts: requestedGroups.flatMap((group) => group.parts),
           materials: state.materials,
           kerfWidth: state.projectSettings.kerfWidth,
           selectedMaterialId: state.selectedMaterialId ?? null,
         });
+        const groupResults = batchResponse.optimizationGroupResults ?? [];
+        const focusedGroupResult =
+          groupResults.find(
+            (result) =>
+              result.optimizationGroupId === state.activeOptimizationGroupId,
+          ) ?? groupResults[0];
+        const focusedBatchResponse = batchForOptimizationGroup(
+          batchResponse,
+          focusedGroupResult,
+        );
         const primaryMaterialResult =
-          batchResponse.materialResults.find(
+          focusedBatchResponse.materialResults.find(
             (result) =>
               result.materialId === state.selectedMaterialId ||
               result.materialName === selectedMaterial?.name,
-          ) ?? batchResponse.materialResults[0];
+          ) ?? focusedBatchResponse.materialResults[0];
         const focusedMaterial =
           selectedMaterial ??
           state.materials.find(
@@ -3384,14 +3487,20 @@ export default function App() {
               material.name === primaryMaterialResult?.materialName,
           );
         const legacyResponse =
-          batchResponse.legacyResult ?? primaryMaterialResult?.result ?? emptyNestResponse;
+          focusedBatchResponse.legacyResult ??
+          primaryMaterialResult?.result ??
+          emptyNestResponse;
 
         dispatch({
           type: 'nesting-finished',
           response: legacyResponse,
-          batchResponse,
+          batchResponse: focusedBatchResponse,
+          optimizationGroupResults: groupResults,
           material: focusedMaterial,
-          message: describeBatchNestingResult(batchResponse),
+          message:
+            scope === 'all'
+              ? describeOptimizationGroupRun(batchResponse)
+              : describeBatchNestingResult(focusedBatchResponse),
         });
         dispatch({ type: 'route-changed', route: 'results' });
       } catch (error) {
@@ -3466,6 +3575,15 @@ export default function App() {
     (canRunBatchNesting
       ? readyParts.length > 0
       : Boolean(selectedMaterial) && nestableParts.length > 0) &&
+    !state.importMappingSession &&
+    !state.importBusy &&
+    !state.materialsBusy &&
+    !state.partMutationBusy;
+  const canRunAllNesting =
+    canRunBatchNesting &&
+    state.optimizationGroups.some((group) =>
+      group.parts.some((part) => part.validationStatus !== 'error'),
+    ) &&
     !state.importMappingSession &&
     !state.importBusy &&
     !state.materialsBusy &&
@@ -3936,6 +4054,7 @@ export default function App() {
           }
           batchNestingEnabled={canRunBatchNesting}
           canRunNesting={canRunNesting}
+          canRunAllNesting={canRunAllNesting}
           readyPartCount={readyParts.length}
           readyMaterialCount={readyMaterialCount}
           onImportFile={importFile}
@@ -3946,7 +4065,8 @@ export default function App() {
           onAddPartRow={addPartRow}
           onUpdatePartRow={updatePartRow}
           onDeletePartRow={deletePartRow}
-          onRunNesting={runNesting}
+          onRunNesting={() => runNesting('active')}
+          onRunAllNesting={() => runNesting('all')}
           optimizationGroups={state.optimizationGroups}
           activeOptimizationGroupId={state.activeOptimizationGroupId}
           onActivateOptimizationGroup={(optimizationGroupId) =>
@@ -4020,6 +4140,8 @@ export default function App() {
     case 'results':
       content = (
         <ResultsPage
+          optimizationGroups={state.optimizationGroups}
+          activeOptimizationGroupId={state.activeOptimizationGroupId}
           material={resultsMaterial}
           selectedMaterialId={state.selectedMaterialId}
           companyLogoPath={desktopAppSettings.companyLogoPath ?? null}
@@ -4064,6 +4186,9 @@ export default function App() {
           onExportReport={exportReport}
           onExportExcelReport={exportExcelReport}
           onExportStiffenerReport={exportStiffenerReport}
+          onSelectOptimizationGroup={(optimizationGroupId) =>
+            dispatch({ type: 'optimization-group-activated', optimizationGroupId })
+          }
         />
       );
       break;

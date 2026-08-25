@@ -6,10 +6,12 @@ namespace PanelNester.Services.Nesting;
 public sealed class BatchNestingService : IBatchNestingService
 {
     private readonly INestingService _nestingService;
+    private readonly Func<string> _idGenerator;
 
-    public BatchNestingService(INestingService nestingService)
+    public BatchNestingService(INestingService nestingService, Func<string>? idGenerator = null)
     {
         _nestingService = nestingService ?? throw new ArgumentNullException(nameof(nestingService));
+        _idGenerator = idGenerator ?? (() => Guid.NewGuid().ToString("N"));
     }
 
     public async Task<BatchNestResponse> NestBatchAsync(
@@ -18,7 +20,117 @@ public sealed class BatchNestingService : IBatchNestingService
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var parts = request.Parts ?? Array.Empty<PartRow>();
+        var executionId = CreateExecutionId();
+        var optimizationGroups = request.OptimizationGroups ?? Array.Empty<OptimizationGroupNestRequest>();
+        if (optimizationGroups.Count > 0)
+        {
+            return await NestOptimizationGroupsAsync(request, optimizationGroups, executionId, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        var legacyResponse = await NestMaterialsAsync(
+                request.Parts ?? Array.Empty<PartRow>(),
+                request.Materials ?? Array.Empty<Material>(),
+                request.KerfWidth,
+                request.SelectedMaterialId,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        return legacyResponse with { ExecutionId = executionId };
+    }
+
+    private async Task<BatchNestResponse> NestOptimizationGroupsAsync(
+        BatchNestRequest request,
+        IReadOnlyList<OptimizationGroupNestRequest> optimizationGroups,
+        string executionId,
+        CancellationToken cancellationToken)
+    {
+        var groupResults = new List<OptimizationGroupNestResult>();
+
+        foreach (var group in optimizationGroups.OrderBy(group => group.Order))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var groupId = string.IsNullOrWhiteSpace(group.OptimizationGroupId)
+                ? $"group-{group.Order}"
+                : group.OptimizationGroupId;
+            var resultId = $"{executionId}:{groupId}";
+            var groupParts = group.Parts ?? Array.Empty<PartRow>();
+            var ownedPartRowIds = group.OwnedPartRowIds?.Count > 0
+                ? group.OwnedPartRowIds
+                : groupParts.Select(part => part.RowId).ToArray();
+
+            try
+            {
+                var batch = await NestMaterialsAsync(
+                        groupParts,
+                        request.Materials ?? Array.Empty<Material>(),
+                        request.KerfWidth,
+                        request.SelectedMaterialId,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                var materialResults = batch.MaterialResults
+                    .Select((result, index) => RewriteIdentities(resultId, index, result))
+                    .ToArray();
+                var legacyResult = ResolveLegacyResult(
+                    materialResults,
+                    ResolveSelectedMaterialName(request.Materials ?? Array.Empty<Material>(), request.SelectedMaterialId));
+
+                groupResults.Add(
+                    new OptimizationGroupNestResult
+                    {
+                        OptimizationResultId = resultId,
+                        OptimizationGroupId = groupId,
+                        Name = group.Name,
+                        Order = group.Order,
+                        Success = batch.Success,
+                        FailureMessage = batch.Success ? null : DescribeGroupFailure(batch),
+                        InputPartRowIds = groupParts.Select(part => part.RowId).ToArray(),
+                        OwnedPartRowIds = ownedPartRowIds,
+                        LegacyResult = legacyResult,
+                        MaterialResults = materialResults
+                    });
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                groupResults.Add(
+                    new OptimizationGroupNestResult
+                    {
+                        OptimizationResultId = resultId,
+                        OptimizationGroupId = groupId,
+                        Name = group.Name,
+                        Order = group.Order,
+                        Success = false,
+                        FailureMessage = ex.Message,
+                        InputPartRowIds = groupParts.Select(part => part.RowId).ToArray(),
+                        OwnedPartRowIds = ownedPartRowIds
+                    });
+            }
+        }
+
+        var successfulGroupCount = groupResults.Count(result => result.Success);
+        var primaryGroup = groupResults.FirstOrDefault();
+        return new BatchNestResponse
+        {
+            ExecutionId = executionId,
+            Success = groupResults.Count > 0 && successfulGroupCount == groupResults.Count,
+            PartialSuccess = successfulGroupCount > 0 && successfulGroupCount < groupResults.Count,
+            LegacyResult = primaryGroup?.LegacyResult,
+            MaterialResults = primaryGroup?.MaterialResults ?? Array.Empty<MaterialNestResult>(),
+            OptimizationGroupResults = groupResults
+        };
+    }
+
+    private async Task<BatchNestResponse> NestMaterialsAsync(
+        IReadOnlyList<PartRow> parts,
+        IReadOnlyList<Material> materials,
+        decimal kerfWidth,
+        string? selectedMaterialId,
+        CancellationToken cancellationToken)
+    {
         if (parts.Count == 0)
         {
             var emptyResponse = CreateEmptyRunResponse();
@@ -30,9 +142,8 @@ public sealed class BatchNestingService : IBatchNestingService
             };
         }
 
-        var materials = request.Materials ?? Array.Empty<Material>();
         var materialsByName = BuildMaterialLookup(materials);
-        var selectedMaterialName = ResolveSelectedMaterialName(materials, request.SelectedMaterialId);
+        var selectedMaterialName = ResolveSelectedMaterialName(materials, selectedMaterialId);
 
         var groupedParts = parts
             .GroupBy(part => part.MaterialName ?? string.Empty, StringComparer.Ordinal)
@@ -53,7 +164,7 @@ public sealed class BatchNestingService : IBatchNestingService
                         {
                             Parts = group.ToArray(),
                             Material = material,
-                            KerfWidth = request.KerfWidth
+                            KerfWidth = kerfWidth
                         },
                         cancellationToken)
                     .ConfigureAwait(false);
@@ -84,6 +195,49 @@ public sealed class BatchNestingService : IBatchNestingService
             Success = materialResults.Any(result => result.Result.Success),
             LegacyResult = legacyResult,
             MaterialResults = materialResults
+        };
+    }
+
+    private string CreateExecutionId()
+    {
+        var generated = _idGenerator()?.Trim();
+        return string.IsNullOrWhiteSpace(generated) ? Guid.NewGuid().ToString("N") : generated;
+    }
+
+    private static string DescribeGroupFailure(BatchNestResponse batch) =>
+        batch.LegacyResult?.UnplacedItems.FirstOrDefault()?.ReasonDescription ??
+        "The Optimization Group did not produce a successful layout.";
+
+    private static MaterialNestResult RewriteIdentities(
+        string optimizationResultId,
+        int materialIndex,
+        MaterialNestResult materialResult)
+    {
+        var identityPrefix = $"{optimizationResultId}:material-{materialIndex}";
+        var sheetIds = materialResult.Result.Sheets.ToDictionary(
+            sheet => sheet.SheetId,
+            sheet => $"{identityPrefix}:{sheet.SheetId}",
+            StringComparer.Ordinal);
+        var rewrittenSheets = materialResult.Result.Sheets
+            .Select(sheet => sheet with { SheetId = sheetIds[sheet.SheetId] })
+            .ToArray();
+        var rewrittenPlacements = materialResult.Result.Placements
+            .Select(placement => placement with
+            {
+                PlacementId = $"{identityPrefix}:{placement.PlacementId}",
+                SheetId = sheetIds.GetValueOrDefault(
+                    placement.SheetId,
+                    $"{identityPrefix}:{placement.SheetId}")
+            })
+            .ToArray();
+
+        return materialResult with
+        {
+            Result = materialResult.Result with
+            {
+                Sheets = rewrittenSheets,
+                Placements = rewrittenPlacements
+            }
         };
     }
 

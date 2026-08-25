@@ -669,10 +669,19 @@ export interface NestRequest {
 }
 
 export interface BatchNestRequest {
+  optimizationGroups?: OptimizationGroupNestRequest[];
   parts: PartRow[];
   materials: Material[];
   kerfWidth: number;
   selectedMaterialId?: string | null;
+}
+
+export interface OptimizationGroupNestRequest {
+  optimizationGroupId: string;
+  name: string;
+  order: number;
+  ownedPartRowIds: string[];
+  parts: PartRow[];
 }
 
 export interface NestSheet {
@@ -733,7 +742,23 @@ export interface MaterialNestResult {
 }
 
 export interface BatchNestResponse {
+  executionId?: string;
   success: boolean;
+  partialSuccess?: boolean;
+  legacyResult?: NestResponse | null;
+  materialResults: MaterialNestResult[];
+  optimizationGroupResults?: OptimizationGroupNestResult[];
+}
+
+export interface OptimizationGroupNestResult {
+  optimizationResultId: string;
+  optimizationGroupId: string;
+  name: string;
+  order: number;
+  success: boolean;
+  failureMessage?: string | null;
+  inputPartRowIds: string[];
+  ownedPartRowIds: string[];
   legacyResult?: NestResponse | null;
   materialResults: MaterialNestResult[];
 }
