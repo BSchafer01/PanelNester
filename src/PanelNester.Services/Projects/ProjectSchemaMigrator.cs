@@ -150,6 +150,16 @@ internal static class ProjectSchemaMigrator
             return false;
         }
 
+        var expectedPartIds = ExpandResultPartIds(parts).Keys.ToHashSet(StringComparer.Ordinal);
+        var batchPartIds = batchResult.MaterialResults
+            .SelectMany(result => GetReferencedPartIds(result.Result))
+            .ToArray();
+        if (batchPartIds.Distinct(StringComparer.Ordinal).Count() != batchPartIds.Length ||
+            !expectedPartIds.SetEquals(batchPartIds))
+        {
+            return false;
+        }
+
         return batchResult.LegacyResult is null ||
                batchResult.MaterialResults.Count == 0 ||
                batchResult.MaterialResults.Any(result => result.Result == batchResult.LegacyResult);
@@ -173,6 +183,12 @@ internal static class ProjectSchemaMigrator
         var partsByResultId = ExpandResultPartIds(parts);
         var knownSheetIds = sheetIds.ToHashSet(StringComparer.Ordinal);
         var knownMaterials = parts.Select(part => part.MaterialName).ToHashSet(StringComparer.Ordinal);
+        var referencedPartIds = GetReferencedPartIds(result).ToArray();
+        if (referencedPartIds.Distinct(StringComparer.Ordinal).Count() != referencedPartIds.Length ||
+            (parts.Count > 0 && referencedPartIds.Length == 0))
+        {
+            return false;
+        }
 
         return sheets.All(sheet => knownMaterials.Contains(sheet.MaterialName)) &&
                placements.All(placement =>
@@ -181,6 +197,12 @@ internal static class ProjectSchemaMigrator
                unplacedItems.All(item =>
                    string.IsNullOrWhiteSpace(item.PartId) || partsByResultId.ContainsKey(item.PartId));
     }
+
+    private static IEnumerable<string> GetReferencedPartIds(NestResponse result) =>
+        result.Placements.Select(placement => placement.PartId)
+            .Concat(result.UnplacedItems
+                .Select(item => item.PartId)
+                .Where(partId => !string.IsNullOrWhiteSpace(partId)));
 
     private static IReadOnlyDictionary<string, PartRow> ExpandResultPartIds(IEnumerable<PartRow> parts)
     {

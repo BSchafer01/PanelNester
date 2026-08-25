@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace PanelNester.Domain.Models;
 
 public sealed record OptimizationGroup
@@ -17,6 +19,7 @@ public sealed record OptimizationGroup
     public OptimizationResultStatus ResultStatus { get; init; } = OptimizationResultStatus.None;
 }
 
+[JsonConverter(typeof(OptimizationResultStatusJsonConverter))]
 public enum OptimizationResultStatus
 {
     None,

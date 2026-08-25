@@ -1051,6 +1051,10 @@ function buildOptimizationGroups(
   lastNestingResult: NestResponse | null,
   lastBatchNestingResult: BatchNestResponse | null,
 ): OptimizationGroup[] {
+  if (state.optimizationGroups.length > 1) {
+    return state.optimizationGroups;
+  }
+
   const existingGroup = state.optimizationGroups[0];
   const sourceName = state.selectedFilePath
     ? fileNameFromPath(state.selectedFilePath).replace(/\.[^.]+$/, '')

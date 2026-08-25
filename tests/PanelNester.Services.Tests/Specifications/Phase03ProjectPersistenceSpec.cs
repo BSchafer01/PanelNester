@@ -127,28 +127,8 @@ internal static class Phase03ProjectPersistenceSpec
                     ],
                     Placements =
                     [
-                        new NestPlacement
-                        {
-                            PlacementId = "placement-001",
-                            SheetId = "sheet-001",
-                            PartId = "A-100#1",
-                            X = 0.5m,
-                            Y = 0.5m,
-                            Width = 24m,
-                            Height = 12m,
-                            Rotated90 = false
-                        },
-                        new NestPlacement
-                        {
-                            PlacementId = "placement-002",
-                            SheetId = "sheet-001",
-                            PartId = "A-100#2",
-                            X = 25m,
-                            Y = 0.5m,
-                            Width = 24m,
-                            Height = 12m,
-                            Rotated90 = false
-                        }
+                        CreateSamplePlacement(1, 0.5m),
+                        CreateSamplePlacement(2, 25m)
                     ],
                     Summary = new MaterialSummary
                     {
@@ -178,28 +158,8 @@ internal static class Phase03ProjectPersistenceSpec
                         ],
                         Placements =
                         [
-                            new NestPlacement
-                            {
-                                PlacementId = "placement-001",
-                                SheetId = "sheet-001",
-                                PartId = "A-100#1",
-                                X = 0.5m,
-                                Y = 0.5m,
-                                Width = 24m,
-                                Height = 12m,
-                                Rotated90 = false
-                            },
-                            new NestPlacement
-                            {
-                                PlacementId = "placement-002",
-                                SheetId = "sheet-001",
-                                PartId = "A-100#2",
-                                X = 25m,
-                                Y = 0.5m,
-                                Width = 24m,
-                                Height = 12m,
-                                Rotated90 = false
-                            }
+                            CreateSamplePlacement(1, 0.5m),
+                            CreateSamplePlacement(2, 25m)
                         ],
                         Summary = new MaterialSummary
                         {
@@ -232,28 +192,8 @@ internal static class Phase03ProjectPersistenceSpec
                                 ],
                                 Placements =
                                 [
-                                    new NestPlacement
-                                    {
-                                        PlacementId = "placement-001",
-                                        SheetId = "sheet-001",
-                                        PartId = "A-100#1",
-                                        X = 0.5m,
-                                        Y = 0.5m,
-                                        Width = 24m,
-                                        Height = 12m,
-                                        Rotated90 = false
-                                    },
-                                    new NestPlacement
-                                    {
-                                        PlacementId = "placement-002",
-                                        SheetId = "sheet-001",
-                                        PartId = "A-100#2",
-                                        X = 25m,
-                                        Y = 0.5m,
-                                        Width = 24m,
-                                        Height = 12m,
-                                        Rotated90 = false
-                                    }
+                                    CreateSamplePlacement(1, 0.5m),
+                                    CreateSamplePlacement(2, 25m)
                                 ],
                                 Summary = new MaterialSummary
                                 {
@@ -269,6 +209,19 @@ internal static class Phase03ProjectPersistenceSpec
             }
         };
     }
+
+    private static NestPlacement CreateSamplePlacement(int instanceNumber, decimal x) =>
+        new()
+        {
+            PlacementId = $"placement-{instanceNumber:000}",
+            SheetId = "sheet-001",
+            PartId = $"A-100#{instanceNumber}",
+            X = x,
+            Y = 0.5m,
+            Width = 24m,
+            Height = 12m,
+            Rotated90 = false
+        };
 
     internal static Material CreateSampleMaterial() =>
         new()

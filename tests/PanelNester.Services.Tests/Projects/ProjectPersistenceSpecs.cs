@@ -341,6 +341,38 @@ public sealed class ProjectPersistenceSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Migration_marks_saved_results_stale_when_a_part_instance_is_duplicated_and_another_is_missing()
+    {
+        var filePath = Path.Combine(_workspacePath, "duplicate-result-part.pnest");
+        var service = new ProjectService(new FakeMaterialService());
+        var sample = Phase03ProjectPersistenceSpec.CreateSampleProject();
+        var duplicatedPlacement = sample.State.LastNestingResult!.Placements[0];
+        var invalidResult = sample.State.LastNestingResult with
+        {
+            Placements =
+            [
+                duplicatedPlacement,
+                duplicatedPlacement with { PlacementId = "placement-duplicate" }
+            ]
+        };
+        var project = sample with
+        {
+            State = sample.State with
+            {
+                LastNestingResult = invalidResult,
+                LastBatchNestingResult = null
+            }
+        };
+
+        var result = await service.SaveAsync(project, filePath);
+
+        Assert.True(result.Success);
+        Assert.Equal(
+            OptimizationResultStatus.Stale,
+            Assert.Single(result.Project!.State.OptimizationGroups).ResultStatus);
+    }
+
+    [Fact]
     public void Saving_a_project_snapshots_selected_materials_and_exact_import_matches_only()
     {
         var liveLibrary = new[]
