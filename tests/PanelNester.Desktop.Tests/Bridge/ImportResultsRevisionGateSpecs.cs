@@ -12,7 +12,8 @@ public sealed class ImportResultsRevisionGateSpecs
 
         Assert.Contains("const openImportDialog = () =>", app);
         Assert.Contains("bridgeMessageTypes.openFileDialog", app);
-        Assert.Contains("const invokeImportFile = (request: ImportFileRequest) =>", app);
+        Assert.Contains("const invokeImportFile = async (request: ImportFileRequest) =>", app);
+        Assert.Contains("normalizeImportFileResponse(", app);
         Assert.Contains("if (hasCapability(bridgeMessageTypes.importFile))", app);
         Assert.Contains("const dialogResponse = hasCapability(bridgeMessageTypes.openFileDialog)", app);
         Assert.Contains("const selectedFilePath = dialogResponse?.filePath ?? undefined;", app);
@@ -42,6 +43,37 @@ public sealed class ImportResultsRevisionGateSpecs
         Assert.Contains("if (!_webView.Dispatcher.CheckAccess())", webViewBridge);
         Assert.Contains("_webView.Dispatcher.Invoke(() => Post(message));", webViewBridge);
         Assert.Contains("_webView.CoreWebView2.PostWebMessageAsJson(json);", webViewBridge);
+    }
+
+    [Fact]
+    public void App_normalizes_incomplete_host_failures_before_reading_import_array_lengths()
+    {
+        var app = ReadRepositoryText("src", "PanelNester.WebUI", "src", "App.tsx");
+
+        Assert.Contains("function normalizeImportFileResponse(", app);
+        Assert.Contains("parts: Array.isArray(response.parts) ? response.parts : []", app);
+        Assert.Contains("errors: Array.isArray(response.errors) ? response.errors : []", app);
+        Assert.Contains("(!response.success && Boolean(response.error))", app);
+    }
+
+    [Fact]
+    public void Materials_page_exposes_an_actionable_unavailable_state_and_keeps_default_repair_enabled()
+    {
+        var app = ReadRepositoryText("src", "PanelNester.WebUI", "src", "App.tsx");
+        var materialsPage = ReadRepositoryText(
+            "src",
+            "PanelNester.WebUI",
+            "src",
+            "pages",
+            "MaterialsPage.tsx");
+
+        Assert.Contains("materialLibraryUnavailable: boolean;", app);
+        Assert.Contains("libraryUnavailable: true", app);
+        Assert.Contains("materialLibraryUnavailable={state.materialLibraryUnavailable}", app);
+        Assert.Contains("'Library unavailable'", materialsPage);
+        Assert.Contains("? 'Repair default'", materialsPage);
+        Assert.Contains("usingDefaultLocation && !materialLibraryUnavailable", materialsPage);
+        Assert.Contains("preserve it and create a fresh library", materialsPage);
     }
 
     [Fact]

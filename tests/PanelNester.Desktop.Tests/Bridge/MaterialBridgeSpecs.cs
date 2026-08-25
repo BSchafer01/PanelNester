@@ -260,6 +260,70 @@ public sealed class MaterialBridgeSpecs : IDisposable
         Assert.True(location.UsesDefaultLocation);
     }
 
+    [Fact]
+    public async Task Corrupt_library_returns_a_typed_failure_and_location_picker_can_recover_to_a_new_file()
+    {
+        var defaultMaterialFilePath = Path.Combine(_workspacePath, "broken-default", "materials.json");
+        var locationStoreFilePath = Path.Combine(_workspacePath, "broken-settings", "material-library-location.json");
+        var replacementMaterialFilePath = Path.Combine(_workspacePath, "replacement", "materials.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(defaultMaterialFilePath)!);
+        await File.WriteAllTextAsync(defaultMaterialFilePath, "not-json");
+        var repository = new JsonMaterialRepository(
+            new JsonMaterialRepositoryOptions
+            {
+                DefaultFilePath = defaultMaterialFilePath,
+                LocationStoreFilePath = locationStoreFilePath
+            });
+        var materialService = new MaterialService(repository);
+        var dialogs = new StubFileDialogService(replacementMaterialFilePath);
+        var dispatcher = DesktopBridgeRegistration.CreateDefault(
+            dialogs,
+            materialService,
+            new ProjectService(materialService),
+            new CsvImportService(repository),
+            new PartEditorService(repository),
+            new ShelfNestingService(),
+            null,
+            null,
+            null,
+            () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true),
+            materialLibraryLocationService: repository);
+
+        var failedList = await DispatchAsync<ListMaterialsResponse>(
+            dispatcher,
+            BridgeMessageTypes.ListMaterials,
+            new ListMaterialsRequest());
+
+        Assert.False(failedList.Success);
+        Assert.Equal("material-library-load-failed", failedList.Error?.Code);
+        Assert.Empty(failedList.Materials);
+        Assert.Equal(Path.GetFullPath(defaultMaterialFilePath), failedList.LibraryLocation?.ActiveFilePath);
+
+        var csvPath = Path.Combine(_workspacePath, "broken-library-import.csv");
+        await File.WriteAllTextAsync(
+            csvPath,
+            "ID,Length,Width,Quantity,Material\nP-1,12,10,1,Demo Material\n");
+        var failedImport = await DispatchAsync<ImportFileResponse>(
+            dispatcher,
+            BridgeMessageTypes.ImportFile,
+            new ImportFileRequest { FilePath = csvPath });
+
+        Assert.False(failedImport.Success);
+        Assert.Equal("import-host-error", failedImport.Error?.Code);
+        Assert.Empty(failedImport.Parts);
+        Assert.Empty(failedImport.Errors);
+
+        var recovered = await DispatchAsync<ChooseMaterialLibraryLocationResponse>(
+            dispatcher,
+            BridgeMessageTypes.ChooseMaterialLibraryLocation,
+            new ChooseMaterialLibraryLocationRequest());
+
+        Assert.True(recovered.Success);
+        Assert.Equal(Path.GetFullPath(replacementMaterialFilePath), recovered.LibraryLocation?.ActiveFilePath);
+        Assert.Single(recovered.Materials);
+        Assert.NotNull(dialogs.LastSaveRequest);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_workspacePath))

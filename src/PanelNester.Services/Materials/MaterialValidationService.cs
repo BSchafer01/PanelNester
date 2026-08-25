@@ -32,7 +32,7 @@ public sealed class MaterialValidationService
 
     private static Material Normalize(Material material, bool generateId)
     {
-        var materialId = material.MaterialId.Trim();
+        var materialId = material.MaterialId?.Trim() ?? string.Empty;
 
         if (generateId && string.IsNullOrWhiteSpace(materialId))
         {
@@ -42,7 +42,7 @@ public sealed class MaterialValidationService
         return material with
         {
             MaterialId = materialId,
-            Name = material.Name.Trim(),
+            Name = material.Name?.Trim() ?? string.Empty,
             ColorFinish = NormalizeOptional(material.ColorFinish),
             Notes = NormalizeOptional(material.Notes)
         };

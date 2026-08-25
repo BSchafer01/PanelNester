@@ -23,6 +23,24 @@ public sealed class JsonMaterialRepositorySpecs : IDisposable
         Assert.True(File.Exists(filePath));
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("[]")]
+    public async Task Empty_store_is_reseeded_after_releasing_the_read_handle(string contents)
+    {
+        var filePath = Path.Combine(_workspacePath, "materials.json");
+        Directory.CreateDirectory(_workspacePath);
+        await File.WriteAllTextAsync(filePath, contents);
+        var repository = new JsonMaterialRepository(filePath);
+
+        var materials = await repository.GetAllAsync();
+
+        Assert.Equal(DemoMaterialCatalog.Phase1.MaterialId, Assert.Single(materials).MaterialId);
+        using var document = JsonDocument.Parse(await File.ReadAllTextAsync(filePath));
+        Assert.Equal(JsonValueKind.Array, document.RootElement.ValueKind);
+        Assert.True(document.RootElement.GetArrayLength() > 0);
+    }
+
     [Fact]
     public async Task Create_update_and_delete_round_trip_through_json_storage()
     {

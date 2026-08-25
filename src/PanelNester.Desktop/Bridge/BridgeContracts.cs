@@ -292,10 +292,14 @@ public sealed record ListMaterialsResponse(
     string? Message,
     MaterialLibraryLocation? LibraryLocation = null)
 {
-    public static ListMaterialsResponse Failure(string code, string message, string? userMessage = null)
+    public static ListMaterialsResponse Failure(
+        string code,
+        string message,
+        string? userMessage = null,
+        MaterialLibraryLocation? libraryLocation = null)
     {
         var failure = BridgeFailure.Create(code, message, userMessage);
-        return new(false, Array.Empty<Material>(), failure.Error, failure.ResponseMessage);
+        return new(false, Array.Empty<Material>(), failure.Error, failure.ResponseMessage, libraryLocation);
     }
 }
 

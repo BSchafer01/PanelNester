@@ -122,6 +122,32 @@ public sealed class MaterialLibraryLocationSpecs : IDisposable
         Assert.False(File.Exists(options.LocationStoreFilePath!));
     }
 
+    [Fact]
+    public async Task Corrupt_default_library_keeps_location_controls_available_and_restore_preserves_then_repairs_it()
+    {
+        var options = MaterialLibraryLocationSpec.CreateOptions(_workspacePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(options.DefaultFilePath!)!);
+        await File.WriteAllTextAsync(options.DefaultFilePath!, "{ definitely-not-json");
+        var repository = new JsonMaterialRepository(options);
+
+        var location = await repository.GetLocationAsync();
+
+        Assert.Equal(Path.GetFullPath(options.DefaultFilePath!), location.ActiveFilePath);
+        Assert.True(location.UsesDefaultLocation);
+        await Assert.ThrowsAsync<InvalidDataException>(() => repository.GetAllAsync());
+
+        var restoredLocation = await repository.RestoreDefaultAsync();
+        var restoredMaterials = await repository.GetAllAsync();
+        var preservedFiles = Directory.GetFiles(
+            Path.GetDirectoryName(options.DefaultFilePath!)!,
+            "materials.unreadable-*.json");
+
+        Assert.True(restoredLocation.UsesDefaultLocation);
+        Assert.Single(preservedFiles);
+        Assert.Contains("definitely-not-json", await File.ReadAllTextAsync(preservedFiles[0]));
+        Assert.Equal(DemoMaterialCatalog.Phase1.MaterialId, Assert.Single(restoredMaterials).MaterialId);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_workspacePath))

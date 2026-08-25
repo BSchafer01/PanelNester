@@ -184,6 +184,8 @@ public static class DesktopBridgeRegistration
             BridgeMessageTypes.ImportFile,
             async (request, cancellationToken) =>
             {
+                try
+                {
                 var filePath = NormalizeFilePath(request.FilePath);
                 if (string.IsNullOrWhiteSpace(filePath))
                 {
@@ -232,6 +234,19 @@ public static class DesktopBridgeRegistration
                     result,
                     filePath,
                     BuildImportFileMessage(result, filePath));
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    return ImportFileResponse.Failure(
+                        request.FilePath,
+                        "import-host-error",
+                        ex.Message,
+                        "The desktop host could not complete the file import. Check the material library and try again.");
+                }
             });
 
         dispatcher.Register<NewProjectRequest>(
@@ -553,16 +568,40 @@ public static class DesktopBridgeRegistration
             BridgeMessageTypes.ListMaterials,
             async (_, cancellationToken) =>
             {
-                var materials = await materialService.ListAsync(cancellationToken).ConfigureAwait(false);
                 var libraryLocation = materialLibraryLocationService is null
                     ? null
                     : await materialLibraryLocationService.GetLocationAsync(cancellationToken).ConfigureAwait(false);
-                return new ListMaterialsResponse(
-                    true,
-                    materials,
-                    null,
-                    $"Loaded {materials.Count} material(s).",
-                    libraryLocation);
+
+                try
+                {
+                    var materials = await materialService.ListAsync(cancellationToken).ConfigureAwait(false);
+                    return new ListMaterialsResponse(
+                        true,
+                        materials,
+                        null,
+                        $"Loaded {materials.Count} material(s).",
+                        libraryLocation);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (InvalidDataException ex)
+                {
+                    return ListMaterialsResponse.Failure(
+                        "material-library-load-failed",
+                        ex.Message,
+                        "The material library is unreadable. Choose another library or repair the default library.",
+                        libraryLocation);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    return ListMaterialsResponse.Failure(
+                        "material-library-access-failed",
+                        ex.Message,
+                        "OptiFab cannot access the material library. Choose another location or check the folder permissions.",
+                        libraryLocation);
+                }
             });
 
         dispatcher.Register<GetMaterialRequest>(
@@ -735,11 +774,16 @@ public static class DesktopBridgeRegistration
                             .GetLocationAsync(cancellationToken)
                             .ConfigureAwait(false);
                         var defaultFileExisted = File.Exists(previousLocation.DefaultFilePath);
+                        var preservedLibraryCount = CountPreservedMaterialLibraries(previousLocation.DefaultFilePath);
                         var location = await materialLibraryLocationService
                             .RestoreDefaultAsync(cancellationToken)
                             .ConfigureAwait(false);
                         var materials = await materialService.ListAsync(cancellationToken).ConfigureAwait(false);
-                        var responseMessage = defaultFileExisted
+                        var defaultLibraryWasRepaired =
+                            CountPreservedMaterialLibraries(location.DefaultFilePath) > preservedLibraryCount;
+                        var responseMessage = defaultLibraryWasRepaired
+                            ? "Default material library repaired. The unreadable library was preserved beside the new materials.json file."
+                            : defaultFileExisted
                             ? "Material library restored to the default location."
                             : $"Default material library was recreated at '{location.DefaultFilePath}'.";
 
@@ -1529,6 +1573,26 @@ public static class DesktopBridgeRegistration
                 : $"{rawName}.json";
     }
 
+    private static int CountPreservedMaterialLibraries(string defaultFilePath)
+    {
+        try
+        {
+            var directory = Path.GetDirectoryName(defaultFilePath);
+            if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+            {
+                return 0;
+            }
+
+            var fileName = Path.GetFileNameWithoutExtension(defaultFilePath);
+            var extension = Path.GetExtension(defaultFilePath);
+            return Directory.EnumerateFiles(directory, $"{fileName}.unreadable-*{extension}").Count();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return 0;
+        }
+    }
+
     private static IReadOnlyList<string> GetCapabilities(
         BridgeHandshakeRequest request,
         BridgeMessageDispatcher dispatcher)
@@ -1576,7 +1640,7 @@ public static class DesktopBridgeRegistration
         CancellationToken cancellationToken)
     {
         var requestedOptions = request.Options ?? new ImportOptions();
-        if (request.NewMaterials.Count == 0)
+        if (request.NewMaterials is not { Count: > 0 })
         {
             return new ImportPreparationResult(
                 true,

@@ -92,6 +92,7 @@ interface AppState {
   batchNestResponse: BatchNestResponse;
   materials: Material[];
   materialLibraryLocation?: MaterialLibraryLocation | null;
+  materialLibraryUnavailable: boolean;
   selectedMaterialId?: string;
   lastNestMaterial?: Material;
   selectedFilePath?: string;
@@ -146,7 +147,12 @@ type AppAction =
       selectedMaterialId?: string;
       message: string;
     }
-  | { type: 'materials-failed'; message: string }
+  | {
+      type: 'materials-failed';
+      message: string;
+      materialLibraryLocation?: MaterialLibraryLocation | null;
+      libraryUnavailable?: boolean;
+    }
   | { type: 'material-selected'; materialId?: string }
   | { type: 'material-created'; material: Material; message: string }
   | { type: 'material-updated'; material: Material; message: string }
@@ -464,6 +470,7 @@ const initialState: AppState = {
   batchNestResponse: emptyBatchNestResponse,
   materials: [],
   materialLibraryLocation: undefined,
+  materialLibraryUnavailable: false,
   selectedMaterialId: undefined,
   lastNestMaterial: undefined,
   selectedFilePath: undefined,
@@ -724,22 +731,39 @@ function pickImportFilePath(response: ImportFileResponse, fallbackFilePath?: str
 }
 
 function normalizeImportResponse(response: {
-  success: boolean;
-  parts: ImportResponse['parts'];
-  errors: ImportResponse['errors'];
-  warnings: ImportResponse['warnings'];
+  success?: boolean;
+  parts?: ImportResponse['parts'];
+  errors?: ImportResponse['errors'];
+  warnings?: ImportResponse['warnings'];
   availableColumns?: string[];
   columnMappings?: ImportResponse['columnMappings'];
   materialResolutions?: ImportResponse['materialResolutions'];
 }): ImportResponse {
   return {
-    success: response.success,
-    parts: response.parts,
-    errors: response.errors,
-    warnings: response.warnings,
-    availableColumns: response.availableColumns ?? [],
-    columnMappings: response.columnMappings ?? [],
-    materialResolutions: response.materialResolutions ?? [],
+    success: response.success === true,
+    parts: Array.isArray(response.parts) ? response.parts : [],
+    errors: Array.isArray(response.errors) ? response.errors : [],
+    warnings: Array.isArray(response.warnings) ? response.warnings : [],
+    availableColumns: Array.isArray(response.availableColumns)
+      ? response.availableColumns
+      : [],
+    columnMappings: Array.isArray(response.columnMappings)
+      ? response.columnMappings
+      : [],
+    materialResolutions: Array.isArray(response.materialResolutions)
+      ? response.materialResolutions
+      : [],
+  };
+}
+
+function normalizeImportFileResponse(
+  response: Partial<ImportFileResponse>,
+): ImportFileResponse {
+  return {
+    ...normalizeImportResponse(response),
+    filePath: typeof response.filePath === 'string' ? response.filePath : null,
+    error: response.error ?? null,
+    message: response.message,
   };
 }
 
@@ -897,6 +921,7 @@ function describeImportReview(
 
 function responseLooksLikeImportPreparationFailure(response: ImportFileResponse): boolean {
   return (
+    (!response.success && Boolean(response.error)) ||
     response.parts.length === 0 &&
     response.availableColumns.length === 0 &&
     response.columnMappings.length === 0 &&
@@ -1156,6 +1181,7 @@ function reducer(state: AppState, action: AppAction): AppState {
         materialsBusy: false,
         materials: sortMaterials(action.materials),
         materialLibraryLocation: action.materialLibraryLocation,
+        materialLibraryUnavailable: false,
         selectedMaterialId: action.selectedMaterialId,
         materialsMessage: action.message,
       };
@@ -1163,6 +1189,10 @@ function reducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         materialsBusy: false,
+        materialLibraryLocation:
+          action.materialLibraryLocation ?? state.materialLibraryLocation,
+        materialLibraryUnavailable:
+          action.libraryUnavailable ?? state.materialLibraryUnavailable,
         materialsMessage: action.message,
       };
     case 'material-selected':
@@ -1679,8 +1709,10 @@ export default function App() {
       message: 'Loading the material library…',
     });
 
+    let reportedLocation: MaterialLibraryLocation | null | undefined;
     try {
       const response = await hostBridge.listMaterials();
+      reportedLocation = response.libraryLocation;
       if (!response.success) {
         throw new Error(
           getBridgeErrorMessage(
@@ -1700,7 +1732,12 @@ export default function App() {
         error,
         'The desktop host could not load the material library.',
       );
-      dispatch({ type: 'materials-failed', message });
+      dispatch({
+        type: 'materials-failed',
+        message,
+        materialLibraryLocation: reportedLocation,
+        libraryUnavailable: true,
+      });
       throw new Error(message);
     }
   };
@@ -2539,11 +2576,13 @@ export default function App() {
           },
           importFileDialogTimeoutMs,
         );
-      const invokeImportFile = (request: ImportFileRequest) =>
-        hostBridge.invoke<ImportFileResponse>(
-          bridgeMessageTypes.importFile,
-          request,
-          importBridgeTimeoutMs,
+      const invokeImportFile = async (request: ImportFileRequest) =>
+        normalizeImportFileResponse(
+          await hostBridge.invoke<ImportFileResponse>(
+            bridgeMessageTypes.importFile,
+            request,
+            importBridgeTimeoutMs,
+          ),
         );
 
       if (hasCapability(bridgeMessageTypes.importFile)) {
@@ -2697,13 +2736,15 @@ export default function App() {
     });
 
     try {
-      const response = await hostBridge.invoke<ImportFileResponse>(
-        bridgeMessageTypes.importFile,
-        {
-          filePath: session.filePath,
-          options: session.options,
-        } satisfies ImportFileRequest,
-        importBridgeTimeoutMs,
+      const response = normalizeImportFileResponse(
+        await hostBridge.invoke<ImportFileResponse>(
+          bridgeMessageTypes.importFile,
+          {
+            filePath: session.filePath,
+            options: session.options,
+          } satisfies ImportFileRequest,
+          importBridgeTimeoutMs,
+        ),
       );
       const filePath = pickImportFilePath(response, session.filePath) ?? session.filePath;
 
@@ -2751,14 +2792,16 @@ export default function App() {
     });
 
     try {
-      const response = await hostBridge.invoke<ImportFileResponse>(
-        bridgeMessageTypes.importFile,
-        {
-          filePath: session.filePath,
-          options: session.options,
-          newMaterials: session.newMaterials,
-        } satisfies ImportFileRequest,
-        importBridgeTimeoutMs,
+      const response = normalizeImportFileResponse(
+        await hostBridge.invoke<ImportFileResponse>(
+          bridgeMessageTypes.importFile,
+          {
+            filePath: session.filePath,
+            options: session.options,
+            newMaterials: session.newMaterials,
+          } satisfies ImportFileRequest,
+          importBridgeTimeoutMs,
+        ),
       );
       const filePath = pickImportFilePath(response, session.filePath) ?? session.filePath;
 
@@ -3615,6 +3658,7 @@ export default function App() {
         <MaterialsPage
           materials={state.materials}
           materialLibraryLocation={state.materialLibraryLocation}
+          materialLibraryUnavailable={state.materialLibraryUnavailable}
           selectedMaterialId={state.selectedMaterialId}
           importResponse={state.importResponse}
           materialsBusy={state.materialsBusy}

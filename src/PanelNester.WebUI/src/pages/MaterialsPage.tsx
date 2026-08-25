@@ -9,6 +9,7 @@ import type {
 interface MaterialsPageProps {
   materials: Material[];
   materialLibraryLocation?: MaterialLibraryLocation | null;
+  materialLibraryUnavailable: boolean;
   selectedMaterialId?: string;
   importResponse: ImportResponse;
   materialsBusy: boolean;
@@ -149,6 +150,7 @@ function shouldShowMaterialsStatus(message: string): boolean {
 export function MaterialsPage({
   materials,
   materialLibraryLocation,
+  materialLibraryUnavailable,
   selectedMaterialId,
   importResponse,
   materialsBusy,
@@ -182,7 +184,9 @@ export function MaterialsPage({
   const usingDefaultLocation = materialLibraryLocation?.usingDefaultLocation ?? false;
   const canManageLibraryLocation =
     canChooseMaterialLibraryLocation || canRestoreDefaultMaterialLibraryLocation;
-  const locationStatusLabel = currentLibraryPath
+  const locationStatusLabel = materialLibraryUnavailable
+    ? 'Library unavailable'
+    : currentLibraryPath
     ? usingDefaultLocation
       ? 'Default location'
       : 'Custom location'
@@ -318,7 +322,7 @@ export function MaterialsPage({
   const handleRestoreDefaultLocation = () => {
     if (
       !window.confirm(
-        'Restore the default material library location? OptiFab will point back to the standard materials.json file and recreate it there if needed.',
+        'Restore the default material library location? OptiFab will point back to the standard materials.json file. If that file is unreadable, OptiFab will preserve it and create a fresh library.',
       )
     ) {
       return;
@@ -363,7 +367,11 @@ export function MaterialsPage({
           <MaterialsGlyph icon="create" />
           <h3>{mode === 'edit' ? 'Edit Material' : 'Create Material'}</h3>
         </div>
-        <p className="muted materials-editor__message">{editorMessage}</p>
+        <p className="muted materials-editor__message">
+          {materialLibraryUnavailable
+            ? 'Repair the default library or choose another location before saving materials.'
+            : editorMessage}
+        </p>
 
         <div className="form-grid form-grid--two-column materials-editor__grid">
           <label className="field field--wide">
@@ -489,7 +497,7 @@ export function MaterialsPage({
           </button>
           <button
             className="primary-button materials-editor__submit"
-            disabled={editorBusy || materialsBusy}
+            disabled={editorBusy || materialsBusy || materialLibraryUnavailable}
             onClick={() => void handleSave()}
             type="button"
           >
@@ -498,7 +506,7 @@ export function MaterialsPage({
           {mode === 'edit' ? (
             <button
               className="secondary-button materials-editor__submit"
-              disabled={editorBusy || materialsBusy}
+              disabled={editorBusy || materialsBusy || materialLibraryUnavailable}
               onClick={() => void handleSaveAsNewMaterial()}
               type="button"
             >
@@ -526,9 +534,19 @@ export function MaterialsPage({
             </div>
             {currentLibraryPath ? (
               <span
-                className={`status-pill ${usingDefaultLocation ? 'status-pill--ok' : 'status-pill--muted'}`}
+                className={`status-pill ${
+                  materialLibraryUnavailable
+                    ? 'status-pill--error'
+                    : usingDefaultLocation
+                      ? 'status-pill--ok'
+                      : 'status-pill--muted'
+                }`}
               >
-                {usingDefaultLocation ? 'Default' : 'Custom'}
+                {materialLibraryUnavailable
+                  ? 'Needs attention'
+                  : usingDefaultLocation
+                    ? 'Default'
+                    : 'Custom'}
               </span>
             ) : null}
           </div>
@@ -537,6 +555,14 @@ export function MaterialsPage({
             {currentLibraryPath ??
               'Location data will appear here when the desktop host supports material library repointing.'}
           </p>
+
+          {materialLibraryUnavailable ? (
+            <p className="section-note">
+              OptiFab could not open this library. Choose another JSON library, or
+              repair the default library. Repair preserves an unreadable file beside
+              the recreated materials.json file.
+            </p>
+          ) : null}
 
           <p className="section-note">
             {defaultLibraryPath ? (
@@ -574,11 +600,15 @@ export function MaterialsPage({
             {canRestoreDefaultMaterialLibraryLocation ? (
               <button
                 className="secondary-button"
-                disabled={materialsBusy || usingDefaultLocation}
+                disabled={
+                  materialsBusy || (usingDefaultLocation && !materialLibraryUnavailable)
+                }
                 onClick={handleRestoreDefaultLocation}
                 type="button"
               >
-                Restore default
+                {materialLibraryUnavailable && usingDefaultLocation
+                  ? 'Repair default'
+                  : 'Restore default'}
               </button>
             ) : null}
           </div>

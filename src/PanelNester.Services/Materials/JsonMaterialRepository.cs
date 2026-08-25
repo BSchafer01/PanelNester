@@ -157,7 +157,12 @@ public sealed class JsonMaterialRepository : IMaterialRepository, IMaterialLibra
 
         try
         {
-            _ = await LoadActiveMaterialsCoreAsync(cancellationToken).ConfigureAwait(false);
+            if (!PathsEqual(_activeFilePath, _defaultFilePath) && !File.Exists(_activeFilePath))
+            {
+                _activeFilePath = _defaultFilePath;
+                await BestEffortSynchronizeLocationCoreAsync(cancellationToken, force: true).ConfigureAwait(false);
+            }
+
             return CreateLocation(_activeFilePath);
         }
         finally
@@ -191,7 +196,15 @@ public sealed class JsonMaterialRepository : IMaterialRepository, IMaterialLibra
 
         try
         {
-            await LoadMaterialsCoreAsync(_defaultFilePath, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await LoadMaterialsCoreAsync(_defaultFilePath, cancellationToken).ConfigureAwait(false);
+            }
+            catch (InvalidDataException)
+            {
+                await QuarantineAndRecreateDefaultLibraryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
             _activeFilePath = _defaultFilePath;
             _locationRequiresSynchronization = false;
             await PersistLocationCoreAsync(cancellationToken).ConfigureAwait(false);
@@ -214,13 +227,30 @@ public sealed class JsonMaterialRepository : IMaterialRepository, IMaterialLibra
             return seeded;
         }
 
-        await using var stream = new FileStream(
-            filePath,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.Read);
+        List<Material>? materials;
+        try
+        {
+            await using (var stream = new FileStream(
+                             filePath,
+                             FileMode.Open,
+                             FileAccess.Read,
+                             FileShare.Read))
+            {
+                materials = stream.Length == 0
+                    ? null
+                    : await JsonSerializer.DeserializeAsync<List<Material>>(
+                            stream,
+                            SerializerOptions,
+                            cancellationToken)
+                        .ConfigureAwait(false);
+            }
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException($"Material library file is not valid JSON: {filePath}", exception);
+        }
 
-        if (stream.Length == 0)
+        if (materials is not { Count: > 0 })
         {
             var seeded = SeedMaterials();
             await SaveMaterialsCoreAsync(seeded, filePath, cancellationToken).ConfigureAwait(false);
@@ -229,33 +259,13 @@ public sealed class JsonMaterialRepository : IMaterialRepository, IMaterialLibra
 
         try
         {
-            var materials = await JsonSerializer.DeserializeAsync<List<Material>>(
-                    stream,
-                    SerializerOptions,
-                    cancellationToken)
-                .ConfigureAwait(false);
-
-            if (materials is not { Count: > 0 })
-            {
-                var seeded = SeedMaterials();
-                await SaveMaterialsCoreAsync(seeded, filePath, cancellationToken).ConfigureAwait(false);
-                return seeded;
-            }
-
-            try
-            {
-                return ValidateLoadedMaterials(materials);
-            }
-            catch (MaterialValidationException exception)
-            {
-                throw new InvalidDataException(
-                    $"Material library file contains invalid material data: {filePath}. {exception.Message}",
-                    exception);
-            }
+            return ValidateLoadedMaterials(materials);
         }
-        catch (JsonException exception)
+        catch (MaterialValidationException exception)
         {
-            throw new InvalidDataException($"Material library file is not valid JSON: {filePath}", exception);
+            throw new InvalidDataException(
+                $"Material library file contains invalid material data: {filePath}. {exception.Message}",
+                exception);
         }
     }
 
@@ -333,6 +343,23 @@ public sealed class JsonMaterialRepository : IMaterialRepository, IMaterialLibra
         _activeFilePath = _defaultFilePath;
         await BestEffortSynchronizeLocationCoreAsync(cancellationToken, force: true).ConfigureAwait(false);
         return materials;
+    }
+
+    private async Task QuarantineAndRecreateDefaultLibraryAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (File.Exists(_defaultFilePath))
+        {
+            var directory = Path.GetDirectoryName(_defaultFilePath) ?? string.Empty;
+            var fileName = Path.GetFileNameWithoutExtension(_defaultFilePath);
+            var extension = Path.GetExtension(_defaultFilePath);
+            var timestamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmssfff", System.Globalization.CultureInfo.InvariantCulture);
+            var quarantinePath = Path.Combine(directory, $"{fileName}.unreadable-{timestamp}{extension}");
+            File.Move(_defaultFilePath, quarantinePath);
+        }
+
+        await SaveMaterialsCoreAsync(SeedMaterials(), _defaultFilePath, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task BestEffortSynchronizeLocationCoreAsync(CancellationToken cancellationToken, bool force)
@@ -444,6 +471,11 @@ public sealed class JsonMaterialRepository : IMaterialRepository, IMaterialLibra
 
         foreach (var material in materials)
         {
+            if (material is null)
+            {
+                throw new InvalidDataException("Material library file contains a null material entry.");
+            }
+
             var prepared = _validationService.PrepareForUpdate(material, normalizedMaterials);
             if (!materialIds.Add(prepared.MaterialId))
             {

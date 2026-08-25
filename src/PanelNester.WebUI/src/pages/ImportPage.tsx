@@ -1779,60 +1779,6 @@ export function ImportPage({
                                 setEditingDraft((current) => ({
                                   ...(current ?? createDraft(part)),
                                   rowId: part.rowId,
-                                  sheetNumber: event.target.value,
-                                }))
-                              }
-                              type="text"
-                              value={draft?.sheetNumber ?? ''}
-                            />
-                          ) : (
-                            part.sheetNumber ?? '—'
-                          )}
-                        </td>
-                        <td>
-                          {isEditing ? (
-                            <div className="table-actions">
-                              <input
-                                className="table-input"
-                                min={1}
-                                onChange={(event) =>
-                                  setEditingDraft((current) => ({
-                                    ...(current ?? createDraft(part)),
-                                    rowId: part.rowId,
-                                    rowNumber: event.target.value,
-                                  }))
-                                }
-                                type="number"
-                                value={draft?.rowNumber ?? ''}
-                              />
-                              <input
-                                className="table-input"
-                                min={1}
-                                onChange={(event) =>
-                                  setEditingDraft((current) => ({
-                                    ...(current ?? createDraft(part)),
-                                    rowId: part.rowId,
-                                    columnNumber: event.target.value,
-                                  }))
-                                }
-                                type="number"
-                                value={draft?.columnNumber ?? ''}
-                              />
-                            </div>
-                          ) : part.rowNumber != null && part.columnNumber != null ? (
-                            `${part.rowNumber}, ${part.columnNumber}`
-                          ) : (
-                            '—'
-                          )}
-                        </td>
-                        <td>
-                          {isEditing ? (
-                            <input
-                              className="table-input"
-                              onChange={(event) =>
-                                setEditingDraft((current) => ({
-                                  ...(current ?? createDraft(part)),
-                                  rowId: part.rowId,
                                   length: event.target.value,
                                 }))
                               }
@@ -1913,6 +1859,60 @@ export function ImportPage({
                             />
                           ) : (
                             getDisplayGroup(part)
+                          )}
+                        </td>
+                        <td>
+                          {isEditing ? (
+                            <input
+                              className="table-input"
+                              onChange={(event) =>
+                                setEditingDraft((current) => ({
+                                  ...(current ?? createDraft(part)),
+                                  rowId: part.rowId,
+                                  sheetNumber: event.target.value,
+                                }))
+                              }
+                              type="text"
+                              value={draft?.sheetNumber ?? ''}
+                            />
+                          ) : (
+                            part.sheetNumber ?? '—'
+                          )}
+                        </td>
+                        <td>
+                          {isEditing ? (
+                            <div className="table-actions">
+                              <input
+                                className="table-input"
+                                min={1}
+                                onChange={(event) =>
+                                  setEditingDraft((current) => ({
+                                    ...(current ?? createDraft(part)),
+                                    rowId: part.rowId,
+                                    rowNumber: event.target.value,
+                                  }))
+                                }
+                                type="number"
+                                value={draft?.rowNumber ?? ''}
+                              />
+                              <input
+                                className="table-input"
+                                min={1}
+                                onChange={(event) =>
+                                  setEditingDraft((current) => ({
+                                    ...(current ?? createDraft(part)),
+                                    rowId: part.rowId,
+                                    columnNumber: event.target.value,
+                                  }))
+                                }
+                                type="number"
+                                value={draft?.columnNumber ?? ''}
+                              />
+                            </div>
+                          ) : part.rowNumber != null && part.columnNumber != null ? (
+                            `${part.rowNumber}, ${part.columnNumber}`
+                          ) : (
+                            '—'
                           )}
                         </td>
                         <td>
