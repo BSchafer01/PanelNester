@@ -14,7 +14,7 @@ namespace PanelNester.Desktop.Tests.Bridge;
 
 public sealed class ProjectBridgeSpecs : IDisposable
 {
-    private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions SerializerOptions = BridgeJson.SerializerOptions;
     private readonly string _workspacePath = Path.Combine(Path.GetTempPath(), $"PanelNester.ProjectBridgeSpecs.{Guid.NewGuid():N}");
 
     [Fact]

@@ -185,7 +185,20 @@ internal static class ProjectSchemaMigrator
         var knownMaterials = parts.Select(part => part.MaterialName).ToHashSet(StringComparer.Ordinal);
         var referencedPartIds = GetReferencedPartIds(result).ToArray();
         if (referencedPartIds.Distinct(StringComparer.Ordinal).Count() != referencedPartIds.Length ||
-            (parts.Count > 0 && referencedPartIds.Length == 0))
+            (parts.Count > 0 && referencedPartIds.Length == 0) ||
+            referencedPartIds.Any(partId => !partsByResultId.ContainsKey(partId)))
+        {
+            return false;
+        }
+
+        var representedMaterials = sheets.Select(sheet => sheet.MaterialName)
+            .Concat(referencedPartIds.Select(partId => partsByResultId[partId].MaterialName))
+            .ToHashSet(StringComparer.Ordinal);
+        var expectedRepresentedPartIds = partsByResultId
+            .Where(item => representedMaterials.Contains(item.Value.MaterialName))
+            .Select(item => item.Key)
+            .ToHashSet(StringComparer.Ordinal);
+        if (!expectedRepresentedPartIds.SetEquals(referencedPartIds))
         {
             return false;
         }

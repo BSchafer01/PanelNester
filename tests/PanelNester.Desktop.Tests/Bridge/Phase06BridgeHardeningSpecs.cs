@@ -14,7 +14,7 @@ namespace PanelNester.Desktop.Tests.Bridge;
 
 public sealed class Phase06BridgeHardeningSpecs : IDisposable
 {
-    private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions SerializerOptions = BridgeJson.SerializerOptions;
     private readonly string _workspacePath = Path.Combine(Path.GetTempPath(), $"PanelNester.Phase06BridgeHardeningSpecs.{Guid.NewGuid():N}");
 
     [Fact]

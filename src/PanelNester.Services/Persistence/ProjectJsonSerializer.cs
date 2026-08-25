@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using PanelNester.Domain.Models;
 using PanelNester.Services.Projects;
 
@@ -6,10 +7,7 @@ namespace PanelNester.Services.Persistence;
 
 internal sealed class ProjectJsonSerializer
 {
-    private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web)
-    {
-        WriteIndented = true
-    };
+    private static readonly JsonSerializerOptions SerializerOptions = CreateSerializerOptions();
 
     internal async Task<Project> LoadAsync(string filePath, CancellationToken cancellationToken = default)
     {
@@ -61,5 +59,15 @@ internal sealed class ProjectJsonSerializer
     }
 
     internal static JsonSerializerOptions CreateOptions() => new(SerializerOptions);
+
+    private static JsonSerializerOptions CreateSerializerOptions()
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            WriteIndented = true
+        };
+        options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
+        return options;
+    }
 
 }

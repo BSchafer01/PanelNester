@@ -373,6 +373,34 @@ public sealed class ProjectPersistenceSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Migration_marks_a_partial_standalone_material_result_stale()
+    {
+        var filePath = Path.Combine(_workspacePath, "partial-result.pnest");
+        var service = new ProjectService(new FakeMaterialService());
+        var sample = Phase03ProjectPersistenceSpec.CreateSampleProject();
+        var partialResult = sample.State.LastNestingResult! with
+        {
+            Placements = [sample.State.LastNestingResult.Placements[0]],
+            Summary = sample.State.LastNestingResult.Summary with { TotalPlaced = 1 }
+        };
+        var project = sample with
+        {
+            State = sample.State with
+            {
+                LastNestingResult = partialResult,
+                LastBatchNestingResult = null
+            }
+        };
+
+        var result = await service.SaveAsync(project, filePath);
+
+        Assert.True(result.Success);
+        Assert.Equal(
+            OptimizationResultStatus.Stale,
+            Assert.Single(result.Project!.State.OptimizationGroups).ResultStatus);
+    }
+
+    [Fact]
     public void Saving_a_project_snapshots_selected_materials_and_exact_import_matches_only()
     {
         var liveLibrary = new[]
