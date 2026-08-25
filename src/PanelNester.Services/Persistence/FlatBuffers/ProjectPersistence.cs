@@ -780,7 +780,16 @@ public struct ProjectState : IFlatbufferObject
         }
     }
 
-    public static void StartProjectState(FlatBufferBuilder builder) => builder.StartTable(7);
+    public string? ImportContextJson
+    {
+        get
+        {
+            var o = __p.__offset(18);
+            return o != 0 ? __p.__string(o + __p.bb_pos) : null;
+        }
+    }
+
+    public static void StartProjectState(FlatBufferBuilder builder) => builder.StartTable(8);
     public static void AddSourceFilePath(FlatBufferBuilder builder, StringOffset sourceFilePathOffset) => builder.AddOffset(0, sourceFilePathOffset.Value, 0);
     public static void AddParts(FlatBufferBuilder builder, VectorOffset partsOffset) => builder.AddOffset(1, partsOffset.Value, 0);
     public static void AddSelectedMaterialId(FlatBufferBuilder builder, StringOffset selectedMaterialIdOffset) => builder.AddOffset(2, selectedMaterialIdOffset.Value, 0);
@@ -791,6 +800,8 @@ public struct ProjectState : IFlatbufferObject
         builder.AddOffset(5, extrusionLayoutJsonOffset.Value, 0);
     public static void AddOptimizationGroupsJson(FlatBufferBuilder builder, StringOffset optimizationGroupsJsonOffset) =>
         builder.AddOffset(6, optimizationGroupsJsonOffset.Value, 0);
+    public static void AddImportContextJson(FlatBufferBuilder builder, StringOffset importContextJsonOffset) =>
+        builder.AddOffset(7, importContextJsonOffset.Value, 0);
 
     public static VectorOffset CreatePartsVector(FlatBufferBuilder builder, Offset<PartRow>[] data)
     {
@@ -972,7 +983,16 @@ public struct PartRow : IFlatbufferObject
         }
     }
 
-    public static void StartPartRow(FlatBufferBuilder builder) => builder.StartTable(16);
+    public string? SourceReferencesJson
+    {
+        get
+        {
+            var o = __p.__offset(36);
+            return o != 0 ? __p.__string(o + __p.bb_pos) : null;
+        }
+    }
+
+    public static void StartPartRow(FlatBufferBuilder builder) => builder.StartTable(17);
     public static void AddRowId(FlatBufferBuilder builder, StringOffset rowIdOffset) => builder.AddOffset(0, rowIdOffset.Value, 0);
     public static void AddImportedId(FlatBufferBuilder builder, StringOffset importedIdOffset) => builder.AddOffset(1, importedIdOffset.Value, 0);
     public static void AddLengthText(FlatBufferBuilder builder, StringOffset lengthTextOffset) => builder.AddOffset(2, lengthTextOffset.Value, 0);
@@ -989,6 +1009,8 @@ public struct PartRow : IFlatbufferObject
     public static void AddRowNumber(FlatBufferBuilder builder, int rowNumber) => builder.AddInt(13, rowNumber, 0);
     public static void AddColumnNumber(FlatBufferBuilder builder, int columnNumber) => builder.AddInt(14, columnNumber, 0);
     public static void AddIsManual(FlatBufferBuilder builder, bool isManual) => builder.AddBool(15, isManual, false);
+    public static void AddSourceReferencesJson(FlatBufferBuilder builder, StringOffset sourceReferencesJsonOffset) =>
+        builder.AddOffset(16, sourceReferencesJsonOffset.Value, 0);
 
     public static VectorOffset CreateValidationMessagesVector(FlatBufferBuilder builder, StringOffset[] data)
     {

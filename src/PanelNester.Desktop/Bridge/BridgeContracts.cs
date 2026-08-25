@@ -10,6 +10,10 @@ public static class BridgeMessageTypes
     public const string OpenFileDialog = "open-file-dialog";
     public const string ImportCsv = "import-csv";
     public const string ImportFile = "import-file";
+    public const string BeginImportSession = "begin-import-session";
+    public const string PreviewImportSession = "preview-import-session";
+    public const string FinalizeImportSession = "finalize-import-session";
+    public const string CancelImportSession = "cancel-import-session";
     public const string UpdatePartRow = "update-part-row";
     public const string DeletePartRow = "delete-part-row";
     public const string AddPartRow = "add-part-row";
@@ -315,6 +319,101 @@ public sealed record ListMaterialsResponse(
         return new(false, Array.Empty<Material>(), failure.Error, failure.ResponseMessage, libraryLocation);
     }
 }
+
+public sealed record BeginImportSessionRequest
+{
+    public string SessionId { get; init; } = string.Empty;
+
+    public string? ImportSourcePath { get; init; }
+}
+
+public sealed record PreviewImportSessionRequest
+{
+    public string SessionId { get; init; } = string.Empty;
+
+    public ImportOptions? Options { get; init; }
+}
+
+public sealed record FinalizeImportSessionRequest
+{
+    public string SessionId { get; init; } = string.Empty;
+
+    public ImportOptions? Options { get; init; }
+
+    public IReadOnlyList<ImportNewMaterialRequest> NewMaterials { get; init; } = Array.Empty<ImportNewMaterialRequest>();
+
+    public Project? Project { get; init; }
+
+    public string? TargetOptimizationGroupId { get; init; }
+}
+
+public sealed record CancelImportSessionRequest
+{
+    public string SessionId { get; init; } = string.Empty;
+}
+
+public enum ImportSessionPhase
+{
+    Opening,
+    Reading,
+    Validating,
+    Finalizing,
+    Finalized,
+    Cancelled,
+    Failed
+}
+
+public sealed record ImportSessionResponse(
+    bool Success,
+    string SessionId,
+    string? ImportSourcePath,
+    ImportSourceMetadata? ImportSource,
+    ImportSessionPhase Phase,
+    bool Finalized,
+    Project? Project,
+    IReadOnlyList<PartRow> Parts,
+    IReadOnlyList<ValidationError> Errors,
+    IReadOnlyList<ValidationWarning> Warnings,
+    IReadOnlyList<string> AvailableColumns,
+    IReadOnlyList<ImportFieldMappingStatus> ColumnMappings,
+    IReadOnlyList<ImportMaterialResolution> MaterialResolutions,
+    BridgeError? Error,
+    string? Message)
+{
+    public static ImportSessionResponse Failure(
+        string sessionId,
+        string? importSourcePath,
+        ImportSessionPhase phase,
+        string code,
+        string message,
+        string? userMessage = null)
+    {
+        var failure = BridgeFailure.Create(code, message, userMessage);
+        return new(
+            false,
+            sessionId,
+            importSourcePath,
+            null,
+            phase,
+            false,
+            null,
+            Array.Empty<PartRow>(),
+            Array.Empty<ValidationError>(),
+            Array.Empty<ValidationWarning>(),
+            Array.Empty<string>(),
+            Array.Empty<ImportFieldMappingStatus>(),
+            Array.Empty<ImportMaterialResolution>(),
+            failure.Error,
+            failure.ResponseMessage);
+    }
+}
+
+public sealed record CancelImportSessionResponse(
+    bool Success,
+    string SessionId,
+    bool Released,
+    BridgeError? Error,
+    string? Message);
 
 public sealed record GetMaterialRequest(string MaterialId);
 

@@ -265,6 +265,7 @@ internal sealed class ProjectFlatBufferSerializer
         var selectedMaterialId = CreateString(builder, state.SelectedMaterialId);
         var extrusionLayoutJson = CreateString(builder, SerializeExtrusionLayout(state.ExtrusionLayout));
         var optimizationGroupsJson = CreateString(builder, SerializeOptimizationGroups(state.OptimizationGroups));
+        var importContextJson = CreateString(builder, SerializeImportContext(state));
         var parts = WriteParts(builder, state.Parts);
         var lastNestingResult = state.LastNestingResult is null ? default : WriteNestResponse(builder, state.LastNestingResult);
         var lastBatchNestingResult = state.LastBatchNestingResult is null ? default : WriteBatchNestResponse(builder, state.LastBatchNestingResult);
@@ -275,6 +276,7 @@ internal sealed class ProjectFlatBufferSerializer
         Fb.ProjectState.AddSelectedMaterialId(builder, selectedMaterialId);
         Fb.ProjectState.AddExtrusionLayoutJson(builder, extrusionLayoutJson);
         Fb.ProjectState.AddOptimizationGroupsJson(builder, optimizationGroupsJson);
+        Fb.ProjectState.AddImportContextJson(builder, importContextJson);
         if (state.LastNestingResult is not null)
         {
             Fb.ProjectState.AddLastNestingResult(builder, lastNestingResult);
@@ -316,6 +318,9 @@ internal sealed class ProjectFlatBufferSerializer
         var validationMessages = WriteValidationMessages(builder, part.ValidationMessages);
         var group = CreateString(builder, part.Group);
         var sheetNumber = CreateString(builder, part.SheetNumber);
+        var sourceReferencesJson = CreateString(
+            builder,
+            JsonSerializer.Serialize(part.SourceReferences, ProjectJsonSerializer.CreateOptions()));
 
         Fb.PartRow.StartPartRow(builder);
         Fb.PartRow.AddRowId(builder, rowId);
@@ -342,6 +347,7 @@ internal sealed class ProjectFlatBufferSerializer
         }
 
         Fb.PartRow.AddIsManual(builder, part.IsManual);
+        Fb.PartRow.AddSourceReferencesJson(builder, sourceReferencesJson);
 
         return Fb.PartRow.EndPartRow(builder);
     }
@@ -697,10 +703,13 @@ internal sealed class ProjectFlatBufferSerializer
         var lastBatch = value.LastBatchNestingResult is { } lastBatchResult ? ReadBatchNestResponse(lastBatchResult) : null;
         var extrusionLayout = DeserializeExtrusionLayout(value.ExtrusionLayoutJson);
         var optimizationGroups = DeserializeOptimizationGroups(value.OptimizationGroupsJson);
+        var importContext = DeserializeImportContext(value.ImportContextJson);
 
         return new ProjectState
         {
             SourceFilePath = value.SourceFilePath,
+            ImportSource = importContext.ImportSource,
+            ImportConfiguration = importContext.ImportConfiguration,
             OptimizationGroups = optimizationGroups,
             Parts = parts,
             SelectedMaterialId = value.SelectedMaterialId,
@@ -715,6 +724,30 @@ internal sealed class ProjectFlatBufferSerializer
 
     private static string SerializeOptimizationGroups(IReadOnlyList<OptimizationGroup>? groups) =>
         JsonSerializer.Serialize(groups ?? Array.Empty<OptimizationGroup>(), ProjectJsonSerializer.CreateOptions());
+
+    private static string SerializeImportContext(ProjectState state) =>
+        JsonSerializer.Serialize(
+            new PersistedImportContext(state.ImportSource, state.ImportConfiguration),
+            ProjectJsonSerializer.CreateOptions());
+
+    private static PersistedImportContext DeserializeImportContext(string? importContextJson)
+    {
+        if (string.IsNullOrWhiteSpace(importContextJson))
+        {
+            return new PersistedImportContext(null, null);
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<PersistedImportContext>(
+                importContextJson,
+                ProjectJsonSerializer.CreateOptions()) ?? new PersistedImportContext(null, null);
+        }
+        catch (JsonException)
+        {
+            return new PersistedImportContext(null, null);
+        }
+    }
 
     private static IReadOnlyList<OptimizationGroup> DeserializeOptimizationGroups(string? groupsJson)
     {
@@ -754,6 +787,10 @@ internal sealed class ProjectFlatBufferSerializer
         }
     }
 
+    private sealed record PersistedImportContext(
+        ImportSourceMetadata? ImportSource,
+        ImportConfiguration? ImportConfiguration);
+
     private static IReadOnlyList<PartRow> ReadParts(Fb.ProjectState state)
     {
         if (state.PartsLength == 0)
@@ -790,11 +827,31 @@ internal sealed class ProjectFlatBufferSerializer
                 ColumnNumber = value.ColumnNumber <= 0 ? null : value.ColumnNumber,
                 IsManual = value.IsManual,
                 ValidationStatus = value.ValidationStatus ?? ValidationStatuses.Valid,
-                ValidationMessages = messages
+                ValidationMessages = messages,
+                SourceReferences = DeserializeSourceReferences(value.SourceReferencesJson)
             });
         }
 
         return parts;
+    }
+
+    private static IReadOnlyList<SourceReference> DeserializeSourceReferences(string? sourceReferencesJson)
+    {
+        if (string.IsNullOrWhiteSpace(sourceReferencesJson))
+        {
+            return Array.Empty<SourceReference>();
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<IReadOnlyList<SourceReference>>(
+                sourceReferencesJson,
+                ProjectJsonSerializer.CreateOptions()) ?? Array.Empty<SourceReference>();
+        }
+        catch (JsonException)
+        {
+            return Array.Empty<SourceReference>();
+        }
     }
 
     private static IReadOnlyList<string> ReadStringVector(int length, Func<int, string?> accessor)

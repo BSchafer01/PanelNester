@@ -4,6 +4,10 @@ export const bridgeMessageTypes = {
   openFileDialog: 'open-file-dialog',
   importCsv: 'import-csv',
   importFile: 'import-file',
+  beginImportSession: 'begin-import-session',
+  previewImportSession: 'preview-import-session',
+  finalizeImportSession: 'finalize-import-session',
+  cancelImportSession: 'cancel-import-session',
   updatePartRow: 'update-part-row',
   deletePartRow: 'delete-part-row',
   addPartRow: 'add-part-row',
@@ -126,6 +130,14 @@ export interface PartRow {
   columnNumber?: number | null;
   validationStatus: ValidationStatus;
   validationMessages: string[];
+  sourceReferences?: SourceReference[];
+}
+
+export interface SourceReference {
+  worksheetName: string;
+  worksheetPosition: number;
+  physicalRow: number;
+  sourceFingerprint: string;
 }
 
 export interface ImportRequest {
@@ -230,6 +242,55 @@ export interface PartRowUpdate {
   sheetNumber?: string | null;
   rowNumber?: string | null;
   columnNumber?: string | null;
+  sourceReferences?: SourceReference[];
+}
+
+export type ImportSessionPhase =
+  | 'opening'
+  | 'reading'
+  | 'validating'
+  | 'finalizing'
+  | 'finalized'
+  | 'cancelled'
+  | 'failed';
+
+export interface BeginImportSessionRequest {
+  sessionId: string;
+  importSourcePath?: string | null;
+}
+
+export interface PreviewImportSessionRequest {
+  sessionId: string;
+  options?: ImportOptions | null;
+}
+
+export interface FinalizeImportSessionRequest {
+  sessionId: string;
+  options?: ImportOptions | null;
+  newMaterials?: ImportNewMaterialRequest[];
+  project: ProjectRecord;
+  targetOptimizationGroupId?: string | null;
+}
+
+export interface CancelImportSessionRequest {
+  sessionId: string;
+}
+
+export interface ImportSessionResponse extends ImportFileResponse {
+  sessionId: string;
+  importSourcePath: string | null;
+  importSource?: ImportSourceMetadata | null;
+  phase: ImportSessionPhase;
+  finalized: boolean;
+  project?: ProjectRecord | null;
+}
+
+export interface CancelImportSessionResponse {
+  success: boolean;
+  sessionId: string;
+  released: boolean;
+  error?: BridgeError | null;
+  message?: string;
 }
 
 export interface AddPartRowRequest {
@@ -248,6 +309,7 @@ export interface DeletePartRowRequest {
 }
 
 export interface ImportMappingSession {
+  sessionId: string;
   filePath: string;
   preview: ImportFileResponse;
   options: ImportOptions;
@@ -384,12 +446,35 @@ export interface OptimizationGroupChange {
 
 export interface ProjectStateRecord {
   sourceFilePath?: string | null;
+  importSource?: ImportSourceMetadata | null;
+  importConfiguration?: ImportConfiguration | null;
   optimizationGroups: OptimizationGroup[];
   parts: PartRow[];
   selectedMaterialId?: string | null;
   lastNestingResult?: NestResponse | null;
   lastBatchNestingResult?: BatchNestResponse | null;
   extrusionLayout: ExtrusionLayoutState;
+}
+
+export interface ImportConfiguration {
+  options: ImportOptions;
+  worksheets: ImportWorksheetConfiguration[];
+}
+
+export interface ImportWorksheetConfiguration {
+  worksheetName: string;
+  originalPosition: number;
+  headingRange: string;
+  columnMappings: ImportColumnMapping[];
+  optimizationGroupId?: string | null;
+  excludedSourceRows: number[];
+}
+
+export interface ImportSourceMetadata {
+  importSourcePath: string;
+  contentFingerprint: string;
+  contentLength: number;
+  snapshotCapturedAtUtc: string;
 }
 
 export interface ProjectRecord {
@@ -963,6 +1048,10 @@ export const requestedBridgeCapabilities: BridgeCapability[] = [
   bridgeMessageTypes.openFileDialog,
   bridgeMessageTypes.importCsv,
   bridgeMessageTypes.importFile,
+  bridgeMessageTypes.beginImportSession,
+  bridgeMessageTypes.previewImportSession,
+  bridgeMessageTypes.finalizeImportSession,
+  bridgeMessageTypes.cancelImportSession,
   bridgeMessageTypes.updatePartRow,
   bridgeMessageTypes.deletePartRow,
   bridgeMessageTypes.addPartRow,

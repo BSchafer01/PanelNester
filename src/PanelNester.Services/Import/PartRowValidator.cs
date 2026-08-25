@@ -154,7 +154,8 @@ public sealed class PartRowValidator
             RowNumber = rowNumber,
             ColumnNumber = columnNumber,
             ValidationStatus = validationStatus,
-            ValidationMessages = validationMessages
+            ValidationMessages = validationMessages,
+            SourceReferences = update.SourceReferences
         };
     }
 

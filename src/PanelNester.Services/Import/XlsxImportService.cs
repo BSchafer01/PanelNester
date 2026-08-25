@@ -1,4 +1,6 @@
 using ClosedXML.Excel;
+using System.Security.Cryptography;
+using System.Text;
 using PanelNester.Domain.Contracts;
 using PanelNester.Domain.Models;
 
@@ -60,6 +62,7 @@ public sealed class XlsxImportService : IImportService
         var availableColumns = Array.Empty<string>();
         IReadOnlyList<ImportFieldMappingStatus> columnMappings = Array.Empty<ImportFieldMappingStatus>();
         IReadOnlyList<ImportMaterialResolution> materialResolutions = Array.Empty<ImportMaterialResolution>();
+        ImportWorksheetDescriptor? worksheetDescriptor = null;
         var knownMaterials = await LoadKnownMaterialsAsync(cancellationToken).ConfigureAwait(false);
 
         try
@@ -88,6 +91,13 @@ public sealed class XlsxImportService : IImportService
                 errors.Add(new ValidationError("missing-column", "Worksheet header row is empty."));
                 return PartRowValidator.CreateResponse([], errors, warnings);
             }
+
+            worksheetDescriptor = new ImportWorksheetDescriptor
+            {
+                WorksheetName = worksheet.Name,
+                OriginalPosition = worksheet.Position,
+                HeadingRange = $"R{headerRow.RowNumber()}C1:R{headerRow.RowNumber()}C{lastHeaderColumn}"
+            };
 
             availableColumns = Enumerable.Range(1, lastHeaderColumn)
                 .Select(columnNumber => GetCellText(headerRow.Cell(columnNumber)))
@@ -137,7 +147,19 @@ public sealed class XlsxImportService : IImportService
                     Group = hasGroupColumn ? GetCellText(row.Cell(headerMap[groupSourceColumn!])) : null,
                     SheetNumber = hasSheetNumberColumn ? GetCellText(row.Cell(headerMap[sheetNumberSourceColumn!])) : null,
                     RowNumber = hasRowNumberColumn ? GetCellText(row.Cell(headerMap[rowNumberSourceColumn!])) : null,
-                    ColumnNumber = hasColumnNumberColumn ? GetCellText(row.Cell(headerMap[columnNumberSourceColumn!])) : null
+                    ColumnNumber = hasColumnNumberColumn ? GetCellText(row.Cell(headerMap[columnNumberSourceColumn!])) : null,
+                    SourceReferences =
+                    [
+                        new SourceReference
+                        {
+                            WorksheetName = worksheet.Name,
+                            WorksheetPosition = worksheet.Position,
+                            PhysicalRow = row.RowNumber(),
+                            SourceFingerprint = Fingerprint(
+                                Enumerable.Range(1, lastHeaderColumn)
+                                    .Select(columnNumber => GetCellText(row.Cell(columnNumber))))
+                        }
+                    ]
                 });
             }
 
@@ -161,7 +183,8 @@ public sealed class XlsxImportService : IImportService
         {
             AvailableColumns = availableColumns,
             ColumnMappings = columnMappings,
-            MaterialResolutions = materialResolutions
+            MaterialResolutions = materialResolutions,
+            Worksheet = worksheetDescriptor
         };
     }
 
@@ -193,6 +216,12 @@ public sealed class XlsxImportService : IImportService
 
     private static string GetCellText(IXLCell cell) =>
         cell.GetString().Trim();
+
+    private static string Fingerprint(IEnumerable<string?> values)
+    {
+        var canonicalRow = string.Join('\u001f', values.Select(value => value ?? string.Empty));
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonicalRow)));
+    }
 
     private static bool IsBlankRequiredRow(
         IXLRow row,

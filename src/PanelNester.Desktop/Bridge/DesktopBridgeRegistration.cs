@@ -154,6 +154,7 @@ public static class DesktopBridgeRegistration
         ArgumentNullException.ThrowIfNull(contentLocationAccessor);
 
         var dispatcher = new BridgeMessageDispatcher();
+        var importSessions = new ImportSessionCoordinator(importService);
 
         dispatcher.Register<BridgeHandshakeRequest>(
             BridgeMessageTypes.BridgeHandshake,
@@ -246,6 +247,225 @@ public static class DesktopBridgeRegistration
                         "import-host-error",
                         ex.Message,
                         "The desktop host could not complete the file import. Check the material library and try again.");
+                }
+            });
+
+        dispatcher.Register<BeginImportSessionRequest>(
+            BridgeMessageTypes.BeginImportSession,
+            async (request, cancellationToken) =>
+            {
+                var importSourcePath = NormalizeFilePath(request.ImportSourcePath);
+                if (string.IsNullOrWhiteSpace(importSourcePath))
+                {
+                    var dialogResult = await fileDialogService
+                        .OpenAsync(
+                            new OpenFileDialogRequest("Import OptiFab parts", ImportFileFilters),
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                    if (!dialogResult.Success || string.IsNullOrWhiteSpace(dialogResult.FilePath))
+                    {
+                        return ImportSessionResponse.Failure(
+                            request.SessionId,
+                            null,
+                            ImportSessionPhase.Opening,
+                            "cancelled",
+                            "File selection was cancelled.");
+                    }
+
+                    importSourcePath = dialogResult.FilePath;
+                }
+
+                try
+                {
+                    var result = await importSessions
+                        .BeginAsync(request.SessionId, importSourcePath, cancellationToken)
+                        .ConfigureAwait(false);
+                    return BuildImportSessionResponse(request.SessionId, result, ImportSessionPhase.Reading);
+                }
+                catch (ImportSessionException ex)
+                {
+                    return ImportSessionResponse.Failure(request.SessionId, importSourcePath, ImportSessionPhase.Opening, ex.Code, ex.Message);
+                }
+                catch (OperationCanceledException)
+                {
+                    return ImportSessionResponse.Failure(
+                        request.SessionId,
+                        importSourcePath,
+                        ImportSessionPhase.Cancelled,
+                        "cancelled",
+                        "Import Session was cancelled.");
+                }
+                catch (Exception ex)
+                {
+                    return ImportSessionResponse.Failure(
+                        request.SessionId,
+                        importSourcePath,
+                        ImportSessionPhase.Failed,
+                        "import-host-error",
+                        ex.Message,
+                        "The desktop host could not begin the Import Session.");
+                }
+            });
+
+        dispatcher.Register<PreviewImportSessionRequest>(
+            BridgeMessageTypes.PreviewImportSession,
+            async (request, cancellationToken) =>
+            {
+                try
+                {
+                    var result = await importSessions
+                        .PreviewAsync(request.SessionId, request.Options, cancellationToken)
+                        .ConfigureAwait(false);
+                    return BuildImportSessionResponse(request.SessionId, result, ImportSessionPhase.Validating);
+                }
+                catch (ImportSessionException ex)
+                {
+                    return ImportSessionResponse.Failure(request.SessionId, null, ImportSessionPhase.Validating, ex.Code, ex.Message);
+                }
+                catch (OperationCanceledException)
+                {
+                    return ImportSessionResponse.Failure(
+                        request.SessionId,
+                        null,
+                        ImportSessionPhase.Cancelled,
+                        "cancelled",
+                        "Import Session was cancelled.");
+                }
+                catch (Exception ex)
+                {
+                    return ImportSessionResponse.Failure(
+                        request.SessionId,
+                        null,
+                        ImportSessionPhase.Failed,
+                        "import-host-error",
+                        ex.Message,
+                        "The desktop host could not preview the Import Session.");
+                }
+            });
+
+        dispatcher.Register<FinalizeImportSessionRequest>(
+            BridgeMessageTypes.FinalizeImportSession,
+            async (request, cancellationToken) =>
+            {
+                IReadOnlyList<Material> createdMaterials = Array.Empty<Material>();
+                if (request.Project is null)
+                {
+                    importSessions.Cancel(request.SessionId);
+                    return ImportSessionResponse.Failure(
+                        request.SessionId,
+                        null,
+                        ImportSessionPhase.Finalizing,
+                        "import-session-project-required",
+                        "Import Session finalization requires the current project.");
+                }
+
+                try
+                {
+                    using var finalization = importSessions.BeginFinalization(request.SessionId, cancellationToken);
+                    var importPreparation = await PrepareImportOptionsAsync(
+                            new ImportFileRequest
+                            {
+                                Options = request.Options,
+                                NewMaterials = request.NewMaterials
+                            },
+                            materialService,
+                            finalization.CancellationToken)
+                        .ConfigureAwait(false);
+                    createdMaterials = importPreparation.CreatedMaterials;
+                    if (!importPreparation.Success)
+                    {
+                        importSessions.Cancel(request.SessionId);
+                        var message = GetFirstErrorMessage(
+                            importPreparation.Errors,
+                            "Import material preparation failed.");
+                        return ImportSessionResponse.Failure(
+                            request.SessionId,
+                            null,
+                            ImportSessionPhase.Failed,
+                            GetFirstErrorCode(importPreparation.Errors, "import-material-preparation-failed"),
+                            message);
+                    }
+
+                    var result = await finalization.ImportAsync(importPreparation.Options).ConfigureAwait(false);
+                    result = result with
+                    {
+                        Response = MarkCreatedMaterialResolutions(
+                            result.Response,
+                            importPreparation.CreatedSourceMaterials)
+                    };
+                    if (!result.Response.Success)
+                    {
+                        await RollbackCreatedMaterialsAsync(materialService, importPreparation.CreatedMaterials)
+                            .ConfigureAwait(false);
+                        return BuildImportSessionResponse(request.SessionId, result, ImportSessionPhase.Failed);
+                    }
+
+                    var project = ProjectImportFinalizer.Finalize(
+                        request.Project,
+                        result.ImportSource,
+                        importPreparation.Options,
+                        result.Response,
+                        request.TargetOptimizationGroupId);
+                    return BuildImportSessionResponse(
+                        request.SessionId,
+                        result,
+                        ImportSessionPhase.Finalized,
+                        project,
+                        finalized: true);
+                }
+                catch (ImportSessionException ex)
+                {
+                    await RollbackCreatedMaterialsAsync(materialService, createdMaterials).ConfigureAwait(false);
+                    return ImportSessionResponse.Failure(request.SessionId, null, ImportSessionPhase.Finalizing, ex.Code, ex.Message);
+                }
+                catch (OperationCanceledException)
+                {
+                    await RollbackCreatedMaterialsAsync(materialService, createdMaterials).ConfigureAwait(false);
+                    return ImportSessionResponse.Failure(
+                        request.SessionId,
+                        null,
+                        ImportSessionPhase.Cancelled,
+                        "cancelled",
+                        "Import Session was cancelled.");
+                }
+                catch (Exception ex)
+                {
+                    await RollbackCreatedMaterialsAsync(materialService, createdMaterials).ConfigureAwait(false);
+                    importSessions.Cancel(request.SessionId);
+                    return ImportSessionResponse.Failure(
+                        request.SessionId,
+                        null,
+                        ImportSessionPhase.Failed,
+                        "import-host-error",
+                        ex.Message,
+                        "The desktop host could not finalize the Import Session.");
+                }
+            });
+
+        dispatcher.Register<CancelImportSessionRequest>(
+            BridgeMessageTypes.CancelImportSession,
+            (request, _) =>
+            {
+                try
+                {
+                    var released = importSessions.Cancel(request.SessionId);
+                    return Task.FromResult<object?>(new CancelImportSessionResponse(
+                        true,
+                        request.SessionId,
+                        released,
+                        null,
+                        released
+                            ? "Import Session cancelled and snapshot released."
+                            : "No active Import Session was found."));
+                }
+                catch (ImportSessionException ex)
+                {
+                    return Task.FromResult<object?>(new CancelImportSessionResponse(
+                        false,
+                        request.SessionId,
+                        false,
+                        BridgeError.Create(ex.Code, ex.Message),
+                        ex.Message));
                 }
             });
 
@@ -1668,10 +1888,12 @@ public static class DesktopBridgeRegistration
                 true,
                 requestedOptions,
                 new HashSet<string>(StringComparer.Ordinal),
+                Array.Empty<Material>(),
                 Array.Empty<ValidationError>());
         }
 
         var createdSourceMaterials = new List<string>(request.NewMaterials.Count);
+        var createdMaterials = new List<Material>(request.NewMaterials.Count);
         var errors = new List<ValidationError>();
         var existingMappings = new Dictionary<string, ImportMaterialMapping>(StringComparer.Ordinal);
 
@@ -1692,55 +1914,69 @@ public static class DesktopBridgeRegistration
             }
         }
 
-        foreach (var newMaterial in request.NewMaterials)
+        try
         {
-            var sourceMaterialName = newMaterial.SourceMaterialName?.Trim() ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(sourceMaterialName))
+            foreach (var newMaterial in request.NewMaterials)
             {
-                errors.Add(new ValidationError("invalid-material-mapping", "New import materials require a sourceMaterialName."));
-                continue;
-            }
-
-            if (newMaterial.Material is null)
-            {
-                errors.Add(new ValidationError(
-                    "invalid-material-mapping",
-                    $"New import material '{sourceMaterialName}' is missing a material definition."));
-                continue;
-            }
-
-            if (existingMappings.ContainsKey(sourceMaterialName))
-            {
-                errors.Add(new ValidationError(
-                    "duplicate-material-mapping",
-                    $"Import material '{sourceMaterialName}' was mapped more than once."));
-                continue;
-            }
-
-            var createResult = await materialService.CreateAsync(newMaterial.Material, cancellationToken).ConfigureAwait(false);
-            if (!createResult.Success || createResult.Material is null)
-            {
-                if (createResult.Errors.Count > 0)
+                var sourceMaterialName = newMaterial.SourceMaterialName?.Trim() ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(sourceMaterialName))
                 {
-                    errors.AddRange(createResult.Errors);
+                    errors.Add(new ValidationError("invalid-material-mapping", "New import materials require a sourceMaterialName."));
+                    continue;
                 }
-                else
+
+                if (newMaterial.Material is null)
                 {
                     errors.Add(new ValidationError(
-                        "material-create-failed",
-                        $"Material '{newMaterial.Material.Name}' could not be created for import."));
+                        "invalid-material-mapping",
+                        $"New import material '{sourceMaterialName}' is missing a material definition."));
+                    continue;
                 }
 
-                continue;
-            }
+                if (existingMappings.ContainsKey(sourceMaterialName))
+                {
+                    errors.Add(new ValidationError(
+                        "duplicate-material-mapping",
+                        $"Import material '{sourceMaterialName}' was mapped more than once."));
+                    continue;
+                }
 
-            var createdMapping = new ImportMaterialMapping
-            {
-                SourceMaterialName = sourceMaterialName,
-                TargetMaterialId = createResult.Material.MaterialId
-            };
-            existingMappings.Add(sourceMaterialName, createdMapping);
-            createdSourceMaterials.Add(sourceMaterialName);
+                var createResult = await materialService.CreateAsync(newMaterial.Material, cancellationToken).ConfigureAwait(false);
+                if (!createResult.Success || createResult.Material is null)
+                {
+                    if (createResult.Errors.Count > 0)
+                    {
+                        errors.AddRange(createResult.Errors);
+                    }
+                    else
+                    {
+                        errors.Add(new ValidationError(
+                            "material-create-failed",
+                            $"Material '{newMaterial.Material.Name}' could not be created for import."));
+                    }
+
+                    continue;
+                }
+
+                var createdMapping = new ImportMaterialMapping
+                {
+                    SourceMaterialName = sourceMaterialName,
+                    TargetMaterialId = createResult.Material.MaterialId
+                };
+                existingMappings.Add(sourceMaterialName, createdMapping);
+                createdSourceMaterials.Add(sourceMaterialName);
+                createdMaterials.Add(createResult.Material);
+            }
+        }
+        catch
+        {
+            await RollbackCreatedMaterialsAsync(materialService, createdMaterials).ConfigureAwait(false);
+            throw;
+        }
+
+        if (errors.Count > 0)
+        {
+            await RollbackCreatedMaterialsAsync(materialService, createdMaterials).ConfigureAwait(false);
         }
 
         return errors.Count > 0
@@ -1748,12 +1984,25 @@ public static class DesktopBridgeRegistration
                 false,
                 requestedOptions,
                 createdSourceMaterials.ToHashSet(StringComparer.Ordinal),
+                Array.Empty<Material>(),
                 errors)
             : new ImportPreparationResult(
                 true,
                 requestedOptions with { MaterialMappings = existingMappings.Values.ToArray() },
                 createdSourceMaterials.ToHashSet(StringComparer.Ordinal),
+                createdMaterials,
                 Array.Empty<ValidationError>());
+    }
+
+    private static async Task RollbackCreatedMaterialsAsync(
+        IMaterialService materialService,
+        IReadOnlyList<Material> createdMaterials)
+    {
+        foreach (var material in createdMaterials.Reverse())
+        {
+            await materialService.DeleteAsync(material.MaterialId, cancellationToken: CancellationToken.None)
+                .ConfigureAwait(false);
+        }
     }
 
     private static ImportResponse MarkCreatedMaterialResolutions(
@@ -1790,6 +2039,32 @@ public static class DesktopBridgeRegistration
         }
 
         return GetFirstErrorMessage(response.Errors, $"Import failed for '{fileName}'.");
+    }
+
+    private static ImportSessionResponse BuildImportSessionResponse(
+        string sessionId,
+        ImportSessionResult result,
+        ImportSessionPhase phase,
+        Project? project = null,
+        bool finalized = false)
+    {
+        var response = result.Response;
+        return new ImportSessionResponse(
+            response.Success,
+            sessionId,
+            result.ImportSource.ImportSourcePath,
+            result.ImportSource,
+            phase,
+            finalized,
+            project,
+            response.Parts,
+            response.Errors,
+            response.Warnings,
+            response.AvailableColumns,
+            response.ColumnMappings,
+            response.MaterialResolutions,
+            null,
+            BuildImportFileMessage(response, result.ImportSource.ImportSourcePath));
     }
 
     private static string GetFirstErrorCode(IReadOnlyList<ValidationError> errors, string fallbackCode) =>
@@ -1844,5 +2119,6 @@ public static class DesktopBridgeRegistration
         bool Success,
         ImportOptions Options,
         IReadOnlySet<string> CreatedSourceMaterials,
+        IReadOnlyList<Material> CreatedMaterials,
         IReadOnlyList<ValidationError> Errors);
 }

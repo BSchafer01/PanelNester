@@ -80,6 +80,7 @@ table ProjectState {
   last_batch_nesting_result:BatchNestResponse;
   extrusion_layout_json:string;
   optimization_groups_json:string;
+  import_context_json:string;
 }
 
 table PartRow {
@@ -99,6 +100,7 @@ table PartRow {
   row_number:int;
   column_number:int;
   is_manual:bool;
+  source_references_json:string;
 }
 
 table NestResponse {

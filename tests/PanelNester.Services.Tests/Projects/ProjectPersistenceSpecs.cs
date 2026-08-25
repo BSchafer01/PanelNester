@@ -135,6 +135,83 @@ public sealed class ProjectPersistenceSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Current_schema_round_trips_import_configuration_and_source_metadata_without_snapshot_bytes()
+    {
+        var filePath = Path.Combine(_workspacePath, "import-context-roundtrip.pnest");
+        var serializer = new ProjectSerializer();
+        var sample = Phase03ProjectPersistenceSpec.CreateSampleProject();
+        var project = sample with
+        {
+            State = sample.State with
+            {
+                ImportSource = new ImportSourceMetadata
+                {
+                    ImportSourcePath = @"C:\imports\Lobby.csv",
+                    ContentFingerprint = "A1B2C3",
+                    ContentLength = 1234,
+                    SnapshotCapturedAtUtc = new DateTime(2026, 8, 25, 12, 30, 0, DateTimeKind.Utc)
+                },
+                ImportConfiguration = new ImportConfiguration
+                {
+                    Options = new ImportOptions
+                    {
+                        ColumnMappings =
+                        [
+                            new ImportColumnMapping
+                            {
+                                SourceColumn = "Panel ID",
+                                TargetField = ImportFieldNames.Id
+                            }
+                        ]
+                    },
+                    Worksheets =
+                    [
+                        new ImportWorksheetConfiguration
+                        {
+                            WorksheetName = "Parts",
+                            OriginalPosition = 1,
+                            HeadingRange = "R1C1:R1C5",
+                            ColumnMappings =
+                            [
+                                new ImportColumnMapping
+                                {
+                                    SourceColumn = "Panel ID",
+                                    TargetField = ImportFieldNames.Id
+                                }
+                            ],
+                            OptimizationGroupId = "group-stable-001",
+                            ExcludedSourceRows = [7]
+                        }
+                    ]
+                },
+                Parts = sample.State.Parts.Select(part => part with
+                {
+                    SourceReferences =
+                    [
+                        new SourceReference
+                        {
+                            WorksheetName = "Parts",
+                            WorksheetPosition = 1,
+                            PhysicalRow = 2,
+                            SourceFingerprint = "ROW-FINGERPRINT"
+                        }
+                    ]
+                }).ToArray()
+            }
+        };
+
+        await serializer.SaveAsync(project, filePath);
+        var restored = await serializer.LoadAsync(filePath);
+
+        Assert.Equivalent(project.State.ImportSource, restored.State.ImportSource, strict: true);
+        Assert.Equivalent(project.State.ImportConfiguration, restored.State.ImportConfiguration, strict: true);
+        Assert.Equivalent(
+            project.State.Parts[0].SourceReferences,
+            restored.State.Parts[0].SourceReferences,
+            strict: true);
+    }
+
+    [Fact]
     public async Task Legacy_json_projects_migrate_to_the_current_schema_with_valid_results_intact()
     {
         var filePath = Path.Combine(_workspacePath, "legacy-v1-json.pnest");

@@ -1,6 +1,8 @@
 using System.Globalization;
 using CsvHelper;
 using CsvHelper.Configuration;
+using System.Security.Cryptography;
+using System.Text;
 using PanelNester.Domain.Contracts;
 using PanelNester.Domain.Models;
 
@@ -60,7 +62,24 @@ public sealed class CsvImportService : IImportService
         {
             await using var stream = ImportFileAccessGuard.OpenReadShared(request.FilePath);
             using var reader = new StreamReader(stream);
-            return await ImportAsync(reader, request.Options, cancellationToken).ConfigureAwait(false);
+            var response = await ImportAsync(reader, request.Options, cancellationToken).ConfigureAwait(false);
+            var worksheetName = Path.GetFileName(request.FilePath);
+            return response with
+            {
+                Worksheet = new ImportWorksheetDescriptor
+                {
+                    WorksheetName = worksheetName,
+                    OriginalPosition = 0,
+                    HeadingRange = $"R1C1:R1C{response.AvailableColumns.Count}"
+                },
+                Parts = response.Parts.Select(part => part with
+                {
+                    SourceReferences = part.SourceReferences.Select(reference => reference with
+                    {
+                        WorksheetName = worksheetName
+                    }).ToArray()
+                }).ToArray()
+            };
         }
         catch (IOException exception)
         {
@@ -142,7 +161,17 @@ public sealed class CsvImportService : IImportService
                      Group = hasGroupColumn ? csv.GetField(groupSourceColumn!) : null,
                      SheetNumber = hasSheetNumberColumn ? csv.GetField(sheetNumberSourceColumn!) : null,
                      RowNumber = hasRowNumberColumn ? csv.GetField(rowNumberSourceColumn!) : null,
-                     ColumnNumber = hasColumnNumberColumn ? csv.GetField(columnNumberSourceColumn!) : null
+                     ColumnNumber = hasColumnNumberColumn ? csv.GetField(columnNumberSourceColumn!) : null,
+                     SourceReferences =
+                     [
+                         new SourceReference
+                         {
+                             WorksheetName = "CSV",
+                             WorksheetPosition = 0,
+                             PhysicalRow = csv.Parser.Row,
+                             SourceFingerprint = Fingerprint(csv.Parser.Record ?? Array.Empty<string>())
+                         }
+                     ]
                  });
              }
 
@@ -187,5 +216,11 @@ public sealed class CsvImportService : IImportService
         return materials
             .GroupBy(material => material.Name, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+    }
+
+    private static string Fingerprint(IEnumerable<string?> values)
+    {
+        var canonicalRow = string.Join('\u001f', values.Select(value => value ?? string.Empty));
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonicalRow)));
     }
 }

@@ -23,4 +23,6 @@ public sealed record PartRowUpdate
     public string? RowNumber { get; init; }
 
     public string? ColumnNumber { get; init; }
+
+    public IReadOnlyList<SourceReference> SourceReferences { get; init; } = Array.Empty<SourceReference>();
 }

@@ -45,6 +45,24 @@ public sealed class ImportBridgeContractSpecs
         }
     }
 
+    [Fact]
+    public void Handshake_and_dispatcher_expose_request_scoped_import_session_operations()
+    {
+        var dispatcher = DesktopBridgeRegistration.CreateDefault(
+            new StubFileDialogService(),
+            new StubMaterialService(),
+            new ProjectService(new StubMaterialService(), idGenerator: () => "project-import-session-contract"),
+            new StubImportService(),
+            new PartEditorService(DemoMaterialCatalog.All),
+            new StubNestingService(),
+            () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true));
+
+        Assert.Contains("begin-import-session", dispatcher.RegisteredTypes);
+        Assert.Contains("preview-import-session", dispatcher.RegisteredTypes);
+        Assert.Contains("finalize-import-session", dispatcher.RegisteredTypes);
+        Assert.Contains("cancel-import-session", dispatcher.RegisteredTypes);
+    }
+
     private sealed class StubFileDialogService : IFileDialogService
     {
         public Task<OpenFileDialogResponse> OpenAsync(

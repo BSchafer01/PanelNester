@@ -60,7 +60,7 @@ public sealed class XlsxImportServiceSpecs : IDisposable
         var csvResponse = await csvService.ImportAsync(new ImportRequest { FilePath = csvPath });
         var xlsxResponse = await xlsxService.ImportAsync(new ImportRequest { FilePath = xlsxPath });
 
-        Assert.Equivalent(csvResponse, xlsxResponse, strict: true);
+        Assert.Equivalent(WithoutSourceIdentity(csvResponse), WithoutSourceIdentity(xlsxResponse), strict: true);
     }
 
     [Fact]
@@ -162,7 +162,7 @@ public sealed class XlsxImportServiceSpecs : IDisposable
         var csvResponse = await csvService.ImportAsync(new ImportRequest { FilePath = csvPath });
         var xlsxResponse = await xlsxService.ImportAsync(new ImportRequest { FilePath = xlsxPath });
 
-        Assert.Equivalent(csvResponse, xlsxResponse, strict: true);
+        Assert.Equivalent(WithoutSourceIdentity(csvResponse), WithoutSourceIdentity(xlsxResponse), strict: true);
     }
 
     [Fact]
@@ -236,12 +236,22 @@ public sealed class XlsxImportServiceSpecs : IDisposable
         var csvResponse = await csvService.ImportAsync(new ImportRequest { FilePath = csvPath });
         var xlsxResponse = await xlsxService.ImportAsync(new ImportRequest { FilePath = xlsxPath });
 
-        Assert.Equivalent(csvResponse, xlsxResponse, strict: true);
+        Assert.Equivalent(WithoutSourceIdentity(csvResponse), WithoutSourceIdentity(xlsxResponse), strict: true);
         Assert.Equal(3, xlsxResponse.Parts.Count);
         Assert.Equal(5, xlsxResponse.Parts[0].Quantity);
         Assert.Equal(4, xlsxResponse.Parts[1].Quantity);
         Assert.Equal(3, xlsxResponse.Parts[2].Quantity);
     }
+
+    private static ImportResponse WithoutSourceIdentity(ImportResponse response) =>
+        response with
+        {
+            Worksheet = null,
+            Parts = response.Parts.Select(part => part with
+            {
+                SourceReferences = Array.Empty<SourceReference>()
+            }).ToArray()
+        };
 
     public void Dispose()
     {

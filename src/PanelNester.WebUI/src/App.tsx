@@ -28,9 +28,13 @@ import {
   requiredImportFieldNames,
   type ImportFileRequest,
   type ImportMappingSession,
+  type ImportSessionPhase,
+  type ImportSessionResponse,
   type ImportMaterialResolution,
   type ImportResponse,
   type ImportOptions,
+  type ImportConfiguration,
+  type ImportSourceMetadata,
   type Material,
   type MaterialDraft,
   type MaterialLibraryLocation,
@@ -100,8 +104,11 @@ interface AppState {
   selectedMaterialId?: string;
   lastNestMaterial?: Material;
   selectedFilePath?: string;
+  importSource?: ImportSourceMetadata;
+  importConfiguration?: ImportConfiguration;
   importMappingSession?: ImportMappingSession;
   importMessage: string;
+  importPhase?: ImportSessionPhase;
   nestingMessage: string;
   materialsMessage: string;
   reportMessage: string;
@@ -163,7 +170,7 @@ type AppAction =
   | { type: 'material-created'; material: Material; message: string }
   | { type: 'material-updated'; material: Material; message: string }
   | { type: 'material-deleted'; materialId: string; message: string }
-  | { type: 'import-started'; message: string }
+  | { type: 'import-started'; message: string; phase: ImportSessionPhase }
   | { type: 'import-selection-cancelled'; message: string }
   | {
       type: 'import-mapping-ready';
@@ -176,6 +183,7 @@ type AppAction =
       type: 'import-finished';
       filePath: string;
       response: ImportResponse;
+      project?: ProjectRecord;
       message: string;
       selectedMaterialId?: string;
     }
@@ -495,6 +503,8 @@ const initialState: AppState = {
   selectedMaterialId: undefined,
   lastNestMaterial: undefined,
   selectedFilePath: undefined,
+  importSource: undefined,
+  importConfiguration: undefined,
   importMappingSession: undefined,
   importMessage: defaultImportMessage,
   nestingMessage: defaultNestingMessage,
@@ -790,6 +800,34 @@ function normalizeImportFileResponse(
   };
 }
 
+function normalizeImportSessionResponse(
+  response: Partial<ImportSessionResponse>,
+  sessionId: string,
+): ImportSessionResponse {
+  return {
+    ...normalizeImportFileResponse({
+      ...response,
+      filePath: response.importSourcePath ?? response.filePath,
+    }),
+    sessionId: response.sessionId ?? sessionId,
+    importSourcePath:
+      typeof response.importSourcePath === 'string'
+        ? response.importSourcePath
+        : typeof response.filePath === 'string'
+          ? response.filePath
+          : null,
+    importSource: response.importSource ?? null,
+    phase: response.phase ?? 'failed',
+    finalized: response.finalized === true,
+    project: response.project ?? null,
+  };
+}
+
+function createImportSessionId(): string {
+  return globalThis.crypto?.randomUUID?.() ??
+    `import-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 function toImportResponse(response: ImportFileResponse): ImportResponse {
   return normalizeImportResponse(response);
 }
@@ -827,11 +865,13 @@ function buildImportOptionsFromResponse(response: ImportFileResponse): ImportOpt
 }
 
 function createImportMappingSession(
+  sessionId: string,
   filePath: string,
   response: ImportFileResponse,
   existing?: ImportMappingSession,
 ): ImportMappingSession {
   return {
+    sessionId,
     filePath,
     preview: response,
     options: existing?.options ?? buildImportOptionsFromResponse(response),
@@ -1324,6 +1364,8 @@ function buildProjectRecord(
     materialSnapshots,
     state: {
       sourceFilePath: state.selectedFilePath ?? null,
+      importSource: state.importSource ?? null,
+      importConfiguration: state.importConfiguration ?? null,
       optimizationGroups: buildOptimizationGroups(
         state,
         lastNestingResult,
@@ -1358,6 +1400,8 @@ function buildStiffenerProjectRecord(
     materialSnapshots,
     state: {
       sourceFilePath: state.selectedFilePath ?? null,
+      importSource: state.importSource ?? null,
+      importConfiguration: state.importConfiguration ?? null,
       optimizationGroups: buildOptimizationGroups(state, null, null),
       parts: state.importResponse.parts,
       selectedMaterialId: state.selectedMaterialId ?? null,
@@ -1565,18 +1609,21 @@ function reducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         importBusy: true,
+        importPhase: action.phase,
         importMessage: action.message,
       };
     case 'import-selection-cancelled':
       return {
         ...state,
         importBusy: false,
+        importPhase: undefined,
         importMessage: action.message,
       };
     case 'import-mapping-ready':
       return {
         ...state,
         importBusy: false,
+        importPhase: undefined,
         activeRoute: 'import',
         importMappingSession: action.session,
         importMessage: action.message,
@@ -1590,6 +1637,7 @@ function reducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         importBusy: false,
+        importPhase: undefined,
         importMappingSession: undefined,
         importMessage: action.message,
       };
@@ -1598,14 +1646,19 @@ function reducer(state: AppState, action: AppAction): AppState {
         {
           ...state,
           importBusy: false,
+          importPhase: undefined,
           importMappingSession: undefined,
           selectedFilePath: action.filePath,
+          importSource: action.project?.state.importSource ?? undefined,
+          importConfiguration: action.project?.state.importConfiguration ?? undefined,
           importResponse: action.response,
-          optimizationGroups: syncPartsToOptimizationGroups(
-            state.optimizationGroups,
-            action.response.parts,
-            state.activeOptimizationGroupId,
-          ),
+          optimizationGroups:
+            action.project?.state.optimizationGroups ??
+            syncPartsToOptimizationGroups(
+              state.optimizationGroups,
+              action.response.parts,
+              state.activeOptimizationGroupId,
+            ),
           nestResponse: emptyNestResponse,
           batchNestResponse: emptyBatchNestResponse,
           lastNestMaterial: undefined,
@@ -1653,6 +1706,7 @@ function reducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         importBusy: false,
+        importPhase: undefined,
         importMessage: action.message,
       };
     case 'nesting-started':
@@ -1718,7 +1772,11 @@ function reducer(state: AppState, action: AppAction): AppState {
         selectedMaterialId: undefined,
         lastNestMaterial: undefined,
         selectedFilePath: undefined,
+        importSource: undefined,
+        importConfiguration: undefined,
         importMappingSession: undefined,
+        importBusy: false,
+        importPhase: undefined,
         importMessage: defaultImportMessage,
         nestingMessage: defaultNestingMessage,
         reportMessage: defaultReportMessage,
@@ -1780,7 +1838,11 @@ function reducer(state: AppState, action: AppAction): AppState {
           action.project.state.optimizationGroups[0]?.optimizationGroupId,
         lastSavedAt: new Date().toISOString(),
         selectedFilePath: action.project.state.sourceFilePath ?? undefined,
+        importSource: action.project.state.importSource ?? undefined,
+        importConfiguration: action.project.state.importConfiguration ?? undefined,
         importMappingSession: undefined,
+        importBusy: false,
+        importPhase: undefined,
         importResponse,
         nestResponse,
         batchNestResponse,
@@ -2034,6 +2096,7 @@ export default function App() {
     importResponse: state.importResponse,
     selectedMaterialId: state.selectedMaterialId,
   });
+  const activeImportSessionIdRef = useRef<string>();
   const hostReadyNotifiedRef = useRef(false);
   const createNewProjectRef = useRef<() => void | Promise<void>>(() => undefined);
   const startupProjectOpenRef = useRef<(request: OpenProjectRequest) => void | Promise<void>>(
@@ -2531,6 +2594,14 @@ export default function App() {
   const hasCapability = (capability: BridgeCapability): boolean =>
     state.bridge.handshake.capabilities.includes(capability);
 
+  const releaseActiveImportSession = async (): Promise<void> => {
+    const sessionId = activeImportSessionIdRef.current;
+    activeImportSessionIdRef.current = undefined;
+    if (sessionId && hasCapability(bridgeMessageTypes.cancelImportSession)) {
+      await hostBridge.cancelImportSession({ sessionId }).catch(() => undefined);
+    }
+  };
+
   const retryHandshake = async () => {
     const handshake = await hostBridge.initialize();
     dispatch({
@@ -2783,6 +2854,7 @@ export default function App() {
 
   const createNewProject = async () => {
     await runProjectTransition('starting a new project', async () => {
+      await releaseActiveImportSession();
       const metadata = createDefaultProjectMetadata();
       const settings = createProjectSettings(metadata, desktopAppSettings.companyName);
 
@@ -2862,6 +2934,7 @@ export default function App() {
       : 'opening another project';
 
     await runProjectTransition(actionLabel, async () => {
+      await releaseActiveImportSession();
       dispatch({
         type: 'project-operation-started',
         message: 'Opening project…',
@@ -2964,6 +3037,7 @@ export default function App() {
   const importFile = async () => {
     dispatch({
       type: 'import-started',
+      phase: 'opening',
       message: 'Opening the native file picker and preparing the import review…',
     });
 
@@ -2991,6 +3065,145 @@ export default function App() {
           ),
         );
 
+      const canUseImportSessions =
+        hasCapability(bridgeMessageTypes.beginImportSession) &&
+        hasCapability(bridgeMessageTypes.previewImportSession) &&
+        hasCapability(bridgeMessageTypes.finalizeImportSession) &&
+        hasCapability(bridgeMessageTypes.cancelImportSession);
+      if (canUseImportSessions) {
+        const previousSessionId = activeImportSessionIdRef.current;
+        if (previousSessionId) {
+          await releaseActiveImportSession();
+        }
+
+        const sessionId = createImportSessionId();
+        activeImportSessionIdRef.current = sessionId;
+        const dialogResponse = await openImportDialog();
+        if (activeImportSessionIdRef.current !== sessionId) {
+          return;
+        }
+
+        const selectedFilePath = dialogResponse.filePath ?? undefined;
+        if (!dialogResponse.success || !selectedFilePath) {
+          activeImportSessionIdRef.current = undefined;
+          dispatch({
+            type: 'import-selection-cancelled',
+            message: getBridgeErrorMessage(
+              dialogResponse.error,
+              dialogResponse.message ?? 'File selection was cancelled.',
+            ),
+          });
+          return;
+        }
+
+        dispatch({
+          type: 'import-started',
+          phase: 'reading',
+          message: `Reading an immutable snapshot of ${fileNameFromPath(selectedFilePath)}…`,
+        });
+        const started = normalizeImportSessionResponse(
+          await hostBridge.beginImportSession({ sessionId, importSourcePath: selectedFilePath }),
+          sessionId,
+        );
+        if (activeImportSessionIdRef.current !== sessionId) {
+          return;
+        }
+        if (responseLooksLikeImportPreparationFailure(started)) {
+          activeImportSessionIdRef.current = undefined;
+          await hostBridge.cancelImportSession({ sessionId }).catch(() => undefined);
+          dispatch({
+            type: 'import-failed',
+            message: getBridgeErrorMessage(
+              started.error,
+              started.message ?? 'The desktop host could not capture the Import Snapshot.',
+            ),
+          });
+          return;
+        }
+
+        dispatch({
+          type: 'import-started',
+          phase: 'validating',
+          message: `Validating the snapshot for ${fileNameFromPath(selectedFilePath)}…`,
+        });
+        const response = normalizeImportSessionResponse(
+          await hostBridge.previewImportSession({ sessionId }),
+          sessionId,
+        );
+        if (activeImportSessionIdRef.current !== sessionId) {
+          return;
+        }
+        if (responseLooksLikeImportPreparationFailure(response)) {
+          activeImportSessionIdRef.current = undefined;
+          await hostBridge.cancelImportSession({ sessionId }).catch(() => undefined);
+          dispatch({
+            type: 'import-failed',
+            message: getBridgeErrorMessage(
+              response.error,
+              response.message ?? 'The desktop host could not validate the Import Snapshot.',
+            ),
+          });
+          return;
+        }
+
+        const importResponse = toImportResponse(response);
+        if (shouldRequireImportReview(importResponse)) {
+          dispatch({
+            type: 'import-mapping-ready',
+            session: createImportMappingSession(sessionId, selectedFilePath, response),
+            message: describeImportReview(selectedFilePath, importResponse),
+          });
+          return;
+        }
+
+        dispatch({
+          type: 'import-started',
+          phase: 'finalizing',
+          message: `Finalizing the import for ${fileNameFromPath(selectedFilePath)}…`,
+        });
+        const finalized = normalizeImportSessionResponse(
+          await hostBridge.finalizeImportSession({
+            sessionId,
+            project: buildProjectRecord(state),
+            targetOptimizationGroupId: state.activeOptimizationGroupId ?? null,
+          }),
+          sessionId,
+        );
+        if (activeImportSessionIdRef.current !== sessionId) {
+          return;
+        }
+        activeImportSessionIdRef.current = undefined;
+        if (!finalized.success || !finalized.finalized || !finalized.project) {
+          dispatch({
+            type: 'import-failed',
+            message: getBridgeErrorMessage(
+              finalized.error,
+              finalized.message ?? 'The Import Session could not be finalized.',
+            ),
+          });
+          return;
+        }
+
+        const finalizedImport = toImportResponse(finalized);
+        dispatch({
+          type: 'import-finished',
+          filePath: finalized.filePath ?? selectedFilePath,
+          response: finalizedImport,
+          project: finalized.project,
+          selectedMaterialId: pickMaterialId(
+            state.materials,
+            finalizedImport,
+            state.selectedMaterialId,
+          ),
+          message: describeImportResult(
+            finalized.filePath ?? selectedFilePath,
+            finalizedImport,
+          ),
+        });
+        dispatch({ type: 'route-changed', route: 'import' });
+        return;
+      }
+
       if (hasCapability(bridgeMessageTypes.importFile)) {
         const dialogResponse = hasCapability(bridgeMessageTypes.openFileDialog)
           ? await openImportDialog()
@@ -3011,6 +3224,7 @@ export default function App() {
         if (selectedFilePath) {
           dispatch({
             type: 'import-started',
+            phase: 'reading',
             message: `Importing ${fileNameFromPath(selectedFilePath)}…`,
           });
         }
@@ -3062,7 +3276,7 @@ export default function App() {
 
         dispatch({
           type: 'import-mapping-ready',
-          session: createImportMappingSession(filePath, response),
+          session: createImportMappingSession('legacy-import', filePath, response),
           message: describeImportReview(filePath, importResponse),
         });
         return;
@@ -3120,7 +3334,15 @@ export default function App() {
     });
   };
 
-  const cancelImportMapping = () => {
+  const cancelImportMapping = async () => {
+    const sessionId = state.importMappingSession?.sessionId ?? activeImportSessionIdRef.current;
+    if (sessionId && sessionId !== 'legacy-import') {
+      activeImportSessionIdRef.current = sessionId;
+      await releaseActiveImportSession();
+    } else {
+      activeImportSessionIdRef.current = undefined;
+    }
+
     dispatch({
       type: 'import-mapping-cancelled',
       message:
@@ -3138,20 +3360,37 @@ export default function App() {
 
     dispatch({
       type: 'import-started',
+      phase: 'validating',
       message: `Refreshing the import preview for ${fileNameFromPath(session.filePath)}…`,
     });
 
     try {
-      const response = normalizeImportFileResponse(
-        await hostBridge.invoke<ImportFileResponse>(
-          bridgeMessageTypes.importFile,
-          {
-            filePath: session.filePath,
-            options: session.options,
-          } satisfies ImportFileRequest,
-          importBridgeTimeoutMs,
-        ),
-      );
+      const response =
+        session.sessionId !== 'legacy-import' &&
+        hasCapability(bridgeMessageTypes.previewImportSession)
+          ? normalizeImportSessionResponse(
+              await hostBridge.previewImportSession({
+                sessionId: session.sessionId,
+                options: session.options,
+              }),
+              session.sessionId,
+            )
+          : normalizeImportFileResponse(
+              await hostBridge.invoke<ImportFileResponse>(
+                bridgeMessageTypes.importFile,
+                {
+                  filePath: session.filePath,
+                  options: session.options,
+                } satisfies ImportFileRequest,
+                importBridgeTimeoutMs,
+              ),
+            );
+      if (
+        session.sessionId !== 'legacy-import' &&
+        activeImportSessionIdRef.current !== session.sessionId
+      ) {
+        return;
+      }
       const filePath = pickImportFilePath(response, session.filePath) ?? session.filePath;
 
       if (responseLooksLikeImportPreparationFailure(response)) {
@@ -3165,7 +3404,7 @@ export default function App() {
         return;
       }
 
-      const nextSession = createImportMappingSession(filePath, response, {
+      const nextSession = createImportMappingSession(session.sessionId, filePath, response, {
         ...session,
         hasPendingChanges: false,
       });
@@ -3176,6 +3415,12 @@ export default function App() {
         message: describeImportReview(filePath, toImportResponse(response), nextSession),
       });
     } catch (error) {
+      if (
+        session.sessionId !== 'legacy-import' &&
+        activeImportSessionIdRef.current !== session.sessionId
+      ) {
+        return;
+      }
       dispatch({
         type: 'import-failed',
         message: getErrorMessage(
@@ -3194,32 +3439,62 @@ export default function App() {
 
     dispatch({
       type: 'import-started',
+      phase: 'finalizing',
       message: `Finalizing the import for ${fileNameFromPath(session.filePath)}…`,
     });
 
     try {
-      const response = normalizeImportFileResponse(
-        await hostBridge.invoke<ImportFileResponse>(
-          bridgeMessageTypes.importFile,
-          {
-            filePath: session.filePath,
+      const usesImportSession =
+        session.sessionId !== 'legacy-import' &&
+        hasCapability(bridgeMessageTypes.finalizeImportSession);
+      let sessionResponse: ImportSessionResponse | undefined;
+      let response: ImportFileResponse;
+      if (usesImportSession) {
+        sessionResponse = normalizeImportSessionResponse(
+          await hostBridge.finalizeImportSession({
+            sessionId: session.sessionId,
             options: session.options,
             newMaterials: session.newMaterials,
-          } satisfies ImportFileRequest,
-          importBridgeTimeoutMs,
-        ),
-      );
+            project: buildProjectRecord(state),
+            targetOptimizationGroupId: state.activeOptimizationGroupId ?? null,
+          }),
+          session.sessionId,
+        );
+        response = sessionResponse;
+      } else {
+        response = normalizeImportFileResponse(
+          await hostBridge.invoke<ImportFileResponse>(
+            bridgeMessageTypes.importFile,
+            {
+              filePath: session.filePath,
+              options: session.options,
+              newMaterials: session.newMaterials,
+            } satisfies ImportFileRequest,
+            importBridgeTimeoutMs,
+          ),
+        );
+      }
+      if (usesImportSession && activeImportSessionIdRef.current !== session.sessionId) {
+        return;
+      }
       const filePath = pickImportFilePath(response, session.filePath) ?? session.filePath;
 
-      if (responseLooksLikeImportPreparationFailure(response)) {
-        dispatch({
-          type: 'import-mapping-ready',
-          session,
-          message: getBridgeErrorMessage(
-            response.error,
-            response.message ?? 'Import mapping could not be finalized.',
-          ),
-        });
+      if (
+        responseLooksLikeImportPreparationFailure(response) ||
+        (usesImportSession && (!sessionResponse?.finalized || !sessionResponse.project))
+      ) {
+        if (usesImportSession) {
+          activeImportSessionIdRef.current = undefined;
+        }
+        const message = getBridgeErrorMessage(
+          response.error,
+          response.message ?? 'Import mapping could not be finalized.',
+        );
+        dispatch(
+          usesImportSession
+            ? { type: 'import-mapping-cancelled', message }
+            : { type: 'import-mapping-ready', session, message },
+        );
         return;
       }
 
@@ -3235,11 +3510,15 @@ export default function App() {
             }).catch(() => undefined)
           : undefined;
       const effectiveMaterials = syncedMaterials ?? state.materials;
+      if (usesImportSession) {
+        activeImportSessionIdRef.current = undefined;
+      }
 
       dispatch({
         type: 'import-finished',
         filePath,
         response: importResponse,
+        project: sessionResponse?.project ?? undefined,
         selectedMaterialId: pickMaterialId(
           effectiveMaterials,
           importResponse,
@@ -3248,6 +3527,12 @@ export default function App() {
         message: describeImportResult(filePath, importResponse),
       });
     } catch (error) {
+      if (
+        session.sessionId !== 'legacy-import' &&
+        activeImportSessionIdRef.current !== session.sessionId
+      ) {
+        return;
+      }
       dispatch({
         type: 'import-failed',
         message: getErrorMessage(
@@ -4141,6 +4426,7 @@ export default function App() {
           importResponse={state.importResponse}
           mappingSession={state.importMappingSession}
           importMessage={state.importMessage}
+          importPhase={state.importPhase}
           nestingMessage={state.nestingMessage}
           importBusy={state.importBusy}
           partMutationBusy={state.partMutationBusy}

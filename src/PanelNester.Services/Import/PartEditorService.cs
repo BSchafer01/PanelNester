@@ -67,7 +67,7 @@ public sealed partial class PartEditorService : IPartEditorService
         {
             if (string.Equals(part.RowId, rowId, StringComparison.Ordinal))
             {
-                updates.Add(update with { RowId = rowId });
+                updates.Add(update with { RowId = rowId, SourceReferences = part.SourceReferences });
                 replaced = true;
             }
             else
@@ -158,7 +158,8 @@ public sealed partial class PartEditorService : IPartEditorService
             IsManual = row.IsManual,
             SheetNumber = row.SheetNumber,
             RowNumber = row.RowNumber?.ToString(CultureInfo.InvariantCulture),
-            ColumnNumber = row.ColumnNumber?.ToString(CultureInfo.InvariantCulture)
+            ColumnNumber = row.ColumnNumber?.ToString(CultureInfo.InvariantCulture),
+            SourceReferences = row.SourceReferences
         };
 
     private static string CreateNextRowId(IReadOnlyList<PartRow> parts)

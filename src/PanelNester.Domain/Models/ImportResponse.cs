@@ -15,4 +15,6 @@ public sealed record ImportResponse
     public IReadOnlyList<ImportFieldMappingStatus> ColumnMappings { get; init; } = Array.Empty<ImportFieldMappingStatus>();
 
     public IReadOnlyList<ImportMaterialResolution> MaterialResolutions { get; init; } = Array.Empty<ImportMaterialResolution>();
+
+    public ImportWorksheetDescriptor? Worksheet { get; init; }
 }

@@ -60,7 +60,8 @@ internal static class ImportedPartRowMerger
 
             mergedUpdates[existingIndex] = existingUpdate with
             {
-                Quantity = summedQuantity.ToString(CultureInfo.InvariantCulture)
+                Quantity = summedQuantity.ToString(CultureInfo.InvariantCulture),
+                SourceReferences = existingUpdate.SourceReferences.Concat(update.SourceReferences).ToArray()
             };
         }
 

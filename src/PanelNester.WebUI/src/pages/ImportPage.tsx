@@ -7,6 +7,7 @@ import {
   type HostBridgeSnapshot,
   type ImportFieldName,
   type ImportMappingSession,
+  type ImportSessionPhase,
   type ImportMaterialResolution,
   type Material,
   type MaterialDraft,
@@ -62,6 +63,7 @@ interface ImportPageProps {
   importResponse: ImportResponse;
   mappingSession?: ImportMappingSession;
   importMessage: string;
+  importPhase?: ImportSessionPhase;
   nestingMessage: string;
   importBusy: boolean;
   partMutationBusy: boolean;
@@ -79,7 +81,7 @@ interface ImportPageProps {
   onUpdateImportMappingSession: (session: ImportMappingSession) => void;
   onPreviewImportMapping: () => Promise<void>;
   onFinalizeImportMapping: () => Promise<void>;
-  onCancelImportMapping: () => void;
+  onCancelImportMapping: () => void | Promise<void>;
   onAddPartRow: (part: PartRowUpdate) => Promise<void>;
   onUpdatePartRow: (part: PartRowUpdate) => Promise<void>;
   onDeletePartRow: (rowId: string) => Promise<void>;
@@ -554,6 +556,7 @@ export function ImportPage({
   importResponse,
   mappingSession,
   importMessage,
+  importPhase,
   nestingMessage,
   importBusy,
   partMutationBusy,
@@ -967,6 +970,12 @@ export function ImportPage({
           <p className="module-hero__breadcrumb">Workspace / Module</p>
           <h1>Import &amp; Panel Management</h1>
           <p className="module-hero__intro">{importMessage}</p>
+          {importBusy && importPhase ? (
+            <div className="import-session-progress" role="status">
+              <span>{`${importPhase[0].toUpperCase()}${importPhase.slice(1)}…`}</span>
+              <progress aria-label={`Import ${importPhase}`} />
+            </div>
+          ) : null}
           {displayFilePath ? (
             <p className="module-hero__meta import-path">Source file: {displayFilePath}</p>
           ) : null}
@@ -994,6 +1003,16 @@ export function ImportPage({
                   : 'Choose file'}
             </span>
           </button>
+          {importBusy ? (
+            <button
+              className="secondary-button module-action-button"
+              disabled={!bridge.connected}
+              onClick={() => void onCancelImportMapping()}
+              type="button"
+            >
+              <span>Cancel import</span>
+            </button>
+          ) : null}
           <button
             className="primary-button module-action-button module-action-button--primary"
             disabled={!bridge.connected || !canRunNesting || nestingBusy || busy}
@@ -1033,8 +1052,8 @@ export function ImportPage({
             <div className="button-row">
               <button
                 className="secondary-button"
-                disabled={busy}
-                onClick={onCancelImportMapping}
+                disabled={!bridge.connected}
+                onClick={() => void onCancelImportMapping()}
                 type="button"
               >
                 Cancel review

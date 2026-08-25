@@ -37,6 +37,12 @@ import {
   type HostBridgeSnapshot,
   type ImportFileRequest,
   type ImportFileResponse,
+  type BeginImportSessionRequest,
+  type PreviewImportSessionRequest,
+  type FinalizeImportSessionRequest,
+  type CancelImportSessionRequest,
+  type ImportSessionResponse,
+  type CancelImportSessionResponse,
   type ImportResponse,
   type ListMaterialsRequest,
   type ListMaterialsResponse,
@@ -283,6 +289,38 @@ class HostBridgeClient {
   runBatchNesting(request: BatchNestRequest): Promise<BatchNestResponse> {
     return this.invoke<BatchNestResponse>(
       bridgeMessageTypes.runBatchNesting,
+      request,
+      longRunningRequestTimeoutMs,
+    );
+  }
+
+  beginImportSession(request: BeginImportSessionRequest): Promise<ImportSessionResponse> {
+    return this.invoke<ImportSessionResponse>(
+      bridgeMessageTypes.beginImportSession,
+      request,
+      longRunningRequestTimeoutMs,
+    );
+  }
+
+  previewImportSession(request: PreviewImportSessionRequest): Promise<ImportSessionResponse> {
+    return this.invoke<ImportSessionResponse>(
+      bridgeMessageTypes.previewImportSession,
+      request,
+      longRunningRequestTimeoutMs,
+    );
+  }
+
+  finalizeImportSession(request: FinalizeImportSessionRequest): Promise<ImportSessionResponse> {
+    return this.invoke<ImportSessionResponse>(
+      bridgeMessageTypes.finalizeImportSession,
+      request,
+      longRunningRequestTimeoutMs,
+    );
+  }
+
+  cancelImportSession(request: CancelImportSessionRequest): Promise<CancelImportSessionResponse> {
+    return this.invoke<CancelImportSessionResponse>(
+      bridgeMessageTypes.cancelImportSession,
       request,
       longRunningRequestTimeoutMs,
     );

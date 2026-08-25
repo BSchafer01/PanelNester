@@ -34,6 +34,8 @@ public sealed record PartRow
 
     public IReadOnlyList<string> ValidationMessages { get; init; } = Array.Empty<string>();
 
+    public IReadOnlyList<SourceReference> SourceReferences { get; init; } = Array.Empty<SourceReference>();
+
     public bool Equals(PartRow? other)
     {
         if (ReferenceEquals(this, other))
@@ -61,7 +63,8 @@ public sealed record PartRow
                RowNumber == other.RowNumber &&
                ColumnNumber == other.ColumnNumber &&
                string.Equals(ValidationStatus, other.ValidationStatus, StringComparison.Ordinal) &&
-               ValidationMessages.SequenceEqual(other.ValidationMessages, StringComparer.Ordinal);
+               ValidationMessages.SequenceEqual(other.ValidationMessages, StringComparer.Ordinal) &&
+               SourceReferences.SequenceEqual(other.SourceReferences);
     }
 
     public override int GetHashCode()
@@ -86,6 +89,11 @@ public sealed record PartRow
         foreach (var validationMessage in ValidationMessages)
         {
             hash.Add(validationMessage, StringComparer.Ordinal);
+        }
+
+        foreach (var sourceReference in SourceReferences)
+        {
+            hash.Add(sourceReference);
         }
 
         return hash.ToHashCode();

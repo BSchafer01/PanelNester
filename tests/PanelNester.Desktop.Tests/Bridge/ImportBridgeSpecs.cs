@@ -2,6 +2,7 @@ using System.IO;
 using System.Text.Json;
 using ClosedXML.Excel;
 using PanelNester.Desktop.Bridge;
+using PanelNester.Domain.Contracts;
 using PanelNester.Domain.Models;
 using PanelNester.Services.Import;
 using PanelNester.Services.Materials;
@@ -12,7 +13,7 @@ namespace PanelNester.Desktop.Tests.Bridge;
 
 public sealed class ImportBridgeSpecs : IDisposable
 {
-    private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions SerializerOptions = BridgeJson.SerializerOptions;
     private readonly string _workspacePath = Path.Combine(Path.GetTempPath(), $"PanelNester.ImportBridgeSpecs.{Guid.NewGuid():N}");
 
     [Fact]
@@ -97,12 +98,499 @@ public sealed class ImportBridgeSpecs : IDisposable
 
         Assert.True(xlsxResponse.Success);
         Assert.Equal(xlsxPath, xlsxResponse.FilePath);
-        Assert.Equivalent(csvResponse.Parts, xlsxResponse.Parts, strict: true);
+        var csvPart = Assert.Single(csvResponse.Parts);
+        var xlsxPart = Assert.Single(xlsxResponse.Parts);
+        Assert.Equal(csvPart.ImportedId, xlsxPart.ImportedId);
+        Assert.Equal(csvPart.Length, xlsxPart.Length);
+        Assert.Equal(csvPart.Width, xlsxPart.Width);
+        Assert.Equal(csvPart.Quantity, xlsxPart.Quantity);
+        Assert.Equal(csvPart.MaterialName, xlsxPart.MaterialName);
         Assert.Equal(csvResponse.Errors, xlsxResponse.Errors);
         Assert.Equal(csvResponse.Warnings, xlsxResponse.Warnings);
         Assert.Equal(csvResponse.AvailableColumns, xlsxResponse.AvailableColumns);
         Assert.Equal(csvResponse.ColumnMappings, xlsxResponse.ColumnMappings);
         Assert.Equal(csvResponse.MaterialResolutions, xlsxResponse.MaterialResolutions);
+    }
+
+    [Fact]
+    public async Task Import_session_uses_one_immutable_snapshot_for_later_previews()
+    {
+        Directory.CreateDirectory(_workspacePath);
+
+        var csvPath = Path.Combine(_workspacePath, "snapshot-parts.csv");
+        var materialFilePath = Path.Combine(_workspacePath, "materials-snapshot.json");
+        var repository = new JsonMaterialRepository(materialFilePath);
+        var materialService = new MaterialService(repository, idGenerator: () => "snapshot-material");
+        var validator = new PartRowValidator();
+        var dispatcher = DesktopBridgeRegistration.CreateDefault(
+            new RecordingFileDialogService(),
+            materialService,
+            new ProjectService(materialService, idGenerator: () => "project-snapshot"),
+            new FileImportDispatcher(
+                new CsvImportService(repository, validator),
+                new XlsxImportService(repository, validator)),
+            new PartEditorService(repository, validator),
+            new ShelfNestingService(),
+            () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true));
+
+        var materialResult = await materialService.CreateAsync(new Material
+        {
+            Name = "Snapshot Material",
+            SheetLength = 96m,
+            SheetWidth = 48m,
+            AllowRotation = true,
+            DefaultSpacing = 0.125m,
+            DefaultEdgeMargin = 0.5m
+        });
+        Assert.True(materialResult.Success);
+
+        await File.WriteAllTextAsync(
+            csvPath,
+            "Id,Length,Width,Quantity,Material\nORIGINAL,20,10,1,Snapshot Material\n");
+
+        const string sessionId = "immutable-snapshot-session";
+        var started = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest { SessionId = sessionId, ImportSourcePath = csvPath });
+
+        Assert.True(started.Success);
+        Assert.Empty(started.Parts);
+
+        await File.WriteAllTextAsync(
+            csvPath,
+            "Id,Length,Width,Quantity,Material\nCHANGED,99,88,1,Snapshot Material\n");
+
+        var preview = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.PreviewImportSession,
+            new PreviewImportSessionRequest { SessionId = sessionId });
+
+        Assert.True(preview.Success);
+        Assert.Equal(csvPath, preview.ImportSourcePath);
+        var row = Assert.Single(preview.Parts);
+        Assert.Equal("ORIGINAL", row.ImportedId);
+        Assert.Equal(20m, row.Length);
+        Assert.Equal(10m, row.Width);
+    }
+
+    [Fact]
+    public async Task Import_session_retains_single_worksheet_excel_behavior_after_the_source_is_removed()
+    {
+        Directory.CreateDirectory(_workspacePath);
+
+        var xlsxPath = Path.Combine(_workspacePath, "snapshot-parts.xlsx");
+        var repository = new JsonMaterialRepository(Path.Combine(_workspacePath, "xlsx-session-materials.json"));
+        var materialService = new MaterialService(repository, idGenerator: () => "xlsx-session-material");
+        var validator = new PartRowValidator();
+        var dispatcher = DesktopBridgeRegistration.CreateDefault(
+            new RecordingFileDialogService(),
+            materialService,
+            new ProjectService(materialService, idGenerator: () => "project-xlsx-session"),
+            new FileImportDispatcher(
+                new CsvImportService(repository, validator),
+                new XlsxImportService(repository, validator)),
+            new PartEditorService(repository, validator),
+            new ShelfNestingService(),
+            () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true));
+
+        await materialService.CreateAsync(new Material
+        {
+            Name = "Excel Snapshot Material",
+            SheetLength = 96m,
+            SheetWidth = 48m,
+            AllowRotation = true,
+            DefaultSpacing = 0.125m,
+            DefaultEdgeMargin = 0.5m
+        });
+        WriteWorkbook(xlsxPath, "Excel Snapshot Material");
+
+        const string sessionId = "xlsx-snapshot-session";
+        var started = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest { SessionId = sessionId, ImportSourcePath = xlsxPath });
+        Assert.True(started.Success);
+
+        File.Delete(xlsxPath);
+        var preview = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.PreviewImportSession,
+            new PreviewImportSessionRequest { SessionId = sessionId });
+
+        Assert.True(preview.Success);
+        Assert.Equal(xlsxPath, preview.ImportSourcePath);
+        var excelPart = Assert.Single(preview.Parts);
+        Assert.Equal("P-001", excelPart.ImportedId);
+        var excelSource = Assert.Single(excelPart.SourceReferences);
+        Assert.Equal("Parts", excelSource.WorksheetName);
+        Assert.Equal(2, excelSource.PhysicalRow);
+        Assert.False(string.IsNullOrWhiteSpace(excelSource.SourceFingerprint));
+
+        var cancelled = await DispatchAsync<CancelImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.CancelImportSession,
+            new CancelImportSessionRequest { SessionId = sessionId });
+        Assert.True(cancelled.Released);
+    }
+
+    [Fact]
+    public async Task Import_session_finalization_atomically_returns_the_updated_project_and_releases_the_snapshot()
+    {
+        Directory.CreateDirectory(_workspacePath);
+
+        var csvPath = Path.Combine(_workspacePath, "finalized-parts.csv");
+        var materialFilePath = Path.Combine(_workspacePath, "materials-finalized.json");
+        var repository = new JsonMaterialRepository(materialFilePath);
+        var materialService = new MaterialService(repository, idGenerator: () => "finalized-material");
+        var validator = new PartRowValidator();
+        var dispatcher = DesktopBridgeRegistration.CreateDefault(
+            new RecordingFileDialogService(),
+            materialService,
+            new ProjectService(materialService, idGenerator: () => "project-finalized"),
+            new FileImportDispatcher(
+                new CsvImportService(repository, validator),
+                new XlsxImportService(repository, validator)),
+            new PartEditorService(repository, validator),
+            new ShelfNestingService(),
+            () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true));
+
+        await materialService.CreateAsync(new Material
+        {
+            Name = "Finalized Material",
+            SheetLength = 96m,
+            SheetWidth = 48m,
+            AllowRotation = true,
+            DefaultSpacing = 0.125m,
+            DefaultEdgeMargin = 0.5m
+        });
+        await File.WriteAllTextAsync(
+            csvPath,
+            "Id,Length,Width,Quantity,Material\nNEW-PART,20,10,1,Finalized Material\n");
+
+        var oldPart = new PartRow
+        {
+            RowId = "row-1",
+            ImportedId = "OLD-PART",
+            Length = 12m,
+            Width = 6m,
+            Quantity = 1,
+            MaterialName = "Finalized Material"
+        };
+        var project = new Project
+        {
+            ProjectId = "atomic-project",
+            State = new ProjectState
+            {
+                SourceFilePath = "old.csv",
+                Parts = [oldPart],
+                OptimizationGroups =
+                [
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "group-1",
+                        Name = "Primary",
+                        Order = 0,
+                        Parts = [oldPart],
+                        LastNestingResult = new NestResponse { Success = true },
+                        ResultStatus = OptimizationResultStatus.Valid
+                    }
+                ],
+                LastNestingResult = new NestResponse { Success = true }
+            }
+        };
+
+        const string sessionId = "atomic-finalization-session";
+        var started = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest { SessionId = sessionId, ImportSourcePath = csvPath });
+        Assert.True(started.Success);
+
+        var finalized = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.FinalizeImportSession,
+            new FinalizeImportSessionRequest
+            {
+                SessionId = sessionId,
+                Project = project,
+                TargetOptimizationGroupId = "group-1"
+            });
+
+        Assert.True(finalized.Success);
+        Assert.True(finalized.Finalized);
+        var finalizedProject = Assert.IsType<Project>(finalized.Project);
+        Assert.Equal(csvPath, finalizedProject.State.SourceFilePath);
+        Assert.Equal(csvPath, finalizedProject.State.ImportSource?.ImportSourcePath);
+        Assert.False(string.IsNullOrWhiteSpace(finalizedProject.State.ImportSource?.ContentFingerprint));
+        Assert.True(finalizedProject.State.ImportSource?.ContentLength > 0);
+        Assert.NotNull(finalizedProject.State.ImportConfiguration);
+        var finalizedPart = Assert.Single(finalizedProject.State.Parts);
+        Assert.Equal("NEW-PART", finalizedPart.ImportedId);
+        var sourceReference = Assert.Single(finalizedPart.SourceReferences);
+        Assert.Equal(Path.GetFileName(csvPath), sourceReference.WorksheetName);
+        Assert.Equal(2, sourceReference.PhysicalRow);
+        Assert.False(string.IsNullOrWhiteSpace(sourceReference.SourceFingerprint));
+        var worksheetConfiguration = Assert.Single(finalizedProject.State.ImportConfiguration!.Worksheets);
+        Assert.Equal(Path.GetFileName(csvPath), worksheetConfiguration.WorksheetName);
+        Assert.Equal("R1C1:R1C5", worksheetConfiguration.HeadingRange);
+        Assert.Equal("group-1", worksheetConfiguration.OptimizationGroupId);
+        Assert.Equal(5, worksheetConfiguration.ColumnMappings.Count);
+        Assert.Empty(worksheetConfiguration.ExcludedSourceRows);
+        var finalizedGroup = Assert.Single(finalizedProject.State.OptimizationGroups);
+        Assert.Equal("NEW-PART", Assert.Single(finalizedGroup.Parts).ImportedId);
+        Assert.Null(finalizedGroup.LastNestingResult);
+        Assert.Equal(OptimizationResultStatus.None, finalizedGroup.ResultStatus);
+
+        Assert.Equal("OLD-PART", Assert.Single(project.State.Parts).ImportedId);
+        Assert.NotNull(Assert.Single(project.State.OptimizationGroups).LastNestingResult);
+
+        var afterFinalization = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.PreviewImportSession,
+            new PreviewImportSessionRequest { SessionId = sessionId });
+        Assert.False(afterFinalization.Success);
+        Assert.Equal("import-session-not-found", afterFinalization.Error?.Code);
+    }
+
+    [Fact]
+    public async Task Failed_import_session_finalization_cannot_replace_existing_project_state()
+    {
+        Directory.CreateDirectory(_workspacePath);
+
+        var csvPath = Path.Combine(_workspacePath, "invalid-finalization.csv");
+        var materialFilePath = Path.Combine(_workspacePath, "materials-invalid-finalization.json");
+        var repository = new JsonMaterialRepository(materialFilePath);
+        var materialService = new MaterialService(repository, idGenerator: () => "invalid-finalization-material");
+        var validator = new PartRowValidator();
+        var dispatcher = DesktopBridgeRegistration.CreateDefault(
+            new RecordingFileDialogService(),
+            materialService,
+            new ProjectService(materialService, idGenerator: () => "project-invalid-finalization"),
+            new FileImportDispatcher(
+                new CsvImportService(repository, validator),
+                new XlsxImportService(repository, validator)),
+            new PartEditorService(repository, validator),
+            new ShelfNestingService(),
+            () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true));
+
+        await File.WriteAllTextAsync(
+            csvPath,
+            "Id,Length,Width,Quantity,Material\nINVALID,not-a-number,10,1,Unknown\n");
+
+        var oldPart = new PartRow { RowId = "old", ImportedId = "UNCHANGED" };
+        var oldResult = new NestResponse { Success = true };
+        var project = new Project
+        {
+            ProjectId = "unchanged-project",
+            State = new ProjectState
+            {
+                SourceFilePath = "existing.csv",
+                Parts = [oldPart],
+                OptimizationGroups =
+                [
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "group-1",
+                        Name = "Primary",
+                        Parts = [oldPart],
+                        LastNestingResult = oldResult,
+                        ResultStatus = OptimizationResultStatus.Valid
+                    }
+                ],
+                LastNestingResult = oldResult
+            }
+        };
+
+        const string sessionId = "failed-finalization-session";
+        var started = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest { SessionId = sessionId, ImportSourcePath = csvPath });
+        Assert.True(started.Success);
+
+        var finalized = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.FinalizeImportSession,
+            new FinalizeImportSessionRequest
+            {
+                SessionId = sessionId,
+                Project = project,
+                TargetOptimizationGroupId = "group-1",
+                NewMaterials =
+                [
+                    new ImportNewMaterialRequest
+                    {
+                        SourceMaterialName = "Unknown",
+                        Material = new Material
+                        {
+                            Name = "Temporary Material",
+                            SheetLength = 96m,
+                            SheetWidth = 48m
+                        }
+                    }
+                ]
+            });
+
+        Assert.False(finalized.Success);
+        Assert.False(finalized.Finalized);
+        Assert.Null(finalized.Project);
+        Assert.Equal("UNCHANGED", Assert.Single(project.State.Parts).ImportedId);
+        Assert.Same(oldResult, Assert.Single(project.State.OptimizationGroups).LastNestingResult);
+        Assert.DoesNotContain(await materialService.ListAsync(), material => material.Name == "Temporary Material");
+
+        var afterFailure = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.PreviewImportSession,
+            new PreviewImportSessionRequest { SessionId = sessionId });
+        Assert.Equal("import-session-not-found", afterFailure.Error?.Code);
+    }
+
+    [Fact]
+    public async Task Cancellation_requested_before_begin_prevents_a_late_session_from_becoming_active()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var csvPath = Path.Combine(_workspacePath, "late-begin.csv");
+        await File.WriteAllTextAsync(csvPath, "Id\nP-001\n");
+
+        var materialService = new MaterialService(
+            new JsonMaterialRepository(Path.Combine(_workspacePath, "late-begin-materials.json")));
+        var dispatcher = DesktopBridgeRegistration.CreateDefault(
+            new RecordingFileDialogService(),
+            materialService,
+            new ProjectService(materialService),
+            new FileImportDispatcher(
+                new CsvImportService(DemoMaterialCatalog.All, new PartRowValidator()),
+                new XlsxImportService(DemoMaterialCatalog.All, new PartRowValidator())),
+            new PartEditorService(DemoMaterialCatalog.All),
+            new ShelfNestingService(),
+            () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true));
+
+        const string sessionId = "cancel-before-begin-session";
+        var cancelled = await DispatchAsync<CancelImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.CancelImportSession,
+            new CancelImportSessionRequest { SessionId = sessionId });
+        var lateBegin = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest { SessionId = sessionId, ImportSourcePath = csvPath });
+
+        Assert.True(cancelled.Success);
+        Assert.False(cancelled.Released);
+        Assert.False(lateBegin.Success);
+        Assert.Equal("cancelled", lateBegin.Error?.Code);
+
+        var preview = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.PreviewImportSession,
+            new PreviewImportSessionRequest { SessionId = sessionId });
+        Assert.Equal("import-session-not-found", preview.Error?.Code);
+    }
+
+    [Fact]
+    public async Task Cancelling_an_import_session_propagates_to_host_work_and_releases_the_snapshot()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var csvPath = Path.Combine(_workspacePath, "cancelled-session.csv");
+        await File.WriteAllTextAsync(csvPath, "Id\nP-001\n");
+
+        var blockingImport = new BlockingImportService();
+        var materialService = new MaterialService(
+            new JsonMaterialRepository(Path.Combine(_workspacePath, "cancel-materials.json")));
+        var dispatcher = DesktopBridgeRegistration.CreateDefault(
+            new RecordingFileDialogService(),
+            materialService,
+            new ProjectService(materialService, idGenerator: () => "project-cancel-session"),
+            blockingImport,
+            new PartEditorService(DemoMaterialCatalog.All),
+            new ShelfNestingService(),
+            () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true));
+
+        const string sessionId = "cancelled-import-session";
+        var started = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest { SessionId = sessionId, ImportSourcePath = csvPath });
+        Assert.True(started.Success);
+
+        var previewTask = DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.PreviewImportSession,
+            new PreviewImportSessionRequest { SessionId = sessionId });
+        await blockingImport.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var cancelled = await DispatchAsync<CancelImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.CancelImportSession,
+            new CancelImportSessionRequest { SessionId = sessionId });
+        var latePreviewResponse = await previewTask;
+
+        Assert.True(cancelled.Success);
+        Assert.True(cancelled.Released);
+        Assert.True(await blockingImport.CancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.False(latePreviewResponse.Success);
+        Assert.Equal("cancelled", latePreviewResponse.Error?.Code);
+
+        var afterCancellation = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.PreviewImportSession,
+            new PreviewImportSessionRequest { SessionId = sessionId });
+        Assert.Equal("import-session-not-found", afterCancellation.Error?.Code);
+    }
+
+    [Fact]
+    public async Task Cancelling_finalization_reaches_material_preparation_and_releases_the_snapshot()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var csvPath = Path.Combine(_workspacePath, "cancelled-preparation.csv");
+        await File.WriteAllTextAsync(csvPath, "Id,Length,Width,Quantity,Material\nP-001,20,10,1,New Material\n");
+
+        var materialService = new BlockingMaterialService();
+        var dispatcher = DesktopBridgeRegistration.CreateDefault(
+            new RecordingFileDialogService(),
+            materialService,
+            new ProjectService(materialService),
+            new BlockingImportService(),
+            new PartEditorService(DemoMaterialCatalog.All),
+            new ShelfNestingService(),
+            () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true));
+        const string sessionId = "cancel-material-preparation-session";
+
+        var started = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest { SessionId = sessionId, ImportSourcePath = csvPath });
+        Assert.True(started.Success);
+
+        var finalizationTask = DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.FinalizeImportSession,
+            new FinalizeImportSessionRequest
+            {
+                SessionId = sessionId,
+                Project = new Project(),
+                NewMaterials =
+                [
+                    new ImportNewMaterialRequest
+                    {
+                        SourceMaterialName = "New Material",
+                        Material = new Material { Name = "New Material", SheetLength = 96m, SheetWidth = 48m }
+                    }
+                ]
+            });
+        await materialService.CreateStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var cancelled = await DispatchAsync<CancelImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.CancelImportSession,
+            new CancelImportSessionRequest { SessionId = sessionId });
+        var finalization = await finalizationTask;
+
+        Assert.True(cancelled.Released);
+        Assert.True(await materialService.CancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.False(finalization.Success);
+        Assert.Equal("cancelled", finalization.Error?.Code);
     }
 
     [Fact]
@@ -606,5 +1094,78 @@ public sealed class ImportBridgeSpecs : IDisposable
             SaveFileDialogRequest request,
             CancellationToken cancellationToken = default) =>
             Task.FromResult(SaveFileDialogResponse.Cancelled());
+    }
+
+    private sealed class BlockingImportService : IImportService
+    {
+        public TaskCompletionSource Started { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<bool> CancellationObserved { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<ImportResponse> ImportAsync(
+            ImportRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            Started.TrySetResult();
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                return new ImportResponse { Success = true };
+            }
+            catch (OperationCanceledException)
+            {
+                CancellationObserved.TrySetResult(true);
+                throw;
+            }
+        }
+
+        public Task<ImportResponse> ImportAsync(
+            TextReader reader,
+            ImportOptions? options = null,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class BlockingMaterialService : IMaterialService
+    {
+        public TaskCompletionSource CreateStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<bool> CancellationObserved { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task<IReadOnlyList<Material>> ListAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<Material>>(Array.Empty<Material>());
+
+        public Task<MaterialOperationResult> GetAsync(string materialId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new MaterialOperationResult());
+
+        public async Task<MaterialOperationResult> CreateAsync(
+            Material material,
+            CancellationToken cancellationToken = default)
+        {
+            CreateStarted.TrySetResult();
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                return new MaterialOperationResult { Success = true, Material = material };
+            }
+            catch (OperationCanceledException)
+            {
+                CancellationObserved.TrySetResult(true);
+                throw;
+            }
+        }
+
+        public Task<MaterialOperationResult> UpdateAsync(Material material, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new MaterialOperationResult());
+
+        public Task<MaterialDeleteResult> DeleteAsync(
+            string materialId,
+            bool isInUse = false,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new MaterialDeleteResult { Success = true });
     }
 }
