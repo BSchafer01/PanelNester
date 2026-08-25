@@ -38,7 +38,9 @@ import {
   type NestResponse,
   type OpenFileDialogResponse,
   type OptimizationGroup,
+  type OptimizationGroupChange,
   type OpenProjectRequest,
+  type PartRow,
   type PartRowUpdate,
   type ProjectFileMetadata,
   type ProjectMaterialSnapshot,
@@ -119,6 +121,7 @@ interface AppState {
   projectFilePath?: string;
   projectMaterialSnapshots: ProjectMaterialSnapshot[];
   optimizationGroups: OptimizationGroup[];
+  activeOptimizationGroupId?: string;
   projectMessage: string;
   projectBusy: boolean;
   projectDirty: boolean;
@@ -181,6 +184,7 @@ type AppAction =
       response: ImportResponse;
       message: string;
       selectedMaterialId?: string;
+      targetOptimizationGroupId?: string;
     }
   | { type: 'part-row-operation-failed'; message: string }
   | { type: 'import-failed'; message: string }
@@ -220,6 +224,13 @@ type AppAction =
   | { type: 'project-operation-started'; message: string }
   | { type: 'project-operation-finished'; message: string }
   | { type: 'project-operation-failed'; message: string }
+  | { type: 'optimization-group-activated'; optimizationGroupId: string }
+  | {
+      type: 'optimization-groups-updated';
+      project: ProjectRecord;
+      activeOptimizationGroupId?: string;
+      message: string;
+    }
   | {
       type: 'project-metadata-changed';
       metadata: ProjectMetadata;
@@ -499,6 +510,7 @@ const initialState: AppState = {
   projectFilePath: undefined,
   projectMaterialSnapshots: [],
   optimizationGroups: [],
+  activeOptimizationGroupId: undefined,
   projectMessage: defaultProjectMessage,
   projectBusy: false,
   projectDirty: false,
@@ -1052,7 +1064,20 @@ function buildOptimizationGroups(
   lastBatchNestingResult: BatchNestResponse | null,
 ): OptimizationGroup[] {
   if (state.optimizationGroups.length > 1) {
-    return state.optimizationGroups;
+    if (!lastNestingResult && !lastBatchNestingResult) {
+      return state.optimizationGroups;
+    }
+
+    return state.optimizationGroups.map((group) =>
+      group.optimizationGroupId === state.activeOptimizationGroupId
+        ? {
+            ...group,
+            lastNestingResult,
+            lastBatchNestingResult,
+            resultStatus: 'valid',
+          }
+        : group,
+    );
   }
 
   const existingGroup = state.optimizationGroups[0];
@@ -1070,10 +1095,93 @@ function buildOptimizationGroups(
       lastNestingResult,
       lastBatchNestingResult,
       resultStatus:
-        existingGroup?.resultStatus ??
-        (lastNestingResult || lastBatchNestingResult ? 'valid' : 'none'),
+        lastNestingResult || lastBatchNestingResult
+          ? 'valid'
+          : existingGroup?.resultStatus ?? 'none',
     },
   ];
+}
+
+function syncPartsToOptimizationGroups(
+  groups: OptimizationGroup[],
+  nextParts: ImportResponse['parts'],
+  targetOptimizationGroupId?: string,
+): OptimizationGroup[] {
+  if (groups.length === 0) {
+    return groups;
+  }
+
+  const nextPartsById = new Map(nextParts.map((part) => [part.rowId, part]));
+  const assignedIds = new Set<string>();
+  const syncedGroups = groups.map((group) => {
+    const parts = group.parts
+      .map((part) => nextPartsById.get(part.rowId))
+      .filter((part): part is ImportResponse['parts'][number] => Boolean(part));
+    parts.forEach((part) => assignedIds.add(part.rowId));
+    const changed =
+      parts.length !== group.parts.length ||
+      parts.some(
+        (part, index) =>
+          !arePartRowsEqual(part, group.parts[index]),
+      );
+
+    return changed
+      ? {
+          ...group,
+          parts,
+          lastNestingResult: null,
+          lastBatchNestingResult: null,
+          resultStatus: 'none' as const,
+        }
+      : group;
+  });
+  const unassignedParts = nextParts.filter((part) => !assignedIds.has(part.rowId));
+  if (unassignedParts.length === 0) {
+    return syncedGroups;
+  }
+
+  const targetIndex = Math.max(
+    0,
+    syncedGroups.findIndex(
+      (group) => group.optimizationGroupId === targetOptimizationGroupId,
+    ),
+  );
+  return syncedGroups.map((group, index) =>
+    index === targetIndex
+      ? {
+          ...group,
+          parts: [...group.parts, ...unassignedParts],
+          lastNestingResult: null,
+          lastBatchNestingResult: null,
+          resultStatus: 'none' as const,
+        }
+      : group,
+  );
+}
+
+function arePartRowsEqual(left: PartRow, right: PartRow | undefined): boolean {
+  return Boolean(
+    right &&
+      left.rowId === right.rowId &&
+      left.importedId === right.importedId &&
+      left.lengthText === right.lengthText &&
+      left.length === right.length &&
+      left.widthText === right.widthText &&
+      left.width === right.width &&
+      left.quantityText === right.quantityText &&
+      left.quantity === right.quantity &&
+      left.materialName === right.materialName &&
+      left.group === right.group &&
+      left.isManual === right.isManual &&
+      left.sheetNumber === right.sheetNumber &&
+      left.rowNumber === right.rowNumber &&
+      left.columnNumber === right.columnNumber &&
+      left.validationStatus === right.validationStatus &&
+      left.validationMessages.length === right.validationMessages.length &&
+      left.validationMessages.every(
+        (message, index) => message === right.validationMessages[index],
+      ),
+  );
 }
 
 function buildProjectRecord(
@@ -1351,6 +1459,11 @@ function reducer(state: AppState, action: AppAction): AppState {
           importMappingSession: undefined,
           selectedFilePath: action.filePath,
           importResponse: action.response,
+          optimizationGroups: syncPartsToOptimizationGroups(
+            state.optimizationGroups,
+            action.response.parts,
+            state.activeOptimizationGroupId,
+          ),
           nestResponse: emptyNestResponse,
           batchNestResponse: emptyBatchNestResponse,
           lastNestMaterial: undefined,
@@ -1377,6 +1490,11 @@ function reducer(state: AppState, action: AppAction): AppState {
           batchNestResponse: emptyBatchNestResponse,
           lastNestMaterial: undefined,
           selectedMaterialId: action.selectedMaterialId,
+          optimizationGroups: syncPartsToOptimizationGroups(
+            state.optimizationGroups,
+            action.response.parts,
+            action.targetOptimizationGroupId ?? state.activeOptimizationGroupId,
+          ),
           importMessage: action.message,
           nestingMessage:
             'Imported rows changed. Re-run nesting after the corrected rows are ready.',
@@ -1410,6 +1528,16 @@ function reducer(state: AppState, action: AppAction): AppState {
           batchNestResponse: action.batchResponse,
           lastNestMaterial: action.material,
           nestingMessage: action.message,
+          optimizationGroups: state.optimizationGroups.map((group) =>
+            group.optimizationGroupId === state.activeOptimizationGroupId
+              ? {
+                  ...group,
+                  lastNestingResult: action.response,
+                  lastBatchNestingResult: action.batchResponse,
+                  resultStatus: 'valid',
+                }
+              : group,
+          ),
         },
         'Nesting results changed. Save the project to keep this layout with its material snapshot.',
       );
@@ -1447,6 +1575,8 @@ function reducer(state: AppState, action: AppAction): AppState {
         projectFilePath: undefined,
         projectMaterialSnapshots: [],
         optimizationGroups: action.optimizationGroups ?? [],
+        activeOptimizationGroupId:
+          action.optimizationGroups?.[0]?.optimizationGroupId,
         projectMessage: action.message,
         projectBusy: false,
         projectDirty: false,
@@ -1455,7 +1585,11 @@ function reducer(state: AppState, action: AppAction): AppState {
       };
     case 'project-opened': {
       const importResponse = getProjectImportResponse(action.project);
-      const nestResponse = action.project.state.lastNestingResult ?? emptyNestResponse;
+      const openedGroup = action.project.state.optimizationGroups[0];
+      const nestResponse =
+        openedGroup?.lastNestingResult ??
+        action.project.state.lastNestingResult ??
+        emptyNestResponse;
       const projectMetadata = mapMetadataFromBridge(action.project.metadata);
       const projectSettings =
         action.settings ??
@@ -1463,10 +1597,9 @@ function reducer(state: AppState, action: AppAction): AppState {
           action.project.settings,
           projectMetadata,
         );
-      const batchNestResponse = getProjectBatchNestResponse(
-        action.project,
-        action.lastNestMaterial,
-      );
+      const batchNestResponse =
+        openedGroup?.lastBatchNestingResult ??
+        getProjectBatchNestResponse(action.project, action.lastNestMaterial);
 
       return {
         ...state,
@@ -1479,6 +1612,8 @@ function reducer(state: AppState, action: AppAction): AppState {
         projectFilePath: action.filePath,
         projectMaterialSnapshots: sortByName(action.project.materialSnapshots),
         optimizationGroups: action.project.state.optimizationGroups,
+        activeOptimizationGroupId:
+          action.project.state.optimizationGroups[0]?.optimizationGroupId,
         lastSavedAt: new Date().toISOString(),
         selectedFilePath: action.project.state.sourceFilePath ?? undefined,
         importMappingSession: undefined,
@@ -1535,6 +1670,12 @@ function reducer(state: AppState, action: AppAction): AppState {
         extrusionReport: null,
         projectMaterialSnapshots: sortByName(action.project.materialSnapshots),
         optimizationGroups: action.project.state.optimizationGroups,
+        activeOptimizationGroupId:
+          action.project.state.optimizationGroups.some(
+            (group) => group.optimizationGroupId === state.activeOptimizationGroupId,
+          )
+            ? state.activeOptimizationGroupId
+            : action.project.state.optimizationGroups[0]?.optimizationGroupId,
         projectMessage: action.message,
         lastSavedAt: new Date().toISOString(),
       };
@@ -1556,6 +1697,49 @@ function reducer(state: AppState, action: AppAction): AppState {
         projectBusy: false,
         projectMessage: action.message,
       };
+    case 'optimization-group-activated': {
+      const activeGroup = state.optimizationGroups.find(
+        (group) => group.optimizationGroupId === action.optimizationGroupId,
+      );
+      return {
+        ...state,
+        activeOptimizationGroupId: action.optimizationGroupId,
+        nestResponse: activeGroup?.lastNestingResult ?? emptyNestResponse,
+        batchNestResponse:
+          activeGroup?.lastBatchNestingResult ?? emptyBatchNestResponse,
+        lastNestMaterial: undefined,
+      };
+    }
+    case 'optimization-groups-updated': {
+      const importResponse = getProjectImportResponse(action.project);
+      const nextActiveOptimizationGroupId =
+        action.activeOptimizationGroupId &&
+        action.project.state.optimizationGroups.some(
+          (group) =>
+            group.optimizationGroupId === action.activeOptimizationGroupId,
+        )
+          ? action.activeOptimizationGroupId
+          : action.project.state.optimizationGroups[0]?.optimizationGroupId;
+      const activeGroup = action.project.state.optimizationGroups.find(
+        (group) =>
+          group.optimizationGroupId === nextActiveOptimizationGroupId,
+      );
+      return markProjectDirty(
+        {
+          ...state,
+          projectBusy: false,
+          projectId: action.project.projectId,
+          optimizationGroups: action.project.state.optimizationGroups,
+          activeOptimizationGroupId: nextActiveOptimizationGroupId,
+          importResponse,
+          nestResponse: activeGroup?.lastNestingResult ?? emptyNestResponse,
+          batchNestResponse:
+            activeGroup?.lastBatchNestingResult ?? emptyBatchNestResponse,
+          projectMessage: action.message,
+        },
+        `${action.message} Save the project to persist this change.`,
+      );
+    }
     case 'project-metadata-changed':
       return markProjectDirty(
         {
@@ -2901,6 +3085,7 @@ export default function App() {
   const replaceImportResponse = (
     response: ImportResponse,
     message: string,
+    targetOptimizationGroupId?: string,
   ) => {
     const importResponse = normalizeImportResponse(response);
     dispatch({
@@ -2912,6 +3097,7 @@ export default function App() {
         state.selectedMaterialId,
       ),
       message,
+      targetOptimizationGroupId,
     });
   };
 
@@ -3000,6 +3186,7 @@ export default function App() {
       replaceImportResponse(
         response,
         describeRowOperation(`Added row ${part.importedId || 'draft'}.`, response),
+        state.activeOptimizationGroupId,
       );
     } catch (error) {
       const message = getErrorMessage(
@@ -3140,13 +3327,25 @@ export default function App() {
   const selectedMaterial = state.materials.find(
     (material) => material.materialId === state.selectedMaterialId,
   );
-  const readyParts = getReadyParts(state.importResponse);
+  const activeOptimizationGroup =
+    state.optimizationGroups.find(
+      (group) =>
+        group.optimizationGroupId === state.activeOptimizationGroupId,
+    ) ?? state.optimizationGroups[0];
+  const activeOptimizationGroupImportResponse = {
+    ...state.importResponse,
+    parts: activeOptimizationGroup?.parts ?? state.importResponse.parts,
+  };
+  const readyParts = getReadyParts(activeOptimizationGroupImportResponse);
   const readyMaterialCount = new Set(
     readyParts
       .map((part) => part.materialName.trim())
       .filter((name) => name.length > 0),
   ).size;
-  const nestableParts = getNestableParts(state.importResponse, selectedMaterial);
+  const nestableParts = getNestableParts(
+    activeOptimizationGroupImportResponse,
+    selectedMaterial,
+  );
   const canRunBatchNesting = hasCapability(bridgeMessageTypes.runBatchNesting);
 
   const runNesting = async () => {
@@ -3154,14 +3353,14 @@ export default function App() {
       if (readyParts.length === 0) {
         dispatch({
           type: 'nesting-failed',
-          message: 'No ready imported rows are available for batch nesting.',
+          message: 'No ready rows are available in the active Optimization Group.',
         });
         return;
       }
 
       dispatch({
         type: 'nesting-started',
-        message: `Running batch nesting for ${readyParts.length} row(s) across ${readyMaterialCount} material group(s)…`,
+        message: `Running ${activeOptimizationGroup?.name ?? 'the active Optimization Group'} for ${readyParts.length} row(s) across ${readyMaterialCount} material(s)…`,
       });
 
       try {
@@ -3218,7 +3417,7 @@ export default function App() {
     if (nestableParts.length === 0) {
       dispatch({
         type: 'nesting-failed',
-        message: `No valid imported rows currently match ${selectedMaterial.name}.`,
+        message: `No valid rows in the active Optimization Group currently match ${selectedMaterial.name}.`,
       });
       return;
     }
@@ -3297,6 +3496,58 @@ export default function App() {
         'Report settings changed. Save the project to keep these export fields with the job.',
     });
   };
+
+  const updateOptimizationGroups = async (
+    change: OptimizationGroupChange,
+    activeOptimizationGroupId = state.activeOptimizationGroupId,
+  ): Promise<void> => {
+    if (!hasCapability(bridgeMessageTypes.updateOptimizationGroups)) {
+      throw new Error('Optimization Group management is not available from the connected desktop host.');
+    }
+
+    dispatch({
+      type: 'project-operation-started',
+      message: 'Updating Optimization Groups…',
+    });
+
+    try {
+      const response = await hostBridge.updateOptimizationGroups({
+        project: buildProjectRecord(state),
+        change,
+      });
+      if (!response.success || !response.project) {
+        throw new Error(
+          getBridgeErrorMessage(
+            response.error,
+            response.message ?? 'Optimization Groups could not be updated.',
+          ),
+        );
+      }
+
+      dispatch({
+        type: 'optimization-groups-updated',
+        project: response.project,
+        activeOptimizationGroupId,
+        message: response.message ?? 'Updated Optimization Groups.',
+      });
+    } catch (error) {
+      const message = getErrorMessage(error, 'Optimization Groups could not be updated.');
+      dispatch({ type: 'project-operation-failed', message });
+      throw new Error(message);
+    }
+  };
+
+  const movePartToOptimizationGroup = async (
+    partRowId: string,
+    targetOptimizationGroupId: string,
+  ): Promise<void> =>
+    updateOptimizationGroups(
+      {
+        type: 'movePart',
+        partRowId,
+        targetOptimizationGroupId,
+      },
+    );
 
   const exportReport = async (overrides?: ReportExportOverrides) => {
     const reportSettingsOverride = overrides?.reportSettings;
@@ -3696,6 +3947,12 @@ export default function App() {
           onUpdatePartRow={updatePartRow}
           onDeletePartRow={deletePartRow}
           onRunNesting={runNesting}
+          optimizationGroups={state.optimizationGroups}
+          activeOptimizationGroupId={state.activeOptimizationGroupId}
+          onActivateOptimizationGroup={(optimizationGroupId) =>
+            dispatch({ type: 'optimization-group-activated', optimizationGroupId })
+          }
+          onMovePartToOptimizationGroup={movePartToOptimizationGroup}
         />
       );
       break;
@@ -3874,6 +4131,37 @@ export default function App() {
           }}
           onPickCompanyLogo={pickCompanyLogoPath}
           onSaveDesktopAppSettings={saveDesktopAppSettings}
+          optimizationGroups={state.optimizationGroups}
+          activeOptimizationGroupId={state.activeOptimizationGroupId}
+          canManageOptimizationGroups={hasCapability(
+            bridgeMessageTypes.updateOptimizationGroups,
+          )}
+          onActivateOptimizationGroup={(optimizationGroupId) =>
+            dispatch({ type: 'optimization-group-activated', optimizationGroupId })
+          }
+          onCreateOptimizationGroup={(name) =>
+            updateOptimizationGroups({ type: 'create', name })
+          }
+          onRenameOptimizationGroup={(optimizationGroupId, name) =>
+            updateOptimizationGroups({
+              type: 'rename',
+              optimizationGroupId,
+              name,
+            })
+          }
+          onReorderOptimizationGroups={(orderedOptimizationGroupIds) =>
+            updateOptimizationGroups({
+              type: 'reorder',
+              orderedOptimizationGroupIds,
+            })
+          }
+          onDeleteOptimizationGroup={(optimizationGroupId, removeOwnedContent) =>
+            updateOptimizationGroups({
+              type: 'delete',
+              optimizationGroupId,
+              removeOwnedContent,
+            })
+          }
         />
       );
       break;

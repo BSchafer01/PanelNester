@@ -242,6 +242,153 @@ public sealed class ProjectBridgeSpecs : IDisposable
         Assert.Empty(dialogs.OpenRequests);
     }
 
+    [Fact]
+    public async Task Optimization_group_workflow_round_trips_through_the_desktop_bridge()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var projectPath = Path.Combine(_workspacePath, "bridge-managed-groups.pnest");
+        var repository = new JsonMaterialRepository(Path.Combine(_workspacePath, "materials.json"));
+        var materialService = new MaterialService(repository);
+        var generatedIds = new Queue<string>(["project-bridge-001", "group-bridge-002"]);
+        var projectService = new ProjectService(materialService, idGenerator: () => generatedIds.Dequeue());
+        var dispatcher = DesktopBridgeRegistration.CreateDefault(
+            new RecordingFileDialogService(),
+            materialService,
+            projectService,
+            new CsvImportService(repository),
+            new PartEditorService(repository),
+            new ShelfNestingService(),
+            () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true));
+
+        Assert.Contains(BridgeMessageTypes.UpdateOptimizationGroups, dispatcher.RegisteredTypes);
+
+        var created = await DispatchAsync<NewProjectResponse>(
+            dispatcher,
+            BridgeMessageTypes.NewProject,
+            new NewProjectRequest());
+        var project = created.Project!;
+        var originalGroup = Assert.Single(project.State.OptimizationGroups);
+        var manualPart = new PartRow
+        {
+            RowId = "manual-bridge-001",
+            ImportedId = "Door",
+            Length = 24m,
+            Width = 12m,
+            Quantity = 1,
+            MaterialName = "Maple",
+            Group = "Casework",
+            IsManual = true,
+            ValidationStatus = ValidationStatuses.Valid
+        };
+        project = project with
+        {
+            State = project.State with
+            {
+                OptimizationGroups = [originalGroup with { Parts = [manualPart] }],
+                Parts = [manualPart]
+            }
+        };
+
+        var added = await ChangeGroupsAsync(
+            dispatcher,
+            project,
+            new OptimizationGroupChange
+            {
+                Type = OptimizationGroupChangeType.Create,
+                Name = "Secondary"
+            });
+        project = added.Project!;
+        var secondaryGroup = project.State.OptimizationGroups[1];
+
+        project = (await ChangeGroupsAsync(
+            dispatcher,
+            project,
+            new OptimizationGroupChange
+            {
+                Type = OptimizationGroupChangeType.Rename,
+                OptimizationGroupId = originalGroup.OptimizationGroupId,
+                Name = "Primary"
+            })).Project!;
+
+        project = (await ChangeGroupsAsync(
+            dispatcher,
+            project,
+            new OptimizationGroupChange
+            {
+                Type = OptimizationGroupChangeType.MovePart,
+                PartRowId = manualPart.RowId,
+                TargetOptimizationGroupId = secondaryGroup.OptimizationGroupId
+            })).Project!;
+
+        project = (await ChangeGroupsAsync(
+            dispatcher,
+            project,
+            new OptimizationGroupChange
+            {
+                Type = OptimizationGroupChangeType.Reorder,
+                OrderedOptimizationGroupIds =
+                [
+                    secondaryGroup.OptimizationGroupId,
+                    originalGroup.OptimizationGroupId
+                ]
+            })).Project!;
+
+        var orderedProjectPath = Path.Combine(_workspacePath, "bridge-ordered-groups.pnest");
+        var orderedSave = await DispatchAsync<SaveProjectResponse>(
+            dispatcher,
+            BridgeMessageTypes.SaveProject,
+            new SaveProjectRequest(project, orderedProjectPath));
+        var orderedReopen = await DispatchAsync<OpenProjectResponse>(
+            dispatcher,
+            BridgeMessageTypes.OpenProject,
+            new OpenProjectRequest(orderedProjectPath));
+        Assert.True(orderedSave.Success);
+        Assert.True(orderedReopen.Success);
+        project = orderedReopen.Project!;
+        Assert.Equal(
+            [secondaryGroup.OptimizationGroupId, originalGroup.OptimizationGroupId],
+            project.State.OptimizationGroups.Select(group => group.OptimizationGroupId));
+        Assert.Equal([0, 1], project.State.OptimizationGroups.Select(group => group.Order));
+
+        var guardedDelete = await ChangeGroupsAsync(
+            dispatcher,
+            project,
+            new OptimizationGroupChange
+            {
+                Type = OptimizationGroupChangeType.Delete,
+                OptimizationGroupId = secondaryGroup.OptimizationGroupId
+            });
+        Assert.False(guardedDelete.Success);
+        Assert.Equal("optimization-group-not-empty", guardedDelete.Error!.Code);
+
+        project = (await ChangeGroupsAsync(
+            dispatcher,
+            project,
+            new OptimizationGroupChange
+            {
+                Type = OptimizationGroupChangeType.Delete,
+                OptimizationGroupId = secondaryGroup.OptimizationGroupId,
+                RemoveOwnedContent = true
+            })).Project!;
+
+        var saved = await DispatchAsync<SaveProjectResponse>(
+            dispatcher,
+            BridgeMessageTypes.SaveProject,
+            new SaveProjectRequest(project, projectPath));
+        var reopened = await DispatchAsync<OpenProjectResponse>(
+            dispatcher,
+            BridgeMessageTypes.OpenProject,
+            new OpenProjectRequest(projectPath));
+
+        Assert.True(saved.Success);
+        Assert.True(reopened.Success);
+        var reopenedGroup = Assert.Single(reopened.Project!.State.OptimizationGroups);
+        Assert.Equal(originalGroup.OptimizationGroupId, reopenedGroup.OptimizationGroupId);
+        Assert.Equal("Primary", reopenedGroup.Name);
+        Assert.Equal(0, reopenedGroup.Order);
+        Assert.Empty(reopened.Project.State.Parts);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_workspacePath))
@@ -323,6 +470,15 @@ public sealed class ProjectBridgeSpecs : IDisposable
         Assert.NotNull(typed);
         return typed!;
     }
+
+    private static Task<UpdateOptimizationGroupsResponse> ChangeGroupsAsync(
+        BridgeMessageDispatcher dispatcher,
+        Project project,
+        OptimizationGroupChange change) =>
+        DispatchAsync<UpdateOptimizationGroupsResponse>(
+            dispatcher,
+            BridgeMessageTypes.UpdateOptimizationGroups,
+            new UpdateOptimizationGroupsRequest(project, change));
 
     private const ushort FlatBufferVersion = 2;
     private const int FlatBufferHeaderLength = 8;

@@ -497,6 +497,28 @@ public static class DesktopBridgeRegistration
                         GetFirstErrorMessage(result.Errors, "Project metadata could not be updated."));
             });
 
+        dispatcher.Register<UpdateOptimizationGroupsRequest>(
+            BridgeMessageTypes.UpdateOptimizationGroups,
+            async (request, cancellationToken) =>
+            {
+                var result = await projectService
+                    .UpdateOptimizationGroupsAsync(
+                        request.Project,
+                        request.Change,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+
+                return result.Success && result.Project is not null
+                    ? new UpdateOptimizationGroupsResponse(
+                        true,
+                        result.Project,
+                        null,
+                        "Updated Optimization Groups.")
+                    : UpdateOptimizationGroupsResponse.Failure(
+                        GetFirstErrorCode(result.Errors, "optimization-group-change-invalid"),
+                        GetFirstErrorMessage(result.Errors, "Optimization Groups could not be updated."));
+            });
+
         if (batchNestingService is not null &&
             reportDataService is not null &&
             pdfReportExporter is not null)

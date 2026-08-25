@@ -341,6 +341,8 @@ internal sealed class ProjectFlatBufferSerializer
             Fb.PartRow.AddColumnNumber(builder, columnNumber);
         }
 
+        Fb.PartRow.AddIsManual(builder, part.IsManual);
+
         return Fb.PartRow.EndPartRow(builder);
     }
 
@@ -786,6 +788,7 @@ internal sealed class ProjectFlatBufferSerializer
                 SheetNumber = string.IsNullOrWhiteSpace(value.SheetNumber) ? null : value.SheetNumber,
                 RowNumber = value.RowNumber <= 0 ? null : value.RowNumber,
                 ColumnNumber = value.ColumnNumber <= 0 ? null : value.ColumnNumber,
+                IsManual = value.IsManual,
                 ValidationStatus = value.ValidationStatus ?? ValidationStatuses.Valid,
                 ValidationMessages = messages
             });

@@ -1804,6 +1804,44 @@ td {
   grid-column: 1 / -1;
 }
 
+.optimization-groups-card {
+  gap: 0.9rem;
+}
+
+.optimization-groups-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.optimization-group-row {
+  align-items: center;
+  background: var(--surface-subtle, #f5f6f8);
+  border: 1px solid var(--border-color, #d8dce2);
+  border-radius: 0.6rem;
+  display: grid;
+  gap: 0.7rem;
+  grid-template-columns: 7rem minmax(12rem, 1fr) auto auto;
+  padding: 0.65rem;
+}
+
+.optimization-group-row--active {
+  border-color: var(--accent-color, #3169a8);
+}
+
+.optimization-group-row__active {
+  min-width: 0;
+}
+
+.optimization-groups-create {
+  display: flex;
+  gap: 0.65rem;
+  margin-top: 0.75rem;
+}
+
+.optimization-groups-create input {
+  flex: 1;
+}
+
 .project-card--identity {
   grid-area: identity;
 }

@@ -598,7 +598,7 @@ public sealed class ImportResultsRevisionGateSpecs
         Assert.Contains("{ id: 'group-review', label: 'Review by group' },", resultsPage);
         Assert.Contains("const activeMaterialGroupSummaries = useMemo(", resultsPage);
         Assert.Contains("No grouped panels in the active material result", resultsPage);
-        Assert.Contains("<th>Group</th>", resultsPage);
+        Assert.Contains("<th>Part Group</th>", resultsPage);
         Assert.Contains("{selectedPlacement.displayGroup}", resultsPage);
         Assert.Contains("<td>{placement.displayGroup}</td>", resultsPage);
         Assert.Contains("decoratePlacements(activeMaterialResult.response.placements)", resultsPage);
@@ -751,9 +751,9 @@ public sealed class ImportResultsRevisionGateSpecs
         Assert.Contains("const hasActiveGroup = activeGroupRef.current !== undefined;", sheetViewer);
         Assert.Contains("!hasActiveGroup || visual.groupKey === activeGroupRef.current;", sheetViewer);
         Assert.Contains("isActiveGroupPlacement ? visual.baseColor : '#7d7f83'", sheetViewer);
-        Assert.Contains("Focus group: {activeGroupLabel}", sheetViewer);
-        Assert.Contains("Other groups subdued", sheetViewer);
-        Assert.Contains("Group: {getDisplayGroup(tooltip.placement.group, tooltip.placement.displayGroup)}", sheetViewer);
+        Assert.Contains("Focus Part Group: {activeGroupLabel}", sheetViewer);
+        Assert.Contains("Other Part Groups subdued", sheetViewer);
+        Assert.Contains("Part Group: {getDisplayGroup(tooltip.placement.group, tooltip.placement.displayGroup)}", sheetViewer);
     }
 
     [Fact]

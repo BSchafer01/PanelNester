@@ -16,6 +16,8 @@ public sealed record PartRowUpdate
 
     public string? Group { get; init; }
 
+    public bool IsManual { get; init; }
+
     public string? SheetNumber { get; init; }
 
     public string? RowNumber { get; init; }

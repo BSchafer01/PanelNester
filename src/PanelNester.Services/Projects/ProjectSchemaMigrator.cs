@@ -39,6 +39,18 @@ internal static class ProjectSchemaMigrator
             .Select((item, index) => NormalizeGroup(item.Group, projectId, index, usedIds, usedNames))
             .ToArray();
 
+        if (string.IsNullOrWhiteSpace(state.SourceFilePath))
+        {
+            groups = groups
+                .Select(group => group with
+                {
+                    Parts = group.Parts
+                        .Select(part => part with { IsManual = true })
+                        .ToArray()
+                })
+                .ToArray();
+        }
+
         var compatibilityGroup = groups.Length == 1 ? groups[0] : null;
         return state with
         {

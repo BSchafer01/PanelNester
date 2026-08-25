@@ -22,6 +22,8 @@ public sealed record PartRow
 
     public string? Group { get; init; }
 
+    public bool IsManual { get; init; }
+
     public string? SheetNumber { get; init; }
 
     public int? RowNumber { get; init; }
@@ -54,6 +56,7 @@ public sealed record PartRow
                Quantity == other.Quantity &&
                string.Equals(MaterialName, other.MaterialName, StringComparison.Ordinal) &&
                string.Equals(Group, other.Group, StringComparison.Ordinal) &&
+               IsManual == other.IsManual &&
                SheetNumber == other.SheetNumber &&
                RowNumber == other.RowNumber &&
                ColumnNumber == other.ColumnNumber &&
@@ -74,6 +77,7 @@ public sealed record PartRow
         hash.Add(Quantity);
         hash.Add(MaterialName, StringComparer.Ordinal);
         hash.Add(Group, StringComparer.Ordinal);
+        hash.Add(IsManual);
         hash.Add(SheetNumber);
         hash.Add(RowNumber);
         hash.Add(ColumnNumber);

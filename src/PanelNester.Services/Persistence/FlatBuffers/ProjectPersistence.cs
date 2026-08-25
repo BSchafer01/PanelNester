@@ -963,7 +963,16 @@ public struct PartRow : IFlatbufferObject
         }
     }
 
-    public static void StartPartRow(FlatBufferBuilder builder) => builder.StartTable(15);
+    public bool IsManual
+    {
+        get
+        {
+            var o = __p.__offset(34);
+            return o != 0 && 0 != __p.bb.Get(o + __p.bb_pos);
+        }
+    }
+
+    public static void StartPartRow(FlatBufferBuilder builder) => builder.StartTable(16);
     public static void AddRowId(FlatBufferBuilder builder, StringOffset rowIdOffset) => builder.AddOffset(0, rowIdOffset.Value, 0);
     public static void AddImportedId(FlatBufferBuilder builder, StringOffset importedIdOffset) => builder.AddOffset(1, importedIdOffset.Value, 0);
     public static void AddLengthText(FlatBufferBuilder builder, StringOffset lengthTextOffset) => builder.AddOffset(2, lengthTextOffset.Value, 0);
@@ -979,6 +988,7 @@ public struct PartRow : IFlatbufferObject
     public static void AddSheetNumber(FlatBufferBuilder builder, StringOffset sheetNumberOffset) => builder.AddOffset(12, sheetNumberOffset.Value, 0);
     public static void AddRowNumber(FlatBufferBuilder builder, int rowNumber) => builder.AddInt(13, rowNumber, 0);
     public static void AddColumnNumber(FlatBufferBuilder builder, int columnNumber) => builder.AddInt(14, columnNumber, 0);
+    public static void AddIsManual(FlatBufferBuilder builder, bool isManual) => builder.AddBool(15, isManual, false);
 
     public static VectorOffset CreateValidationMessagesVector(FlatBufferBuilder builder, StringOffset[] data)
     {

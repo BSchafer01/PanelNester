@@ -10,6 +10,7 @@ import {
   type ImportMaterialResolution,
   type Material,
   type MaterialDraft,
+  type OptimizationGroup,
   type ImportResponse,
   type PartRow,
   type PartRowUpdate,
@@ -43,7 +44,7 @@ const sortOptions: ThemedSelectOption[] = [
   { value: 'row', label: 'Row order' },
   { value: 'part', label: 'Part ID' },
   { value: 'material', label: 'Material' },
-  { value: 'group', label: 'Group' },
+  { value: 'group', label: 'Part Group' },
   { value: 'status', label: 'Status' },
   { value: 'quantity', label: 'Quantity' },
   { value: 'length', label: 'Length' },
@@ -82,6 +83,13 @@ interface ImportPageProps {
   onUpdatePartRow: (part: PartRowUpdate) => Promise<void>;
   onDeletePartRow: (rowId: string) => Promise<void>;
   onRunNesting: () => Promise<void>;
+  optimizationGroups: OptimizationGroup[];
+  activeOptimizationGroupId?: string;
+  onActivateOptimizationGroup: (optimizationGroupId: string) => void;
+  onMovePartToOptimizationGroup: (
+    partRowId: string,
+    targetOptimizationGroupId: string,
+  ) => Promise<void>;
 }
 
 function getStatusRank(status: ValidationStatus): number {
@@ -133,6 +141,7 @@ function createDraft(
       quantity: getRowValue(part, 'quantity'),
       materialName: part.materialName,
       group: part.group ?? '',
+      isManual: part.isManual,
       sheetNumber: part.sheetNumber ?? '',
       rowNumber: part.rowNumber?.toString() ?? '',
       columnNumber: part.columnNumber?.toString() ?? '',
@@ -146,6 +155,7 @@ function createDraft(
     quantity: '1',
     materialName: fallbackMaterialName,
     group: '',
+    isManual: true,
     sheetNumber: '',
     rowNumber: '',
     columnNumber: '',
@@ -259,7 +269,7 @@ function getFieldLabel(field: ImportFieldName): string {
     case 'Material':
       return 'Material';
     case 'Group':
-      return 'Group';
+      return 'Part Group';
     default:
       return field;
   }
@@ -563,6 +573,10 @@ export function ImportPage({
   onUpdatePartRow,
   onDeletePartRow,
   onRunNesting,
+  optimizationGroups,
+  activeOptimizationGroupId,
+  onActivateOptimizationGroup,
+  onMovePartToOptimizationGroup,
 }: ImportPageProps) {
   const [editingRowId, setEditingRowId] = useState<string>();
   const [editingDraft, setEditingDraft] = useState<PartRowUpdate>();
@@ -582,6 +596,23 @@ export function ImportPage({
   const showRowActions = !hasPendingImportReview && (canEditRows || canDeleteRows);
   const hasParts = activeImportResponse.parts.length > 0;
   const busy = importBusy || partMutationBusy;
+  const optimizationGroupOptions = useMemo<ThemedSelectOption[]>(
+    () =>
+      optimizationGroups.map((group) => ({
+        value: group.optimizationGroupId,
+        label: group.name,
+      })),
+    [optimizationGroups],
+  );
+  const optimizationGroupByPartRowId = useMemo(() => {
+    const ownership = new Map<string, string>();
+    for (const group of optimizationGroups) {
+      for (const part of group.parts) {
+        ownership.set(part.rowId, group.optimizationGroupId);
+      }
+    }
+    return ownership;
+  }, [optimizationGroups]);
   const { distinctMaterials, counts } = useMemo(() => {
     const materialNames = new Set<string>();
     let valid = 0;
@@ -1053,7 +1084,7 @@ export function ImportPage({
               </div>
 
               <p className="section-note">
-                Map each required field to one source column from the file header. Group
+                Map each required field to one source column from the file header. Part Group
                 is optional and can stay blank to keep imported rows ungrouped.
               </p>
 
@@ -1432,7 +1463,7 @@ export function ImportPage({
                 <input
                   disabled={busy}
                   onChange={(event) => setSearchQuery(event.target.value)}
-                  placeholder="Filter parts by ID, material, or group..."
+                  placeholder="Filter parts by ID, material, or Part Group..."
                   type="search"
                   value={searchQuery}
                 />
@@ -1637,7 +1668,21 @@ export function ImportPage({
                 />
               </label>
               <label className="field field--wide">
-                <span>Group (optional)</span>
+                <span>Optimization Group</span>
+                <ThemedSelect
+                  ariaLabel="Active Optimization Group for new manual parts"
+                  disabled={busy || optimizationGroups.length === 0}
+                  onChange={onActivateOptimizationGroup}
+                  options={optimizationGroupOptions}
+                  value={
+                    activeOptimizationGroupId ??
+                    optimizationGroups[0]?.optimizationGroupId ??
+                    ''
+                  }
+                />
+              </label>
+              <label className="field field--wide">
+                <span>Part Group (optional)</span>
                 <input
                   onChange={(event) =>
                     setAddDraft((current) => ({
@@ -1724,7 +1769,8 @@ export function ImportPage({
                     <th>Width</th>
                     <th>Qty</th>
                     <th>Material spec</th>
-                    <th>Group</th>
+                    <th>Part Group</th>
+                    <th>Optimization Group</th>
                     <th>Sheet</th>
                     <th>Cell</th>
                     <th>Status</th>
@@ -1859,6 +1905,37 @@ export function ImportPage({
                             />
                           ) : (
                             getDisplayGroup(part)
+                          )}
+                        </td>
+                        <td>
+                          {part.isManual ? (
+                            <ThemedSelect
+                              ariaLabel={`Optimization Group for ${part.importedId || part.rowId}`}
+                              disabled={
+                                busy ||
+                                hasPendingImportReview ||
+                                optimizationGroups.length < 2
+                              }
+                              onChange={(optimizationGroupId) =>
+                                void onMovePartToOptimizationGroup(
+                                  part.rowId,
+                                  optimizationGroupId,
+                                )
+                              }
+                              options={optimizationGroupOptions}
+                              value={
+                                optimizationGroupByPartRowId.get(part.rowId) ??
+                                activeOptimizationGroupId ??
+                                optimizationGroups[0]?.optimizationGroupId ??
+                                ''
+                              }
+                            />
+                          ) : (
+                            optimizationGroups.find(
+                              (group) =>
+                                group.optimizationGroupId ===
+                                optimizationGroupByPartRowId.get(part.rowId),
+                            )?.name ?? 'Unassigned'
                           )}
                         </td>
                         <td>

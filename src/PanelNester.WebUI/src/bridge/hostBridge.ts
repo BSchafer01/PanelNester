@@ -55,6 +55,8 @@ import {
   type UpdatePartRowRequest,
   type UpdateMaterialRequest,
   type UpdateProjectMetadataRequest,
+  type UpdateOptimizationGroupsRequest,
+  type UpdateOptimizationGroupsResponse,
   type UpdateDesktopAppSettingsRequest,
   type UpdateDesktopAppSettingsResponse,
   type UpdateReportSettingsRequest,
@@ -430,6 +432,15 @@ class HostBridgeClient {
       bridgeMessageTypes.exportPdfReport,
       request,
       15000,
+    );
+  }
+
+  updateOptimizationGroups(
+    request: UpdateOptimizationGroupsRequest,
+  ): Promise<UpdateOptimizationGroupsResponse> {
+    return this.invoke<UpdateOptimizationGroupsResponse>(
+      bridgeMessageTypes.updateOptimizationGroups,
+      request,
     );
   }
 

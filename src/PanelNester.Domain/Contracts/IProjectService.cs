@@ -23,4 +23,9 @@ public interface IProjectService
         ProjectMetadata metadata,
         ProjectSettings settings,
         CancellationToken cancellationToken = default);
+
+    Task<ProjectOperationResult> UpdateOptimizationGroupsAsync(
+        Project project,
+        OptimizationGroupChange change,
+        CancellationToken cancellationToken = default);
 }

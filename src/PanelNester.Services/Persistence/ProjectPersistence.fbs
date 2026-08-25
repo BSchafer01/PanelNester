@@ -98,6 +98,7 @@ table PartRow {
   sheet_number:string;
   row_number:int;
   column_number:int;
+  is_manual:bool;
 }
 
 table NestResponse {

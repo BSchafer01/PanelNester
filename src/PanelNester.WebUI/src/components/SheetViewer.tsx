@@ -1010,8 +1010,8 @@ export function SheetViewer({
         <span className="token">{placementsBySheet.length} placement(s)</span>
         <span className="token">Plan view locked</span>
         <span className="token">Hover panels for details</span>
-        {activeGroupLabel ? <span className="token">Focus group: {activeGroupLabel}</span> : null}
-        {activeGroupLabel ? <span className="token">Other groups subdued</span> : null}
+        {activeGroupLabel ? <span className="token">Focus Part Group: {activeGroupLabel}</span> : null}
+        {activeGroupLabel ? <span className="token">Other Part Groups subdued</span> : null}
         <span className="token">
           {placementsBySheet.length > 0 ? 'Tiny panels use compact labels or callouts' : 'Sheet outline only'}
         </span>
@@ -1047,7 +1047,7 @@ export function SheetViewer({
             }}
           >
             <strong>{tooltip.placement.partId}</strong>
-            <span>Group: {getDisplayGroup(tooltip.placement.group, tooltip.placement.displayGroup)}</span>
+            <span>Part Group: {getDisplayGroup(tooltip.placement.group, tooltip.placement.displayGroup)}</span>
             <span>
               {tooltip.placement.width}" × {tooltip.placement.height}"
             </span>
@@ -1091,7 +1091,7 @@ export function SheetViewer({
               }}
             >
               <strong>{tooltip.placement.partId}</strong>
-              <span>Group: {getDisplayGroup(tooltip.placement.group, tooltip.placement.displayGroup)}</span>
+              <span>Part Group: {getDisplayGroup(tooltip.placement.group, tooltip.placement.displayGroup)}</span>
               <span>
                 {tooltip.placement.width}" × {tooltip.placement.height}"
               </span>

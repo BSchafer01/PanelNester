@@ -33,6 +33,7 @@ export const bridgeMessageTypes = {
   saveProjectAs: 'save-project-as',
   getProjectMetadata: 'get-project-metadata',
   updateProjectMetadata: 'update-project-metadata',
+  updateOptimizationGroups: 'update-optimization-groups',
   getDesktopAppSettings: 'get-desktop-app-settings',
   updateDesktopAppSettings: 'update-desktop-app-settings',
 } as const;
@@ -119,6 +120,7 @@ export interface PartRow {
   quantity: number;
   materialName: string;
   group?: string | null;
+  isManual: boolean;
   sheetNumber?: string | null;
   rowNumber?: number | null;
   columnNumber?: number | null;
@@ -224,6 +226,7 @@ export interface PartRowUpdate {
   quantity: string;
   materialName: string;
   group?: string | null;
+  isManual?: boolean;
   sheetNumber?: string | null;
   rowNumber?: string | null;
   columnNumber?: string | null;
@@ -360,6 +363,23 @@ export interface OptimizationGroup {
   lastNestingResult?: NestResponse | null;
   lastBatchNestingResult?: BatchNestResponse | null;
   resultStatus: OptimizationResultStatus;
+}
+
+export type OptimizationGroupChangeType =
+  | 'create'
+  | 'rename'
+  | 'reorder'
+  | 'movePart'
+  | 'delete';
+
+export interface OptimizationGroupChange {
+  type: OptimizationGroupChangeType;
+  optimizationGroupId?: string | null;
+  name?: string | null;
+  orderedOptimizationGroupIds?: string[];
+  partRowId?: string | null;
+  targetOptimizationGroupId?: string | null;
+  removeOwnedContent?: boolean;
 }
 
 export interface ProjectStateRecord {
@@ -747,6 +767,18 @@ export interface ReportData {
   hasResults: boolean;
 }
 
+export interface UpdateOptimizationGroupsRequest {
+  project: ProjectRecord;
+  change: OptimizationGroupChange;
+}
+
+export interface UpdateOptimizationGroupsResponse {
+  success: boolean;
+  project: ProjectRecord | null;
+  error?: BridgeError | null;
+  message?: string;
+}
+
 export interface StiffenerTakeoffLengthSummary {
   label: string;
   lengthInches: number;
@@ -909,6 +941,7 @@ export const requestedBridgeCapabilities: BridgeCapability[] = [
   bridgeMessageTypes.saveProjectAs,
   bridgeMessageTypes.getProjectMetadata,
   bridgeMessageTypes.updateProjectMetadata,
+  bridgeMessageTypes.updateOptimizationGroups,
   bridgeMessageTypes.getDesktopAppSettings,
   bridgeMessageTypes.updateDesktopAppSettings,
 ];

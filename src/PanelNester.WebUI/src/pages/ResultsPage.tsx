@@ -1117,7 +1117,7 @@ export function ResultsPage({
                       <th>Pos (x, y)</th>
                       <th>Size</th>
                       <th>Rotation</th>
-                      <th>Group</th>
+                      <th>Part Group</th>
                     </tr>
                   </thead>
                   <tbody>

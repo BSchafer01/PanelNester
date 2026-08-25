@@ -149,6 +149,7 @@ public sealed class PartRowValidator
             Quantity = quantity,
             MaterialName = materialName,
             Group = group,
+            IsManual = update.IsManual,
             SheetNumber = sheetNumber,
             RowNumber = rowNumber,
             ColumnNumber = columnNumber,

@@ -36,6 +36,7 @@ public static class BridgeMessageTypes
     public const string SaveProjectAs = "save-project-as";
     public const string GetProjectMetadata = "get-project-metadata";
     public const string UpdateProjectMetadata = "update-project-metadata";
+    public const string UpdateOptimizationGroups = "update-optimization-groups";
     public const string GetDesktopAppSettings = "get-desktop-app-settings";
     public const string UpdateDesktopAppSettings = "update-desktop-app-settings";
     public const string UpdateReportSettings = "update-report-settings";
@@ -94,6 +95,18 @@ public sealed record BridgeError(string Code, string Message, string? UserMessag
                 "The project could not be saved. Please try again.",
             "project-update-failed" =>
                 "The project details could not be updated.",
+            "optimization-group-name-required" =>
+                "Enter an Optimization Group name.",
+            "optimization-group-name-duplicate" =>
+                "Optimization Group names must be unique within the project.",
+            "optimization-group-not-found" =>
+                "The Optimization Group could not be found.",
+            "optimization-group-not-empty" =>
+                "Reassign or explicitly remove the Optimization Group's owned content first.",
+            "optimization-group-last-group" =>
+                "A project must keep at least one Optimization Group.",
+            "optimization-group-part-not-manual" =>
+                "Imported parts move with their Worksheet. Move only manual parts individually.",
             "report-settings-update-failed" =>
                 "The report settings could not be updated.",
             "desktop-settings-update-failed" =>
@@ -561,6 +574,21 @@ public sealed record UpdateProjectMetadataResponse(
     {
         var failure = BridgeFailure.Create(code, message, userMessage);
         return new(false, null, null, null, failure.Error, failure.ResponseMessage);
+    }
+}
+
+public sealed record UpdateOptimizationGroupsRequest(Project Project, OptimizationGroupChange Change);
+
+public sealed record UpdateOptimizationGroupsResponse(
+    bool Success,
+    Project? Project,
+    BridgeError? Error,
+    string? Message)
+{
+    public static UpdateOptimizationGroupsResponse Failure(string code, string message, string? userMessage = null)
+    {
+        var failure = BridgeFailure.Create(code, message, userMessage);
+        return new(false, null, failure.Error, failure.ResponseMessage);
     }
 }
 

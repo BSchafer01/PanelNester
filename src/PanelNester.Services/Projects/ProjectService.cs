@@ -109,6 +109,255 @@ public sealed class ProjectService : IProjectService
         return Task.FromResult(Success(updatedProject));
     }
 
+    public Task<ProjectOperationResult> UpdateOptimizationGroupsAsync(
+        Project project,
+        OptimizationGroupChange change,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        ArgumentNullException.ThrowIfNull(change);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var normalizedProject = NormalizeProject(project);
+        var groups = normalizedProject.State.OptimizationGroups.ToList();
+
+        ProjectOperationResult result = change.Type switch
+        {
+            OptimizationGroupChangeType.Create => CreateOptimizationGroup(normalizedProject, groups, change.Name),
+            OptimizationGroupChangeType.Rename => RenameOptimizationGroup(
+                normalizedProject,
+                groups,
+                change.OptimizationGroupId,
+                change.Name),
+            OptimizationGroupChangeType.Reorder => ReorderOptimizationGroups(
+                normalizedProject,
+                groups,
+                change.OrderedOptimizationGroupIds),
+            OptimizationGroupChangeType.MovePart => MovePartToOptimizationGroup(
+                normalizedProject,
+                groups,
+                change.PartRowId,
+                change.TargetOptimizationGroupId),
+            OptimizationGroupChangeType.Delete => DeleteOptimizationGroup(
+                normalizedProject,
+                groups,
+                change.OptimizationGroupId,
+                change.RemoveOwnedContent),
+            _ => Failure("optimization-group-change-invalid", "Choose a valid Optimization Group change.")
+        };
+
+        return Task.FromResult(result);
+    }
+
+    private ProjectOperationResult CreateOptimizationGroup(
+        Project project,
+        List<OptimizationGroup> groups,
+        string? requestedName)
+    {
+        var nameValidation = ValidateOptimizationGroupName(groups, requestedName);
+        if (nameValidation.Error is not null)
+        {
+            return nameValidation.Error;
+        }
+
+        var generatedId = NormalizeOptional(_idGenerator()) ?? Guid.NewGuid().ToString("N");
+        var uniqueId = generatedId;
+        for (var suffix = 2; groups.Any(group => group.OptimizationGroupId == uniqueId); suffix++)
+        {
+            uniqueId = $"{generatedId}-{suffix}";
+        }
+
+        groups.Add(new OptimizationGroup
+        {
+            OptimizationGroupId = uniqueId,
+            Name = nameValidation.Name!,
+            Order = groups.Count
+        });
+
+        return Success(ApplyOptimizationGroups(project, groups));
+    }
+
+    private static ProjectOperationResult RenameOptimizationGroup(
+        Project project,
+        List<OptimizationGroup> groups,
+        string? optimizationGroupId,
+        string? requestedName)
+    {
+        var index = FindOptimizationGroupIndex(groups, optimizationGroupId);
+        if (index < 0)
+        {
+            return Failure("optimization-group-not-found", "The Optimization Group was not found.");
+        }
+
+        var nameValidation = ValidateOptimizationGroupName(groups, requestedName, optimizationGroupId);
+        if (nameValidation.Error is not null)
+        {
+            return nameValidation.Error;
+        }
+
+        groups[index] = groups[index] with { Name = nameValidation.Name! };
+        return Success(ApplyOptimizationGroups(project, groups));
+    }
+
+    private static ProjectOperationResult ReorderOptimizationGroups(
+        Project project,
+        List<OptimizationGroup> groups,
+        IReadOnlyList<string>? orderedIds)
+    {
+        orderedIds ??= Array.Empty<string>();
+        var currentIds = groups.Select(group => group.OptimizationGroupId).ToHashSet(StringComparer.Ordinal);
+        if (orderedIds.Count != groups.Count ||
+            orderedIds.Distinct(StringComparer.Ordinal).Count() != groups.Count ||
+            orderedIds.Any(id => !currentIds.Contains(id)))
+        {
+            return Failure(
+                "optimization-group-order-invalid",
+                "The Optimization Group order must contain every group exactly once.");
+        }
+
+        var groupsById = groups.ToDictionary(group => group.OptimizationGroupId, StringComparer.Ordinal);
+        var reordered = orderedIds.Select(id => groupsById[id]).ToList();
+        return Success(ApplyOptimizationGroups(project, reordered));
+    }
+
+    private static ProjectOperationResult MovePartToOptimizationGroup(
+        Project project,
+        List<OptimizationGroup> groups,
+        string? partRowId,
+        string? targetOptimizationGroupId)
+    {
+        if (string.IsNullOrWhiteSpace(partRowId))
+        {
+            return Failure("optimization-group-part-required", "Choose a manual part to move.");
+        }
+
+        var targetIndex = FindOptimizationGroupIndex(groups, targetOptimizationGroupId);
+        if (targetIndex < 0)
+        {
+            return Failure("optimization-group-not-found", "The target Optimization Group was not found.");
+        }
+
+        var sourceIndex = groups.FindIndex(group => group.Parts.Any(part => part.RowId == partRowId));
+        if (sourceIndex < 0)
+        {
+            return Failure("optimization-group-part-not-found", "The manual part was not found in an Optimization Group.");
+        }
+
+        if (sourceIndex == targetIndex)
+        {
+            return Success(project);
+        }
+
+        var part = groups[sourceIndex].Parts.First(item => item.RowId == partRowId);
+        if (!part.IsManual)
+        {
+            return Failure(
+                "optimization-group-part-not-manual",
+                "Imported parts move with their Worksheet. Only manual parts can be moved individually.");
+        }
+
+        groups[sourceIndex] = InvalidateOptimizationGroup(groups[sourceIndex] with
+        {
+            Parts = groups[sourceIndex].Parts.Where(item => item.RowId != partRowId).ToArray()
+        });
+        groups[targetIndex] = InvalidateOptimizationGroup(groups[targetIndex] with
+        {
+            Parts = [.. groups[targetIndex].Parts, part]
+        });
+
+        return Success(ApplyOptimizationGroups(project, groups));
+    }
+
+    private static ProjectOperationResult DeleteOptimizationGroup(
+        Project project,
+        List<OptimizationGroup> groups,
+        string? optimizationGroupId,
+        bool removeOwnedContent)
+    {
+        var index = FindOptimizationGroupIndex(groups, optimizationGroupId);
+        if (index < 0)
+        {
+            return Failure("optimization-group-not-found", "The Optimization Group was not found.");
+        }
+
+        if (groups.Count == 1)
+        {
+            return Failure("optimization-group-last-group", "A project must keep at least one Optimization Group.");
+        }
+
+        var group = groups[index];
+        var hasOwnedContent =
+            group.Parts.Count > 0 ||
+            group.LastNestingResult is not null ||
+            group.LastBatchNestingResult is not null;
+        if (hasOwnedContent && !removeOwnedContent)
+        {
+            return Failure(
+                "optimization-group-not-empty",
+                $"Optimization Group '{group.Name}' owns content. Reassign it or explicitly remove it first.");
+        }
+
+        groups.RemoveAt(index);
+        return Success(ApplyOptimizationGroups(project, groups));
+    }
+
+    private static OptimizationGroup InvalidateOptimizationGroup(OptimizationGroup group) =>
+        group with
+        {
+            ResultStatus = group.LastNestingResult is null && group.LastBatchNestingResult is null
+                ? OptimizationResultStatus.None
+                : OptimizationResultStatus.Stale
+        };
+
+    private static Project ApplyOptimizationGroups(Project project, IReadOnlyList<OptimizationGroup> groups)
+    {
+        var orderedGroups = groups
+            .Select((group, order) => group with { Order = order })
+            .ToArray();
+        var compatibilityGroup = orderedGroups.Length == 1 ? orderedGroups[0] : null;
+
+        return project with
+        {
+            State = project.State with
+            {
+                OptimizationGroups = orderedGroups,
+                Parts = orderedGroups.SelectMany(group => group.Parts).ToArray(),
+                LastNestingResult = compatibilityGroup?.LastNestingResult,
+                LastBatchNestingResult = compatibilityGroup?.LastBatchNestingResult
+            }
+        };
+    }
+
+    private static int FindOptimizationGroupIndex(
+        IReadOnlyList<OptimizationGroup> groups,
+        string? optimizationGroupId) =>
+        string.IsNullOrWhiteSpace(optimizationGroupId)
+            ? -1
+            : groups.ToList().FindIndex(group => group.OptimizationGroupId == optimizationGroupId);
+
+    private static (string? Name, ProjectOperationResult? Error) ValidateOptimizationGroupName(
+        IEnumerable<OptimizationGroup> groups,
+        string? requestedName,
+        string? excludedOptimizationGroupId = null)
+    {
+        var name = requestedName?.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return (null, Failure("optimization-group-name-required", "Enter an Optimization Group name."));
+        }
+
+        if (groups.Any(group =>
+                group.OptimizationGroupId != excludedOptimizationGroupId &&
+                string.Equals(group.Name, name, StringComparison.OrdinalIgnoreCase)))
+        {
+            return (null, Failure(
+                "optimization-group-name-duplicate",
+                $"An Optimization Group named '{name}' already exists in this project."));
+        }
+
+        return (name, null);
+    }
+
     private async Task<IReadOnlyList<Material>> CaptureMaterialSnapshotsAsync(
         Project project,
         CancellationToken cancellationToken)

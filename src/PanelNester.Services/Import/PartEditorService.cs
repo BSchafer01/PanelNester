@@ -35,7 +35,7 @@ public sealed partial class PartEditorService : IPartEditorService
         cancellationToken.ThrowIfCancellationRequested();
 
         var updates = parts.Select(ToUpdate).ToList();
-        updates.Add(update with { RowId = CreateNextRowId(parts) });
+        updates.Add(update with { RowId = CreateNextRowId(parts), IsManual = true });
 
         return await ValidateAsync(updates, cancellationToken).ConfigureAwait(false);
     }
@@ -155,6 +155,7 @@ public sealed partial class PartEditorService : IPartEditorService
             Quantity = row.QuantityText ?? row.Quantity.ToString(CultureInfo.InvariantCulture),
             MaterialName = row.MaterialName,
             Group = row.Group,
+            IsManual = row.IsManual,
             SheetNumber = row.SheetNumber,
             RowNumber = row.RowNumber?.ToString(CultureInfo.InvariantCulture),
             ColumnNumber = row.ColumnNumber?.ToString(CultureInfo.InvariantCulture)

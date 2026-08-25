@@ -484,7 +484,7 @@ export function ExtrusionsPage({
 
         <div className="module-panel extrusions-groups">
           <div className="results-sidebar__section-head">
-            <span>Groups</span>
+            <span>Part Groups</span>
             <small>{panels.length} panels</small>
           </div>
           <div className="segmented-control" aria-label="Extrusion grouping">
@@ -499,7 +499,7 @@ export function ExtrusionsPage({
               }
               type="button"
             >
-              Group
+              Part Group
             </button>
             <button
               className={normalizedLayout.groupingMode === 'sheet-number' ? 'is-active' : undefined}
@@ -549,7 +549,7 @@ export function ExtrusionsPage({
             <section className="module-panel extrusions-toolbar">
               <div>
                 <p className="eyebrow">{activeGroup.groupName}</p>
-                <h3>Group Layout</h3>
+                <h3>Part Group Layout</h3>
               </div>
               <label className="field">
                 <span>Rows</span>
@@ -776,7 +776,7 @@ export function ExtrusionsPage({
                 )}
 
                 <div className="results-sidebar__section-head">
-                  <span>Group Summary</span>
+                  <span>Part Group Summary</span>
                   <small>{activeSummary.length} rows</small>
                 </div>
                 <div className="extrusions-summary-list">
