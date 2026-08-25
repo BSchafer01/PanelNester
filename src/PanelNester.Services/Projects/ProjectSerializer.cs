@@ -14,10 +14,12 @@ public sealed class ProjectSerializer
 
         if (ProjectFileHeader.TryRead(filePath, out var header))
         {
-            return await _flatBufferSerializer.LoadAsync(filePath, header, cancellationToken).ConfigureAwait(false);
+            var project = await _flatBufferSerializer.LoadAsync(filePath, header, cancellationToken).ConfigureAwait(false);
+            return ProjectSchemaMigrator.MigrateToCurrent(project);
         }
 
-        return await _jsonSerializer.LoadAsync(filePath, cancellationToken).ConfigureAwait(false);
+        var legacyProject = await _jsonSerializer.LoadAsync(filePath, cancellationToken).ConfigureAwait(false);
+        return ProjectSchemaMigrator.MigrateToCurrent(legacyProject);
     }
 
     public async Task SaveAsync(Project project, string filePath, CancellationToken cancellationToken = default)

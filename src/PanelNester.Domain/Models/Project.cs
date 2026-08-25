@@ -2,7 +2,7 @@ namespace PanelNester.Domain.Models;
 
 public sealed record Project
 {
-    public const int CurrentVersion = 1;
+    public const int CurrentVersion = 2;
 
     public int Version { get; init; } = CurrentVersion;
 

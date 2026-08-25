@@ -37,6 +37,7 @@ import {
   type MaterialLibraryOperationResponse,
   type NestResponse,
   type OpenFileDialogResponse,
+  type OptimizationGroup,
   type OpenProjectRequest,
   type PartRowUpdate,
   type ProjectFileMetadata,
@@ -117,6 +118,7 @@ interface AppState {
   projectId: string;
   projectFilePath?: string;
   projectMaterialSnapshots: ProjectMaterialSnapshot[];
+  optimizationGroups: OptimizationGroup[];
   projectMessage: string;
   projectBusy: boolean;
   projectDirty: boolean;
@@ -196,6 +198,7 @@ type AppAction =
       metadata: ProjectMetadata;
       settings: ProjectSettings;
       projectId?: string;
+      optimizationGroups?: OptimizationGroup[];
       message: string;
     }
   | {
@@ -495,6 +498,7 @@ const initialState: AppState = {
   projectId: '',
   projectFilePath: undefined,
   projectMaterialSnapshots: [],
+  optimizationGroups: [],
   projectMessage: defaultProjectMessage,
   projectBusy: false,
   projectDirty: false,
@@ -1042,6 +1046,32 @@ function collectProjectMaterialSnapshots(
   return sortByName(Array.from(snapshots.values()));
 }
 
+function buildOptimizationGroups(
+  state: AppState,
+  lastNestingResult: NestResponse | null,
+  lastBatchNestingResult: BatchNestResponse | null,
+): OptimizationGroup[] {
+  const existingGroup = state.optimizationGroups[0];
+  const sourceName = state.selectedFilePath
+    ? fileNameFromPath(state.selectedFilePath).replace(/\.[^.]+$/, '')
+    : 'Parts';
+
+  return [
+    {
+      optimizationGroupId:
+        existingGroup?.optimizationGroupId || state.projectId || 'optimization-group-1',
+      name: existingGroup?.name || sourceName || 'Parts',
+      order: existingGroup?.order ?? 0,
+      parts: state.importResponse.parts,
+      lastNestingResult,
+      lastBatchNestingResult,
+      resultStatus:
+        existingGroup?.resultStatus ??
+        (lastNestingResult || lastBatchNestingResult ? 'valid' : 'none'),
+    },
+  ];
+}
+
 function buildProjectRecord(
   state: AppState,
   settingsOverride?: ProjectSettings,
@@ -1063,24 +1093,31 @@ function buildProjectRecord(
           materialSnapshots,
           state.selectedMaterialId,
         );
+  const lastNestingResult =
+    state.nestResponse.sheets.length > 0 ||
+    state.nestResponse.unplacedItems.length > 0
+      ? state.nestResponse
+      : null;
+  const lastBatchNestingResult =
+    batchNestResponse.materialResults.length > 0 ? batchNestResponse : null;
 
   return {
-    version: 1,
+    version: 2,
     projectId: state.projectId,
     metadata: mapMetadataToBridge(state.projectMetadata),
     settings: projectSettings,
     materialSnapshots,
     state: {
       sourceFilePath: state.selectedFilePath ?? null,
+      optimizationGroups: buildOptimizationGroups(
+        state,
+        lastNestingResult,
+        lastBatchNestingResult,
+      ),
       parts: state.importResponse.parts,
       selectedMaterialId: state.selectedMaterialId ?? null,
-      lastNestingResult:
-        state.nestResponse.sheets.length > 0 ||
-        state.nestResponse.unplacedItems.length > 0
-          ? state.nestResponse
-          : null,
-      lastBatchNestingResult:
-        batchNestResponse.materialResults.length > 0 ? batchNestResponse : null,
+      lastNestingResult,
+      lastBatchNestingResult,
       extrusionLayout: state.extrusionLayout,
     },
   };
@@ -1099,13 +1136,14 @@ function buildStiffenerProjectRecord(
   );
 
   return {
-    version: 1,
+    version: 2,
     projectId: state.projectId,
     metadata: mapMetadataToBridge(state.projectMetadata),
     settings: settingsOverride ?? state.projectSettings,
     materialSnapshots,
     state: {
       sourceFilePath: state.selectedFilePath ?? null,
+      optimizationGroups: buildOptimizationGroups(state, null, null),
       parts: state.importResponse.parts,
       selectedMaterialId: state.selectedMaterialId ?? null,
       lastNestingResult: null,
@@ -1404,6 +1442,7 @@ function reducer(state: AppState, action: AppAction): AppState {
         projectId: action.projectId ?? '',
         projectFilePath: undefined,
         projectMaterialSnapshots: [],
+        optimizationGroups: action.optimizationGroups ?? [],
         projectMessage: action.message,
         projectBusy: false,
         projectDirty: false,
@@ -1435,6 +1474,7 @@ function reducer(state: AppState, action: AppAction): AppState {
         projectId: action.project.projectId,
         projectFilePath: action.filePath,
         projectMaterialSnapshots: sortByName(action.project.materialSnapshots),
+        optimizationGroups: action.project.state.optimizationGroups,
         lastSavedAt: new Date().toISOString(),
         selectedFilePath: action.project.state.sourceFilePath ?? undefined,
         importMappingSession: undefined,
@@ -1490,6 +1530,7 @@ function reducer(state: AppState, action: AppAction): AppState {
           action.project.state.extrusionLayout ?? state.extrusionLayout,
         extrusionReport: null,
         projectMaterialSnapshots: sortByName(action.project.materialSnapshots),
+        optimizationGroups: action.project.state.optimizationGroups,
         projectMessage: action.message,
         lastSavedAt: new Date().toISOString(),
       };
@@ -2414,6 +2455,7 @@ export default function App() {
                 )
               : settings,
             projectId: response.project?.projectId,
+            optimizationGroups: response.project?.state.optimizationGroups,
             message:
               response.message ??
               'Started a new project. Add metadata, import rows, and save when ready.',

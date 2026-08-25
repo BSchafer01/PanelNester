@@ -38,7 +38,8 @@ internal sealed class ProjectFlatBufferSerializer
             var document = Fb.ProjectDocument.GetRootAsProjectDocument(buffer);
             var project = ReadProject(document);
 
-            if (project.Version != Project.CurrentVersion)
+            if (project.Version < ProjectSchemaMigrator.FirstSupportedVersion ||
+                project.Version > Project.CurrentVersion)
             {
                 throw new ProjectPersistenceException(
                     "project-unsupported-version",
@@ -263,6 +264,7 @@ internal sealed class ProjectFlatBufferSerializer
         var sourceFilePath = CreateString(builder, state.SourceFilePath);
         var selectedMaterialId = CreateString(builder, state.SelectedMaterialId);
         var extrusionLayoutJson = CreateString(builder, SerializeExtrusionLayout(state.ExtrusionLayout));
+        var optimizationGroupsJson = CreateString(builder, SerializeOptimizationGroups(state.OptimizationGroups));
         var parts = WriteParts(builder, state.Parts);
         var lastNestingResult = state.LastNestingResult is null ? default : WriteNestResponse(builder, state.LastNestingResult);
         var lastBatchNestingResult = state.LastBatchNestingResult is null ? default : WriteBatchNestResponse(builder, state.LastBatchNestingResult);
@@ -272,6 +274,7 @@ internal sealed class ProjectFlatBufferSerializer
         Fb.ProjectState.AddParts(builder, parts);
         Fb.ProjectState.AddSelectedMaterialId(builder, selectedMaterialId);
         Fb.ProjectState.AddExtrusionLayoutJson(builder, extrusionLayoutJson);
+        Fb.ProjectState.AddOptimizationGroupsJson(builder, optimizationGroupsJson);
         if (state.LastNestingResult is not null)
         {
             Fb.ProjectState.AddLastNestingResult(builder, lastNestingResult);
@@ -691,10 +694,12 @@ internal sealed class ProjectFlatBufferSerializer
         var lastNest = value.LastNestingResult is { } lastNesting ? ReadNestResponse(lastNesting) : null;
         var lastBatch = value.LastBatchNestingResult is { } lastBatchResult ? ReadBatchNestResponse(lastBatchResult) : null;
         var extrusionLayout = DeserializeExtrusionLayout(value.ExtrusionLayoutJson);
+        var optimizationGroups = DeserializeOptimizationGroups(value.OptimizationGroupsJson);
 
         return new ProjectState
         {
             SourceFilePath = value.SourceFilePath,
+            OptimizationGroups = optimizationGroups,
             Parts = parts,
             SelectedMaterialId = value.SelectedMaterialId,
             LastNestingResult = lastNest,
@@ -705,6 +710,28 @@ internal sealed class ProjectFlatBufferSerializer
 
     private static string SerializeExtrusionLayout(ExtrusionLayoutState? layout) =>
         JsonSerializer.Serialize(layout ?? new ExtrusionLayoutState(), ProjectJsonSerializer.CreateOptions());
+
+    private static string SerializeOptimizationGroups(IReadOnlyList<OptimizationGroup>? groups) =>
+        JsonSerializer.Serialize(groups ?? Array.Empty<OptimizationGroup>(), ProjectJsonSerializer.CreateOptions());
+
+    private static IReadOnlyList<OptimizationGroup> DeserializeOptimizationGroups(string? groupsJson)
+    {
+        if (string.IsNullOrWhiteSpace(groupsJson))
+        {
+            return Array.Empty<OptimizationGroup>();
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<IReadOnlyList<OptimizationGroup>>(
+                groupsJson,
+                ProjectJsonSerializer.CreateOptions()) ?? Array.Empty<OptimizationGroup>();
+        }
+        catch (JsonException)
+        {
+            return Array.Empty<OptimizationGroup>();
+        }
+    }
 
     private static ExtrusionLayoutState DeserializeExtrusionLayout(string? layoutJson)
     {

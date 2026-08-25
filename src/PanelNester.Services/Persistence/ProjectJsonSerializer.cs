@@ -36,7 +36,8 @@ internal sealed class ProjectJsonSerializer
                 throw new ProjectPersistenceException("project-corrupt", "Project file did not contain a valid project.");
             }
 
-            if (project.Version != Project.CurrentVersion)
+            if (project.Version < ProjectSchemaMigrator.FirstSupportedVersion ||
+                project.Version > Project.CurrentVersion)
             {
                 throw new ProjectPersistenceException(
                     "project-unsupported-version",

@@ -62,7 +62,7 @@ internal static class Phase03ProjectPersistenceSpec
             return "project-corrupt";
         }
 
-        return version == Project.CurrentVersion
+        return version >= 1 && version <= Project.CurrentVersion
             ? null
             : "project-unsupported-version";
     }

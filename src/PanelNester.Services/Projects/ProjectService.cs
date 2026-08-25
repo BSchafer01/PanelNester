@@ -197,16 +197,20 @@ public sealed class ProjectService : IProjectService
         snapshots[snapshotKey] = material;
     }
 
-    private Project NormalizeProject(Project project) =>
-        project with
+    private Project NormalizeProject(Project project)
+    {
+        var projectId = NormalizeId(project.ProjectId);
+
+        return project with
         {
             Version = Project.CurrentVersion,
-            ProjectId = NormalizeId(project.ProjectId),
+            ProjectId = projectId,
             Metadata = NormalizeMetadata(project.Metadata),
             Settings = NormalizeSettings(project.Settings, project.Metadata),
             MaterialSnapshots = NormalizeSnapshots(project.MaterialSnapshots),
-            State = NormalizeState(project.State)
+            State = NormalizeState(project.State, projectId)
         };
+    }
 
     private static IReadOnlyList<Material> NormalizeSnapshots(IReadOnlyList<Material>? snapshots) =>
         (snapshots ?? Array.Empty<Material>())
@@ -295,17 +299,78 @@ public sealed class ProjectService : IProjectService
         };
     }
 
-    private static ProjectState NormalizeState(ProjectState? state)
+    private static ProjectState NormalizeState(ProjectState? state, string projectId)
     {
         state ??= new ProjectState();
+
+        var parts = (state.Parts ?? Array.Empty<PartRow>()).ToArray();
+        var existingGroup = state.OptimizationGroups?.FirstOrDefault();
+        var group = new OptimizationGroup
+        {
+            OptimizationGroupId = NormalizeOptional(existingGroup?.OptimizationGroupId) ?? projectId,
+            Name = NormalizeOptional(existingGroup?.Name) ?? CreateDefaultOptimizationGroupName(state.SourceFilePath),
+            Order = existingGroup?.Order ?? 0,
+            Parts = parts,
+            LastNestingResult = state.LastNestingResult,
+            LastBatchNestingResult = state.LastBatchNestingResult,
+            ResultStatus = state.LastNestingResult is null && state.LastBatchNestingResult is null
+                ? OptimizationResultStatuses.None
+                : AreSavedResultsConsistent(state.LastNestingResult, state.LastBatchNestingResult)
+                    ? OptimizationResultStatuses.Valid
+                    : OptimizationResultStatuses.Stale
+        };
 
         return state with
         {
             SourceFilePath = NormalizeOptional(state.SourceFilePath),
             SelectedMaterialId = NormalizeOptional(state.SelectedMaterialId),
-            Parts = (state.Parts ?? Array.Empty<PartRow>()).ToArray(),
+            OptimizationGroups = [group],
+            Parts = parts,
             ExtrusionLayout = NormalizeExtrusionLayout(state.ExtrusionLayout)
         };
+    }
+
+    private static bool AreSavedResultsConsistent(
+        NestResponse? nestingResult,
+        BatchNestResponse? batchResult)
+    {
+        if (nestingResult is not null && !IsNestResultConsistent(nestingResult))
+        {
+            return false;
+        }
+
+        if (batchResult is null)
+        {
+            return true;
+        }
+
+        if (batchResult.LegacyResult is not null && !IsNestResultConsistent(batchResult.LegacyResult))
+        {
+            return false;
+        }
+
+        return batchResult.MaterialResults.All(result => IsNestResultConsistent(result.Result));
+    }
+
+    private static bool IsNestResultConsistent(NestResponse result)
+    {
+        var sheetIds = result.Sheets
+            .Select(sheet => sheet.SheetId)
+            .Where(sheetId => !string.IsNullOrWhiteSpace(sheetId))
+            .ToHashSet(StringComparer.Ordinal);
+
+        return result.Placements.All(placement => sheetIds.Contains(placement.SheetId));
+    }
+
+    private static string CreateDefaultOptimizationGroupName(string? sourceFilePath)
+    {
+        if (string.IsNullOrWhiteSpace(sourceFilePath))
+        {
+            return "Parts";
+        }
+
+        var fileName = Path.GetFileNameWithoutExtension(sourceFilePath.Trim());
+        return string.IsNullOrWhiteSpace(fileName) ? "Parts" : fileName;
     }
 
     private static ExtrusionLayoutState NormalizeExtrusionLayout(ExtrusionLayoutState? layout)

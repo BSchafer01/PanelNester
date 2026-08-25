@@ -771,7 +771,16 @@ public struct ProjectState : IFlatbufferObject
         }
     }
 
-    public static void StartProjectState(FlatBufferBuilder builder) => builder.StartTable(6);
+    public string? OptimizationGroupsJson
+    {
+        get
+        {
+            var o = __p.__offset(16);
+            return o != 0 ? __p.__string(o + __p.bb_pos) : null;
+        }
+    }
+
+    public static void StartProjectState(FlatBufferBuilder builder) => builder.StartTable(7);
     public static void AddSourceFilePath(FlatBufferBuilder builder, StringOffset sourceFilePathOffset) => builder.AddOffset(0, sourceFilePathOffset.Value, 0);
     public static void AddParts(FlatBufferBuilder builder, VectorOffset partsOffset) => builder.AddOffset(1, partsOffset.Value, 0);
     public static void AddSelectedMaterialId(FlatBufferBuilder builder, StringOffset selectedMaterialIdOffset) => builder.AddOffset(2, selectedMaterialIdOffset.Value, 0);
@@ -780,6 +789,8 @@ public struct ProjectState : IFlatbufferObject
         builder.AddOffset(4, lastBatchNestingResultOffset.Value, 0);
     public static void AddExtrusionLayoutJson(FlatBufferBuilder builder, StringOffset extrusionLayoutJsonOffset) =>
         builder.AddOffset(5, extrusionLayoutJsonOffset.Value, 0);
+    public static void AddOptimizationGroupsJson(FlatBufferBuilder builder, StringOffset optimizationGroupsJsonOffset) =>
+        builder.AddOffset(6, optimizationGroupsJsonOffset.Value, 0);
 
     public static VectorOffset CreatePartsVector(FlatBufferBuilder builder, Offset<PartRow>[] data)
     {

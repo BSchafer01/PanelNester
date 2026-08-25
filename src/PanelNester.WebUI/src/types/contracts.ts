@@ -350,8 +350,21 @@ export interface ProjectSettings {
 
 export interface ProjectMaterialSnapshot extends Material {}
 
+export type OptimizationResultStatus = 'none' | 'valid' | 'stale';
+
+export interface OptimizationGroup {
+  optimizationGroupId: string;
+  name: string;
+  order: number;
+  parts: PartRow[];
+  lastNestingResult?: NestResponse | null;
+  lastBatchNestingResult?: BatchNestResponse | null;
+  resultStatus: OptimizationResultStatus;
+}
+
 export interface ProjectStateRecord {
   sourceFilePath?: string | null;
+  optimizationGroups: OptimizationGroup[];
   parts: PartRow[];
   selectedMaterialId?: string | null;
   lastNestingResult?: NestResponse | null;

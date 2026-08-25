@@ -2,16 +2,245 @@ using System.Buffers.Binary;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Google.FlatBuffers;
 using PanelNester.Domain.Models;
 using PanelNester.Domain.Contracts;
 using PanelNester.Services.Projects;
 using PanelNester.Services.Tests.Specifications;
+using Fb = PanelNester.Services.Persistence.FlatBuffers;
 
 namespace PanelNester.Services.Tests.Projects;
 
 public sealed class ProjectPersistenceSpecs : IDisposable
 {
     private readonly string _workspacePath = Path.Combine(Path.GetTempPath(), $"PanelNester.ProjectPersistenceSpecs.{Guid.NewGuid():N}");
+
+    [Fact]
+    public async Task New_projects_start_with_one_stable_ordered_optimization_group()
+    {
+        var service = new ProjectService(
+            new FakeMaterialService(),
+            idGenerator: () => "generated-id");
+
+        var result = await service.NewAsync();
+
+        Assert.True(result.Success);
+        var group = Assert.Single(result.Project!.State.OptimizationGroups);
+        Assert.Equal("generated-id", group.OptimizationGroupId);
+        Assert.Equal("Parts", group.Name);
+        Assert.Equal(0, group.Order);
+        Assert.Empty(group.Parts);
+        Assert.Equal(OptimizationResultStatuses.None, group.ResultStatus);
+    }
+
+    [Fact]
+    public async Task Current_csv_projects_migrate_into_a_source_named_group_without_reinterpreting_part_groups()
+    {
+        var filePath = Path.Combine(_workspacePath, "migrated-csv.pnest");
+        var service = new ProjectService(
+            new FakeMaterialService(),
+            idGenerator: () => "unused-id");
+        var project = Phase03ProjectPersistenceSpec.CreateSampleProject() with
+        {
+            State = Phase03ProjectPersistenceSpec.CreateSampleProject().State with
+            {
+                SourceFilePath = @"C:\imports\Lobby Panels.csv",
+                Parts =
+                [
+                    new PartRow
+                    {
+                        RowId = "row-001",
+                        ImportedId = "A-100",
+                        MaterialName = "Baltic Birch",
+                        Group = "Casework"
+                    }
+                ]
+            }
+        };
+
+        var result = await service.SaveAsync(project, filePath);
+
+        Assert.True(result.Success);
+        var group = Assert.Single(result.Project!.State.OptimizationGroups);
+        Assert.Equal("project-phase3-001", group.OptimizationGroupId);
+        Assert.Equal("Lobby Panels", group.Name);
+        Assert.Equal("Casework", Assert.Single(group.Parts).Group);
+    }
+
+    [Fact]
+    public async Task Migration_marks_saved_results_stale_when_a_placement_references_an_unknown_sheet()
+    {
+        var filePath = Path.Combine(_workspacePath, "stale-result.pnest");
+        var service = new ProjectService(new FakeMaterialService());
+        var sample = Phase03ProjectPersistenceSpec.CreateSampleProject();
+        var invalidResult = sample.State.LastNestingResult! with
+        {
+            Placements =
+            [
+                sample.State.LastNestingResult!.Placements[0] with
+                {
+                    SheetId = "missing-sheet"
+                }
+            ]
+        };
+        var project = sample with
+        {
+            State = sample.State with
+            {
+                LastNestingResult = invalidResult,
+                LastBatchNestingResult = null
+            }
+        };
+
+        var result = await service.SaveAsync(project, filePath);
+
+        Assert.True(result.Success);
+        var group = Assert.Single(result.Project!.State.OptimizationGroups);
+        Assert.Equal(OptimizationResultStatuses.Stale, group.ResultStatus);
+        Assert.Equal("missing-sheet", Assert.Single(group.LastNestingResult!.Placements).SheetId);
+    }
+
+    [Fact]
+    public async Task Current_schema_round_trips_optimization_group_identity_order_parts_and_valid_results()
+    {
+        var filePath = Path.Combine(_workspacePath, "optimization-group-roundtrip.pnest");
+        var serializer = new ProjectSerializer();
+        var sample = Phase03ProjectPersistenceSpec.CreateSampleProject();
+        var group = new OptimizationGroup
+        {
+            OptimizationGroupId = "group-stable-001",
+            Name = "Lobby Panels",
+            Order = 0,
+            Parts = [sample.State.Parts[0] with { Group = "Casework" }],
+            LastNestingResult = sample.State.LastNestingResult,
+            LastBatchNestingResult = sample.State.LastBatchNestingResult,
+            ResultStatus = OptimizationResultStatuses.Valid
+        };
+        var project = sample with
+        {
+            State = sample.State with { OptimizationGroups = [group] }
+        };
+
+        await serializer.SaveAsync(project, filePath);
+        var restored = await serializer.LoadAsync(filePath);
+
+        Assert.Equal(Project.CurrentVersion, restored.Version);
+        var restoredGroup = Assert.Single(restored.State.OptimizationGroups);
+        Assert.Equal("group-stable-001", restoredGroup.OptimizationGroupId);
+        Assert.Equal("Lobby Panels", restoredGroup.Name);
+        Assert.Equal(0, restoredGroup.Order);
+        Assert.Equal("Casework", Assert.Single(restoredGroup.Parts).Group);
+        Assert.Equal(OptimizationResultStatuses.Valid, restoredGroup.ResultStatus);
+        Assert.Equivalent(group.LastBatchNestingResult, restoredGroup.LastBatchNestingResult, strict: true);
+    }
+
+    [Fact]
+    public async Task Legacy_json_projects_migrate_to_the_current_schema_with_valid_results_intact()
+    {
+        var filePath = Path.Combine(_workspacePath, "legacy-v1-json.pnest");
+        var serializer = new ProjectSerializer();
+        var sample = Phase03ProjectPersistenceSpec.CreateSampleProject();
+        var legacy = sample with
+        {
+            Version = 1,
+            State = sample.State with
+            {
+                SourceFilePath = @"C:\imports\North Lobby.xlsx",
+                Parts = [sample.State.Parts[0] with { Group = "Casework" }],
+                OptimizationGroups = []
+            }
+        };
+
+        EnsureWorkspace();
+        await File.WriteAllTextAsync(
+            filePath,
+            JsonSerializer.Serialize(legacy, CreateLegacyJsonOptions()));
+
+        var restored = await serializer.LoadAsync(filePath);
+
+        Assert.Equal(2, Project.CurrentVersion);
+        Assert.Equal(Project.CurrentVersion, restored.Version);
+        var group = Assert.Single(restored.State.OptimizationGroups);
+        Assert.Equal("project-phase3-001", group.OptimizationGroupId);
+        Assert.Equal("North Lobby", group.Name);
+        Assert.Equal("Casework", Assert.Single(group.Parts).Group);
+        Assert.Equal(OptimizationResultStatuses.Valid, group.ResultStatus);
+        Assert.Equivalent(legacy.State.LastBatchNestingResult, group.LastBatchNestingResult, strict: true);
+    }
+
+    [Fact]
+    public async Task Legacy_flatbuffer_projects_migrate_with_parts_and_part_groups_intact()
+    {
+        var filePath = Path.Combine(_workspacePath, "legacy-v1-flatbuffer.pnest");
+        EnsureWorkspace();
+        WriteLegacyFlatBufferProject(filePath);
+
+        var restored = await new ProjectSerializer().LoadAsync(filePath);
+
+        Assert.Equal(Project.CurrentVersion, restored.Version);
+        var group = Assert.Single(restored.State.OptimizationGroups);
+        Assert.Equal("legacy-project-001", group.OptimizationGroupId);
+        Assert.Equal("Legacy Workbook", group.Name);
+        var part = Assert.Single(group.Parts);
+        Assert.Equal("P-001", part.ImportedId);
+        Assert.Equal("Casework", part.Group);
+        Assert.Equal(OptimizationResultStatuses.None, group.ResultStatus);
+    }
+
+    [Fact]
+    public async Task Future_project_schema_versions_are_rejected_at_the_persistence_boundary()
+    {
+        var filePath = Path.Combine(_workspacePath, "future-schema.pnest");
+        var futureProject = Phase03ProjectPersistenceSpec.CreateSampleProject() with
+        {
+            Version = Project.CurrentVersion + 1
+        };
+        EnsureWorkspace();
+        await File.WriteAllTextAsync(
+            filePath,
+            JsonSerializer.Serialize(futureProject, CreateLegacyJsonOptions()));
+
+        var result = await new ProjectService(new FakeMaterialService()).LoadAsync(filePath);
+
+        Assert.False(result.Success);
+        Assert.Equal("project-unsupported-version", Assert.Single(result.Errors).Code);
+    }
+
+    [Fact]
+    public async Task Project_service_preserves_an_edited_optimization_group_name_and_identity()
+    {
+        var filePath = Path.Combine(_workspacePath, "edited-group-name.pnest");
+        var service = new ProjectService(new FakeMaterialService());
+        var sample = Phase03ProjectPersistenceSpec.CreateSampleProject();
+        var project = sample with
+        {
+            State = sample.State with
+            {
+                OptimizationGroups =
+                [
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "stable-group-id",
+                        Name = "Edited Group Name",
+                        Order = 0,
+                        Parts = sample.State.Parts,
+                        LastNestingResult = sample.State.LastNestingResult,
+                        LastBatchNestingResult = sample.State.LastBatchNestingResult,
+                        ResultStatus = OptimizationResultStatuses.Valid
+                    }
+                ]
+            }
+        };
+
+        var saved = await service.SaveAsync(project, filePath);
+        var loaded = await service.LoadAsync(filePath);
+
+        Assert.True(saved.Success);
+        Assert.True(loaded.Success);
+        var group = Assert.Single(loaded.Project!.State.OptimizationGroups);
+        Assert.Equal("stable-group-id", group.OptimizationGroupId);
+        Assert.Equal("Edited Group Name", group.Name);
+    }
 
     [Fact]
     public void Saving_a_project_snapshots_selected_materials_and_exact_import_matches_only()
@@ -57,7 +286,8 @@ public sealed class ProjectPersistenceSpecs : IDisposable
     [Theory]
     [InlineData(false, true, 1, "project-not-found")]
     [InlineData(true, false, 1, "project-corrupt")]
-    [InlineData(true, true, 2, "project-unsupported-version")]
+    [InlineData(true, true, 3, "project-unsupported-version")]
+    [InlineData(true, true, 2, null)]
     [InlineData(true, true, 1, null)]
     public void Project_open_failures_stay_specific_and_user_actionable(
         bool fileExists,
@@ -75,7 +305,7 @@ public sealed class ProjectPersistenceSpecs : IDisposable
     {
         var filePath = Path.Combine(_workspacePath, "serializer-roundtrip.pnest");
         var serializer = new ProjectSerializer();
-        var project = Phase03ProjectPersistenceSpec.CreateSampleProject();
+        var project = CreateCurrentSampleProject();
 
         await serializer.SaveAsync(project, filePath);
         AssertFlatBufferHeader(filePath, FlatBufferVersion);
@@ -90,7 +320,7 @@ public sealed class ProjectPersistenceSpecs : IDisposable
         var legacyPath = Path.Combine(_workspacePath, "legacy-json.pnest");
         var resavePath = Path.Combine(_workspacePath, "legacy-resave.pnest");
         var serializer = new ProjectSerializer();
-        var project = Phase03ProjectPersistenceSpec.CreateSampleProject();
+        var project = CreateCurrentSampleProject();
         var json = JsonSerializer.Serialize(project, CreateLegacyJsonOptions());
 
         EnsureWorkspace();
@@ -475,6 +705,30 @@ public sealed class ProjectPersistenceSpecs : IDisposable
             CostPerSheet = 142.75m
         };
 
+    private static Project CreateCurrentSampleProject()
+    {
+        var project = Phase03ProjectPersistenceSpec.CreateSampleProject();
+        return project with
+        {
+            State = project.State with
+            {
+                OptimizationGroups =
+                [
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = project.ProjectId,
+                        Name = "north-lobby",
+                        Order = 0,
+                        Parts = project.State.Parts,
+                        LastNestingResult = project.State.LastNestingResult,
+                        LastBatchNestingResult = project.State.LastBatchNestingResult,
+                        ResultStatus = OptimizationResultStatuses.Valid
+                    }
+                ]
+            }
+        };
+    }
+
     private static JsonSerializerOptions CreateLegacyJsonOptions() =>
         new(JsonSerializerDefaults.Web)
         {
@@ -514,6 +768,47 @@ public sealed class ProjectPersistenceSpecs : IDisposable
         {
             stream.Write(payload);
         }
+    }
+
+    private static void WriteLegacyFlatBufferProject(string filePath)
+    {
+        var builder = new FlatBufferBuilder(1024);
+        var rowId = builder.CreateString("row-001");
+        var importedId = builder.CreateString("P-001");
+        var materialName = builder.CreateString("Baltic Birch");
+        var partGroup = builder.CreateString("Casework");
+
+        Fb.PartRow.StartPartRow(builder);
+        Fb.PartRow.AddRowId(builder, rowId);
+        Fb.PartRow.AddImportedId(builder, importedId);
+        Fb.PartRow.AddLength(builder, 24);
+        Fb.PartRow.AddWidth(builder, 12);
+        Fb.PartRow.AddQuantity(builder, 1);
+        Fb.PartRow.AddMaterialName(builder, materialName);
+        Fb.PartRow.AddGroup(builder, partGroup);
+        var part = Fb.PartRow.EndPartRow(builder);
+        var parts = Fb.ProjectState.CreatePartsVector(builder, [part]);
+        var sourcePath = builder.CreateString(@"C:\imports\Legacy Workbook.xlsx");
+
+        Fb.ProjectState.StartProjectState(builder);
+        Fb.ProjectState.AddSourceFilePath(builder, sourcePath);
+        Fb.ProjectState.AddParts(builder, parts);
+        var state = Fb.ProjectState.EndProjectState(builder);
+        var projectId = builder.CreateString("legacy-project-001");
+
+        Fb.ProjectDocument.StartProjectDocument(builder);
+        Fb.ProjectDocument.AddVersion(builder, 1);
+        Fb.ProjectDocument.AddProjectId(builder, projectId);
+        Fb.ProjectDocument.AddState(builder, state);
+        var document = Fb.ProjectDocument.EndProjectDocument(builder);
+        Fb.ProjectDocument.FinishProjectDocumentBuffer(builder, document);
+
+        using var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
+        Span<byte> header = stackalloc byte[FlatBufferHeaderLength];
+        "PNST"u8.CopyTo(header);
+        BinaryPrimitives.WriteUInt16LittleEndian(header.Slice(4, 2), FlatBufferVersion);
+        stream.Write(header);
+        stream.Write(builder.SizedByteArray());
     }
 
     private const ushort FlatBufferVersion = 2;

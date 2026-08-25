@@ -79,6 +79,7 @@ table ProjectState {
   last_nesting_result:NestResponse;
   last_batch_nesting_result:BatchNestResponse;
   extrusion_layout_json:string;
+  optimization_groups_json:string;
 }
 
 table PartRow {
