@@ -72,9 +72,31 @@ public sealed class QuestPdfExtrusionReportExporter : IExtrusionPdfReportExporte
                 column.Item().Element(card => ComposeMetadata(card, report));
                 column.Item().Element(card => ComposeLengths(card, "Overall Summary", report.OverallLengths));
 
-                foreach (var group in report.Groups)
+                if (report.OptimizationGroups.Count > 0)
                 {
-                    column.Item().Element(card => ComposeLengths(card, $"Group: {group.GroupName}", group.Lengths));
+                    foreach (var optimizationGroup in report.OptimizationGroups.OrderBy(group => group.Order))
+                    {
+                        column.Item().Text($"Optimization Group — {optimizationGroup.Name}")
+                            .FontSize(15).SemiBold().FontColor(Colors.Black);
+                        column.Item().Element(card => ComposeLengths(
+                            card,
+                            "Optimization Group Summary",
+                            optimizationGroup.OverallLengths));
+                        foreach (var partGroup in optimizationGroup.PartGroups)
+                        {
+                            column.Item().Element(card => ComposeLengths(
+                                card,
+                                $"Part Group — {partGroup.GroupName}",
+                                partGroup.Lengths));
+                        }
+                    }
+                }
+                else
+                {
+                    foreach (var group in report.Groups)
+                    {
+                        column.Item().Element(card => ComposeLengths(card, $"Part Group — {group.GroupName}", group.Lengths));
+                    }
                 }
 
                 if (!report.HasTakeoff)

@@ -15,29 +15,34 @@ public sealed class ReportDataService : IReportDataService
         cancellationToken.ThrowIfCancellationRequested();
 
         var project = request.Project;
-        var batchResult = NormalizeBatchResult(request.BatchResult, project);
         var materialsByName = BuildMaterialLookup(project.MaterialSnapshots);
         var materialsById = BuildMaterialIdLookup(project.MaterialSnapshots);
+        var optimizationGroups = BuildOptimizationGroupSections(
+            request.BatchResult,
+            project,
+            materialsByName,
+            materialsById);
+
+        if (optimizationGroups.Count > 0)
+        {
+            var projectMaterials = BuildProjectMaterialSections(optimizationGroups);
+            return Task.FromResult(
+                new ReportData
+                {
+                    Settings = ResolveReportSettings(project),
+                    ProjectMetadata = project.Metadata ?? new ProjectMetadata(),
+                    Materials = projectMaterials,
+                    OptimizationGroups = optimizationGroups,
+                    UnplacedItems = optimizationGroups.SelectMany(group => group.UnplacedItems).ToArray(),
+                    HasResults = optimizationGroups.Any(group => group.Materials.Any(HasRenderableLayouts))
+                });
+        }
+
+        var batchResult = NormalizeBatchResult(request.BatchResult, project);
 
         var materialSections = batchResult.MaterialResults
             .OrderBy(result => result.MaterialName, StringComparer.Ordinal)
-            .Select(result =>
-            {
-                var material = ResolveMaterial(result, materialsByName, materialsById);
-                var sheets = BuildSheetDiagrams(result.Result);
-
-                return new ReportMaterialSection
-                {
-                    MaterialName = result.MaterialName,
-                    MaterialId = material?.MaterialId ?? result.MaterialId,
-                    SheetLength = material?.SheetLength ?? GetSheetLength(result.Result),
-                    SheetWidth = material?.SheetWidth ?? GetSheetWidth(result.Result),
-                    CostPerSheet = material?.CostPerSheet,
-                    Summary = result.Result.Summary ?? new MaterialSummary(),
-                    Sheets = sheets,
-                    UnplacedItems = result.Result.UnplacedItems
-                };
-            })
+            .Select(result => BuildMaterialSection(result, materialsByName, materialsById))
             .ToArray();
 
         var allUnplaced = materialSections
@@ -56,6 +61,125 @@ public sealed class ReportDataService : IReportDataService
                 HasResults = materialSections.Any(HasRenderableLayouts)
             });
     }
+
+    private static IReadOnlyList<ReportOptimizationGroupSection> BuildOptimizationGroupSections(
+        BatchNestResponse? requestedBatch,
+        Project project,
+        IReadOnlyDictionary<string, Material> materialsByName,
+        IReadOnlyDictionary<string, Material> materialsById)
+    {
+        var projectGroups = project.State.OptimizationGroups
+            .OrderBy(group => group.Order)
+            .ThenBy(group => group.OptimizationGroupId, StringComparer.Ordinal)
+            .ToArray();
+        if (projectGroups.Length == 0)
+        {
+            return Array.Empty<ReportOptimizationGroupSection>();
+        }
+
+        var requestedResults = (requestedBatch?.OptimizationGroupResults ?? Array.Empty<OptimizationGroupNestResult>())
+            .GroupBy(result => result.OptimizationGroupId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Last(), StringComparer.Ordinal);
+
+        return projectGroups
+            .Where(group =>
+                requestedResults.ContainsKey(group.OptimizationGroupId) ||
+                group.LastBatchNestingResult is not null ||
+                group.LastNestingResult is not null)
+            .Select(group =>
+            {
+                requestedResults.TryGetValue(group.OptimizationGroupId, out var requestedResult);
+                var persistedResult = group.LastBatchNestingResult?.OptimizationGroupResults.LastOrDefault(result =>
+                    string.Equals(result.OptimizationGroupId, group.OptimizationGroupId, StringComparison.Ordinal));
+                var optimizationResult = requestedResult ?? persistedResult;
+                var materialResults = optimizationResult?.MaterialResults
+                    ?? (projectGroups.Length == 1 && requestedBatch is { MaterialResults.Count: > 0 }
+                        ? requestedBatch.MaterialResults
+                        : null)
+                    ?? group.LastBatchNestingResult?.MaterialResults
+                    ?? (group.LastNestingResult is null
+                        ? Array.Empty<MaterialNestResult>()
+                        : CreateBatchFromSingle(project with
+                        {
+                            State = project.State with { Parts = group.Parts }
+                        }, group.LastNestingResult).MaterialResults);
+                var materials = materialResults
+                    .OrderBy(result => result.MaterialName, StringComparer.Ordinal)
+                    .Select(result => BuildMaterialSection(result, materialsByName, materialsById))
+                    .ToArray();
+                var success = optimizationResult?.Success
+                    ?? group.LastBatchNestingResult?.Success
+                    ?? group.LastNestingResult?.Success
+                    ?? false;
+
+                return new ReportOptimizationGroupSection
+                {
+                    OptimizationGroupId = group.OptimizationGroupId,
+                    Name = group.Name,
+                    Order = group.Order,
+                    Success = success,
+                    FailureMessage = optimizationResult?.FailureMessage,
+                    Materials = materials,
+                    PartGroups = BuildMaterialSummaryGroups(group.Parts, materials),
+                    UnplacedItems = materials.SelectMany(material => material.UnplacedItems).ToArray()
+                };
+            })
+            .ToArray();
+    }
+
+    private static ReportMaterialSection BuildMaterialSection(
+        MaterialNestResult result,
+        IReadOnlyDictionary<string, Material> materialsByName,
+        IReadOnlyDictionary<string, Material> materialsById)
+    {
+        var material = ResolveMaterial(result, materialsByName, materialsById);
+        return new ReportMaterialSection
+        {
+            MaterialName = result.MaterialName,
+            MaterialId = material?.MaterialId ?? result.MaterialId,
+            SheetLength = material?.SheetLength ?? GetSheetLength(result.Result),
+            SheetWidth = material?.SheetWidth ?? GetSheetWidth(result.Result),
+            CostPerSheet = material?.CostPerSheet,
+            Summary = result.Result.Summary ?? new MaterialSummary(),
+            Sheets = BuildSheetDiagrams(result.Result),
+            UnplacedItems = result.Result.UnplacedItems
+        };
+    }
+
+    private static IReadOnlyList<ReportMaterialSection> BuildProjectMaterialSections(
+        IReadOnlyList<ReportOptimizationGroupSection> optimizationGroups) =>
+        optimizationGroups
+            .SelectMany(group => group.Materials)
+            .GroupBy(
+                material => string.IsNullOrWhiteSpace(material.MaterialId)
+                    ? material.MaterialName
+                    : material.MaterialId,
+                StringComparer.Ordinal)
+            .Select(group =>
+            {
+                var sections = group.ToArray();
+                var first = sections[0];
+                var sheets = sections.SelectMany(section => section.Sheets).ToArray();
+                var totalSheets = sections.Sum(section => section.Summary.TotalSheets);
+                var weightedUtilization = totalSheets == 0
+                    ? 0m
+                    : sections.Sum(section =>
+                        section.Summary.OverallUtilization * section.Summary.TotalSheets) / totalSheets;
+                return first with
+                {
+                    Summary = new MaterialSummary
+                    {
+                        TotalSheets = totalSheets,
+                        TotalPlaced = sections.Sum(section => section.Summary.TotalPlaced),
+                        TotalUnplaced = sections.Sum(section => section.Summary.TotalUnplaced),
+                        OverallUtilization = decimal.Round(weightedUtilization, 2, MidpointRounding.AwayFromZero)
+                    },
+                    Sheets = sheets,
+                    UnplacedItems = sections.SelectMany(section => section.UnplacedItems).ToArray()
+                };
+            })
+            .OrderBy(material => material.MaterialName, StringComparer.Ordinal)
+            .ToArray();
 
     private static BatchNestResponse NormalizeBatchResult(BatchNestResponse? batchResult, Project project)
     {

@@ -8,11 +8,14 @@ import type {
   ExtrusionLineItemQuantityBasis,
   ExtrusionPanelInstance,
   ExtrusionSegmentDetail,
+  OptimizationGroup,
   PartRow,
 } from '../types/contracts';
 
 interface ExtrusionsPageProps {
   importedRows: PartRow[];
+  optimizationGroups: OptimizationGroup[];
+  activeOptimizationGroupId?: string;
   layout: ExtrusionLayoutState;
   statusMessage: string;
   busy: boolean;
@@ -29,6 +32,8 @@ type ExtrusionGroupingMode = 'group' | 'sheet-number';
 
 export function ExtrusionsPage({
   importedRows,
+  optimizationGroups,
+  activeOptimizationGroupId,
   layout,
   statusMessage,
   busy,
@@ -39,20 +44,36 @@ export function ExtrusionsPage({
   onExportPdf,
   onExportExcel,
 }: ExtrusionsPageProps) {
-  const panels = useMemo(() => expandPanels(importedRows), [importedRows]);
+  const orderedOptimizationGroups = useMemo(
+    () => [...optimizationGroups].sort((left, right) => left.order - right.order),
+    [optimizationGroups],
+  );
+  const panels = useMemo(
+    () => expandPanels(importedRows, orderedOptimizationGroups),
+    [importedRows, orderedOptimizationGroups],
+  );
   const normalizedLayout = useMemo(
     () => normalizeLayout(layout, panels),
     [layout, panels],
   );
   const hasSheetNumbers = panels.some((panel) => panel.sheetNumber != null);
-  const [activeGroupName, setActiveGroupName] = useState<string>();
+  const [selectedOptimizationGroupId, setSelectedOptimizationGroupId] = useState(
+    activeOptimizationGroupId ?? orderedOptimizationGroups[0]?.optimizationGroupId ?? '',
+  );
+  const visibleGroups = normalizedLayout.groups.filter(
+    (group) =>
+      !selectedOptimizationGroupId ||
+      (group.optimizationGroupId ?? '') === selectedOptimizationGroupId,
+  );
+  const [activeGroupKey, setActiveGroupKey] = useState<string>();
   const activeGroup =
-    normalizedLayout.groups.find((group) => group.groupName === activeGroupName) ??
-    normalizedLayout.groups[0];
+    visibleGroups.find((group) => extrusionGroupKey(group) === activeGroupKey) ??
+    visibleGroups[0];
   const [selectedInstanceIds, setSelectedInstanceIds] = useState<string[]>([]);
   const activePanels = panels.filter(
     (panel) =>
       activeGroup &&
+      panel.optimizationGroupId === (activeGroup.optimizationGroupId ?? '') &&
       getPanelGroupName(panel, normalizedLayout.groupingMode as ExtrusionGroupingMode) ===
         activeGroup.groupName,
   );
@@ -61,23 +82,38 @@ export function ExtrusionsPage({
     [normalizedLayout, panels],
   );
   const activeSummary = summarizeSegments(
-    segments.filter((segment) => segment.groupName === activeGroup?.groupName),
+    segments.filter(
+      (segment) =>
+        segment.optimizationGroupId === (activeGroup?.optimizationGroupId ?? '') &&
+        segment.groupName === activeGroup?.groupName,
+    ),
     normalizedLayout.additionalLineItems,
   );
 
   useEffect(() => {
-    if (!activeGroup && normalizedLayout.groups[0]) {
-      setActiveGroupName(normalizedLayout.groups[0].groupName);
+    if (!activeGroup && visibleGroups[0]) {
+      setActiveGroupKey(extrusionGroupKey(visibleGroups[0]));
       return;
     }
 
     if (
-      activeGroupName &&
-      !normalizedLayout.groups.some((group) => group.groupName === activeGroupName)
+      activeGroupKey &&
+      !visibleGroups.some((group) => extrusionGroupKey(group) === activeGroupKey)
     ) {
-      setActiveGroupName(normalizedLayout.groups[0]?.groupName);
+      setActiveGroupKey(visibleGroups[0] ? extrusionGroupKey(visibleGroups[0]) : undefined);
     }
-  }, [activeGroup, activeGroupName, normalizedLayout.groups]);
+  }, [activeGroup, activeGroupKey, visibleGroups]);
+
+  useEffect(() => {
+    if (
+      activeOptimizationGroupId &&
+      orderedOptimizationGroups.some(
+        (group) => group.optimizationGroupId === activeOptimizationGroupId,
+      )
+    ) {
+      setSelectedOptimizationGroupId(activeOptimizationGroupId);
+    }
+  }, [activeOptimizationGroupId, orderedOptimizationGroups]);
 
   useEffect(() => {
     if (JSON.stringify(layout) !== JSON.stringify(normalizedLayout)) {
@@ -93,7 +129,7 @@ export function ExtrusionsPage({
     updateLayout({
       ...normalizedLayout,
       groups: normalizedLayout.groups.map((group) =>
-        group.groupName === nextGroup.groupName ? nextGroup : group,
+        extrusionGroupKey(group) === extrusionGroupKey(nextGroup) ? nextGroup : group,
       ),
     });
   };
@@ -483,6 +519,24 @@ export function ExtrusionsPage({
         </div>
 
         <div className="module-panel extrusions-groups">
+          {orderedOptimizationGroups.length > 0 ? (
+            <label className="field">
+              <span>Optimization Group</span>
+              <select
+                value={selectedOptimizationGroupId}
+                onChange={(event) => {
+                  setSelectedOptimizationGroupId(event.target.value);
+                  setActiveGroupKey(undefined);
+                }}
+              >
+                {orderedOptimizationGroups.map((group) => (
+                  <option key={group.optimizationGroupId} value={group.optimizationGroupId}>
+                    {group.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <div className="results-sidebar__section-head">
             <span>Part Groups</span>
             <small>{panels.length} panels</small>
@@ -516,21 +570,22 @@ export function ExtrusionsPage({
               Sheet
             </button>
           </div>
-          {normalizedLayout.groups.map((group) => {
+          {visibleGroups.map((group) => {
             const count = panels.filter(
               (panel) =>
+                panel.optimizationGroupId === (group.optimizationGroupId ?? '') &&
                 getPanelGroupName(panel, normalizedLayout.groupingMode as ExtrusionGroupingMode) ===
                 group.groupName,
             ).length;
             return (
               <button
                 className={
-                  group.groupName === activeGroup?.groupName
+                  extrusionGroupKey(group) === (activeGroup ? extrusionGroupKey(activeGroup) : '')
                     ? 'extrusions-group-button extrusions-group-button--active'
                     : 'extrusions-group-button'
                 }
-                key={group.groupName}
-                onClick={() => setActiveGroupName(group.groupName)}
+                key={extrusionGroupKey(group)}
+                onClick={() => setActiveGroupKey(extrusionGroupKey(group))}
                 type="button"
               >
                 <strong>{group.groupName}</strong>
@@ -1076,7 +1131,22 @@ function ExtrusionViewer({
   );
 }
 
-function expandPanels(parts: PartRow[]): ExtrusionPanelInstance[] {
+function expandPanels(
+  parts: PartRow[],
+  optimizationGroups: OptimizationGroup[],
+): ExtrusionPanelInstance[] {
+  const ownerByRowId = new Map(
+    optimizationGroups.flatMap((group) =>
+      group.parts.map((part) => [
+        part.rowId,
+        {
+          id: group.optimizationGroupId,
+          name: group.name,
+          order: group.order,
+        },
+      ] as const),
+    ),
+  );
   return parts
     .filter((part) => part.validationStatus !== 'error' && part.quantity > 0 && part.length > 0 && part.width > 0)
     .flatMap((part, partIndex) => {
@@ -1084,7 +1154,11 @@ function expandPanels(parts: PartRow[]): ExtrusionPanelInstance[] {
       const sheetGroupName = part.sheetNumber?.trim() ? `Sheet ${part.sheetNumber.trim()}` : 'Ungrouped';
       const sourceRowId = part.rowId || part.importedId || `panel-${partIndex + 1}`;
       const labelBase = part.importedId || part.rowId || `Panel ${partIndex + 1}`;
+      const owner = ownerByRowId.get(part.rowId);
       return Array.from({ length: part.quantity }, (_, index) => ({
+        optimizationGroupId: owner?.id ?? '',
+        optimizationGroupName: owner?.name ?? '',
+        optimizationGroupOrder: owner?.order ?? 0,
         instanceId: `${sourceRowId}#${index + 1}`,
         sourceRowId,
         importedId: part.importedId,
@@ -1108,8 +1182,20 @@ function normalizeLayout(
   panels: ExtrusionPanelInstance[],
 ): ExtrusionLayoutState {
   const groupingMode = normalizeGroupingMode(layout.groupingMode, panels);
-  const existing = new Map(layout.groups.map((group) => [group.groupName, group]));
-  const groups = Array.from(new Set(panels.map((panel) => getPanelGroupName(panel, groupingMode)))).sort();
+  const existing = new Map(layout.groups.map((group) => [extrusionGroupKey(group), group]));
+  const groups = Array.from(
+    new Map(
+      panels.map((panel) => {
+        const groupName = getPanelGroupName(panel, groupingMode);
+        const key = `${panel.optimizationGroupId}\u001f${groupName}`;
+        return [key, { key, groupName, panel }] as const;
+      }),
+    ).values(),
+  ).sort(
+    (left, right) =>
+      left.panel.optimizationGroupOrder - right.panel.optimizationGroupOrder ||
+      left.groupName.localeCompare(right.groupName),
+  );
   return {
     groupingMode,
     panelToPanelExtrusionName: layout.panelToPanelExtrusionName || 'Panel Joint',
@@ -1117,20 +1203,31 @@ function normalizeLayout(
     panelToPanelStickLengthFeet: normalizeStickLength(layout.panelToPanelStickLengthFeet),
     edgeStickLengthFeet: normalizeStickLength(layout.edgeStickLengthFeet),
     additionalLineItems: normalizeAdditionalLineItems(layout.additionalLineItems),
-    groups: groups.map((groupName) =>
-      normalizeGroup(groupName, panels, groupingMode, existing.get(groupName)),
+    groups: groups.map(({ key, groupName, panel }) =>
+      normalizeGroup(
+        panel.optimizationGroupId,
+        panel.optimizationGroupName,
+        groupName,
+        panels,
+        groupingMode,
+        existing.get(key) ?? existing.get(`\u001f${groupName}`),
+      ),
     ),
   };
 }
 
 function normalizeGroup(
+  optimizationGroupId: string,
+  optimizationGroupName: string,
   groupName: string,
   panels: ExtrusionPanelInstance[],
   groupingMode: ExtrusionGroupingMode,
   existing?: ExtrusionGroupLayout,
 ): ExtrusionGroupLayout {
   const groupPanels = panels.filter(
-    (panel) => getPanelGroupName(panel, groupingMode) === groupName,
+    (panel) =>
+      panel.optimizationGroupId === optimizationGroupId &&
+      getPanelGroupName(panel, groupingMode) === groupName,
   );
   const columns = Math.max(existing?.columns ?? Math.ceil(Math.sqrt(groupPanels.length || 1)), 1);
   let rows = Math.max(existing?.rows ?? Math.ceil((groupPanels.length || 1) / columns), 1);
@@ -1169,6 +1266,8 @@ function normalizeGroup(
   });
 
   return {
+    optimizationGroupId,
+    optimizationGroupName,
     groupName,
     rows: Math.max(rows, ...cells.map((cell) => cell.row + 1), 1),
     columns: Math.max(columns, ...cells.map((cell) => cell.column + 1), 1),
@@ -1178,6 +1277,10 @@ function normalizeGroup(
     ),
     jointAssignments: existing?.jointAssignments ?? [],
   };
+}
+
+function extrusionGroupKey(group: ExtrusionGroupLayout): string {
+  return `${group.optimizationGroupId ?? ''}\u001f${group.groupName}`;
 }
 
 function getBuildingRowNumber(group: ExtrusionGroupLayout, cell: ExtrusionGridCell): number {
@@ -1567,6 +1670,8 @@ function buildSegments(
         (item) => item.instanceId === edge.instanceId && item.edge === edge.edge,
       );
       return [{
+        optimizationGroupId: group.optimizationGroupId ?? '',
+        optimizationGroupName: group.optimizationGroupName ?? '',
         groupName: group.groupName,
         category: 'Edge',
         extrusionName: assignment?.extrusionName || layout.edgeExtrusionName,
@@ -1588,6 +1693,8 @@ function buildSegments(
       }
 
       return [{
+        optimizationGroupId: group.optimizationGroupId ?? '',
+        optimizationGroupName: group.optimizationGroupName ?? '',
         groupName: group.groupName,
         category: 'Panel-to-panel',
         extrusionName: assignment?.extrusionName || layout.panelToPanelExtrusionName,

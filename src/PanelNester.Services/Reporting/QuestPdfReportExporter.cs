@@ -120,70 +120,34 @@ public sealed class QuestPdfReportExporter : IPdfReportExporter
                     column.Item().Text("No nesting results are available for this report.");
                 }
 
-                foreach (var material in report.Materials)
+                if (report.OptimizationGroups.Count > 0)
                 {
-                    column.Item().PaddingBottom(14).Column(section =>
+                    foreach (var optimizationGroup in report.OptimizationGroups.OrderBy(group => group.Order))
                     {
-                        section.Spacing(8);
-                        section.Item().Text(material.MaterialName).FontSize(14).SemiBold();
-                        section.Item().Text(
-                            $"Sheets: {material.Summary.TotalSheets}  •  Placed: {material.Summary.TotalPlaced}  •  Unplaced: {material.Summary.TotalUnplaced}  •  Utilization: {FormatPercent(material.Summary.OverallUtilization)}");
-                        section.Item().Text(
-                            $"Sheet Size: {FormatDimension(material.SheetLength)} × {FormatDimension(material.SheetWidth)}");
-
-                        if (material.Sheets.Count > 0)
+                        column.Item().PaddingTop(4).Text(optimizationGroup.Name).FontSize(18).SemiBold();
+                        if (!optimizationGroup.Success && !string.IsNullOrWhiteSpace(optimizationGroup.FailureMessage))
                         {
-                            section.Item().Text("Sheet Layouts").SemiBold();
-
-                            foreach (var sheet in material.Sheets.OrderBy(item => item.SheetNumber))
-                            {
-                                section.Item().PaddingBottom(8).Row(row =>
-                                {
-                                    row.Spacing(16);
-                                    row.RelativeItem(3).Element(container => SheetDiagram(container, sheet, placementColors));
-                                    row.RelativeItem(2).PaddingLeft(12).Column(details =>
-                                    {
-                                        details.Spacing(4);
-                                        details.Item().Text($"Sheet #{sheet.SheetNumber}").SemiBold();
-                                        details.Item().Text($"Utilization: {FormatPercent(sheet.UtilizationPercent)}");
-                                        details.Item().Text(
-                                            $"Sheet Size: {FormatDimension(sheet.SheetLength)} × {FormatDimension(sheet.SheetWidth)}");
-                                        details.Item().Text("Placements:").SemiBold();
-                                        details.Item().Text(BuildPlacementSummary(sheet)).FontSize(9);
-                                    });
-                                });
-                            }
-                        }
-                        else
-                        {
-                            section.Item().Text("No sheet layouts were produced for this material.");
+                            column.Item().Text($"Optimization failed: {optimizationGroup.FailureMessage}").FontColor(Colors.Red.Darken2);
                         }
 
-                        if (material.UnplacedItems.Count > 0)
+                        if (optimizationGroup.PartGroups.Count > 0)
                         {
-                            section.Item().Text("Unplaced Items").SemiBold();
-                            section.Item().Table(table =>
-                            {
-                                table.ColumnsDefinition(columns =>
-                                {
-                                    columns.RelativeColumn(2);
-                                    columns.RelativeColumn(5);
-                                });
-
-                                table.Header(header =>
-                                {
-                                    header.Cell().Element(TableHeaderCell).Text("Part");
-                                    header.Cell().Element(TableHeaderCell).Text("Reason");
-                                });
-
-                                foreach (var item in material.UnplacedItems)
-                                {
-                                    table.Cell().Element(TableBodyCell).Text(Display(item.PartId, "(unnamed part)"));
-                                    table.Cell().Element(TableBodyCell).Text(item.ReasonDescription);
-                                }
-                            });
+                            column.Item().Element(section =>
+                                ComposeMaterialSummaryByLocationTable(section, optimizationGroup.PartGroups));
                         }
-                    });
+
+                        foreach (var material in optimizationGroup.Materials)
+                        {
+                            column.Item().Element(section => ComposeMaterialSection(section, material, placementColors));
+                        }
+                    }
+                }
+                else
+                {
+                    foreach (var material in report.Materials)
+                    {
+                        column.Item().Element(section => ComposeMaterialSection(section, material, placementColors));
+                    }
                 }
             });
 
@@ -195,6 +159,72 @@ public sealed class QuestPdfReportExporter : IPdfReportExporter
                 text.Span(" of ");
                 text.TotalPages();
             });
+        });
+    }
+
+    private static void ComposeMaterialSection(
+        IContainer container,
+        ReportMaterialSection material,
+        IReadOnlyDictionary<string, string> placementColors)
+    {
+        container.PaddingBottom(14).Column(section =>
+        {
+            section.Spacing(8);
+            section.Item().Text(material.MaterialName).FontSize(14).SemiBold();
+            section.Item().Text(
+                $"Sheets: {material.Summary.TotalSheets}  •  Placed: {material.Summary.TotalPlaced}  •  Unplaced: {material.Summary.TotalUnplaced}  •  Utilization: {FormatPercent(material.Summary.OverallUtilization)}");
+            section.Item().Text(
+                $"Sheet Size: {FormatDimension(material.SheetLength)} × {FormatDimension(material.SheetWidth)}");
+
+            if (material.Sheets.Count > 0)
+            {
+                section.Item().Text("Sheet Layouts").SemiBold();
+                foreach (var sheet in material.Sheets.OrderBy(item => item.SheetNumber))
+                {
+                    section.Item().PaddingBottom(8).Row(row =>
+                    {
+                        row.Spacing(16);
+                        row.RelativeItem(3).Element(sheetContainer => SheetDiagram(sheetContainer, sheet, placementColors));
+                        row.RelativeItem(2).PaddingLeft(12).Column(details =>
+                        {
+                            details.Spacing(4);
+                            details.Item().Text($"Sheet #{sheet.SheetNumber}").SemiBold();
+                            details.Item().Text($"Utilization: {FormatPercent(sheet.UtilizationPercent)}");
+                            details.Item().Text(
+                                $"Sheet Size: {FormatDimension(sheet.SheetLength)} × {FormatDimension(sheet.SheetWidth)}");
+                            details.Item().Text("Placements:").SemiBold();
+                            details.Item().Text(BuildPlacementSummary(sheet)).FontSize(9);
+                        });
+                    });
+                }
+            }
+            else
+            {
+                section.Item().Text("No sheet layouts were produced for this material.");
+            }
+
+            if (material.UnplacedItems.Count > 0)
+            {
+                section.Item().Text("Unplaced Items").SemiBold();
+                section.Item().Table(table =>
+                {
+                    table.ColumnsDefinition(columns =>
+                    {
+                        columns.RelativeColumn(2);
+                        columns.RelativeColumn(5);
+                    });
+                    table.Header(header =>
+                    {
+                        header.Cell().Element(TableHeaderCell).Text("Part");
+                        header.Cell().Element(TableHeaderCell).Text("Reason");
+                    });
+                    foreach (var item in material.UnplacedItems)
+                    {
+                        table.Cell().Element(TableBodyCell).Text(Display(item.PartId, "(unnamed part)"));
+                        table.Cell().Element(TableBodyCell).Text(item.ReasonDescription);
+                    }
+                });
+            }
         });
     }
 

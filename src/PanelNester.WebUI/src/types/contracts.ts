@@ -523,6 +523,8 @@ export interface ExtrusionAdditionalLineItem {
 }
 
 export interface ExtrusionGroupLayout {
+  optimizationGroupId?: string;
+  optimizationGroupName?: string;
   groupName: string;
   rows: number;
   columns: number;
@@ -532,6 +534,9 @@ export interface ExtrusionGroupLayout {
 }
 
 export interface ExtrusionPanelInstance {
+  optimizationGroupId: string;
+  optimizationGroupName: string;
+  optimizationGroupOrder: number;
   instanceId: string;
   sourceRowId: string;
   importedId: string;
@@ -581,11 +586,15 @@ export interface ExtrusionLengthSummary {
 }
 
 export interface ExtrusionGroupSummary {
+  optimizationGroupId: string;
+  optimizationGroupName: string;
   groupName: string;
   lengths: ExtrusionLengthSummary[];
 }
 
 export interface ExtrusionSegmentDetail {
+  optimizationGroupId: string;
+  optimizationGroupName: string;
   groupName: string;
   category: string;
   extrusionName: string;
@@ -601,6 +610,13 @@ export interface ExtrusionReportData {
   panels: ExtrusionPanelInstance[];
   overallLengths: ExtrusionLengthSummary[];
   groups: ExtrusionGroupSummary[];
+  optimizationGroups: Array<{
+    optimizationGroupId: string;
+    name: string;
+    order: number;
+    overallLengths: ExtrusionLengthSummary[];
+    partGroups: ExtrusionGroupSummary[];
+  }>;
   segments: ExtrusionSegmentDetail[];
   hasTakeoff: boolean;
 }
@@ -824,6 +840,14 @@ export interface StiffenerTakeoffMaterialSection {
   lengths: StiffenerTakeoffLengthSummary[];
 }
 
+export interface StiffenerTakeoffOptimizationGroupSection {
+  optimizationGroupId: string;
+  name: string;
+  order: number;
+  summary: StiffenerTakeoffSectionSummary;
+  lengths: StiffenerTakeoffLengthSummary[];
+}
+
 export interface StiffenerTakeoffReportData {
   companyLogoPath?: string | null;
   projectMetadata: ProjectFileMetadata;
@@ -832,6 +856,7 @@ export interface StiffenerTakeoffReportData {
   overallSummary: StiffenerTakeoffSectionSummary;
   overallLengths: StiffenerTakeoffLengthSummary[];
   materials: StiffenerTakeoffMaterialSection[];
+  optimizationGroups: StiffenerTakeoffOptimizationGroupSection[];
   hasTakeoff: boolean;
 }
 

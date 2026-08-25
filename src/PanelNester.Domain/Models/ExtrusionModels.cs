@@ -58,6 +58,10 @@ public sealed record ExtrusionAdditionalLineItem
 
 public sealed record ExtrusionGroupLayout
 {
+    public string OptimizationGroupId { get; init; } = string.Empty;
+
+    public string OptimizationGroupName { get; init; } = string.Empty;
+
     public string GroupName { get; init; } = string.Empty;
 
     public int Rows { get; init; }
@@ -73,6 +77,12 @@ public sealed record ExtrusionGroupLayout
 
 public sealed record ExtrusionPanelInstance
 {
+    public string OptimizationGroupId { get; init; } = string.Empty;
+
+    public string OptimizationGroupName { get; init; } = string.Empty;
+
+    public int OptimizationGroupOrder { get; init; }
+
     public string InstanceId { get; init; } = string.Empty;
 
     public string SourceRowId { get; init; } = string.Empty;
@@ -163,6 +173,9 @@ public sealed record ExtrusionReportData
 
     public IReadOnlyList<ExtrusionGroupSummary> Groups { get; init; } = Array.Empty<ExtrusionGroupSummary>();
 
+    public IReadOnlyList<ExtrusionOptimizationGroupSummary> OptimizationGroups { get; init; } =
+        Array.Empty<ExtrusionOptimizationGroupSummary>();
+
     public IReadOnlyList<ExtrusionSegmentDetail> Segments { get; init; } = Array.Empty<ExtrusionSegmentDetail>();
 
     public bool HasTakeoff { get; init; }
@@ -187,13 +200,36 @@ public sealed record ExtrusionLengthSummary
 
 public sealed record ExtrusionGroupSummary
 {
+    public string OptimizationGroupId { get; init; } = string.Empty;
+
+    public string OptimizationGroupName { get; init; } = string.Empty;
+
     public string GroupName { get; init; } = string.Empty;
 
     public IReadOnlyList<ExtrusionLengthSummary> Lengths { get; init; } = Array.Empty<ExtrusionLengthSummary>();
 }
 
+public sealed record ExtrusionOptimizationGroupSummary
+{
+    public string OptimizationGroupId { get; init; } = string.Empty;
+
+    public string Name { get; init; } = string.Empty;
+
+    public int Order { get; init; }
+
+    public IReadOnlyList<ExtrusionLengthSummary> OverallLengths { get; init; } =
+        Array.Empty<ExtrusionLengthSummary>();
+
+    public IReadOnlyList<ExtrusionGroupSummary> PartGroups { get; init; } =
+        Array.Empty<ExtrusionGroupSummary>();
+}
+
 public sealed record ExtrusionSegmentDetail
 {
+    public string OptimizationGroupId { get; init; } = string.Empty;
+
+    public string OptimizationGroupName { get; init; } = string.Empty;
+
     public string GroupName { get; init; } = string.Empty;
 
     public string Category { get; init; } = string.Empty;

@@ -4222,6 +4222,8 @@ export default function App() {
       content = (
         <ExtrusionsPage
           importedRows={state.importResponse.parts}
+          optimizationGroups={state.optimizationGroups}
+          activeOptimizationGroupId={state.activeOptimizationGroupId}
           layout={state.extrusionLayout}
           statusMessage={state.extrusionMessage}
           busy={state.extrusionBusy}

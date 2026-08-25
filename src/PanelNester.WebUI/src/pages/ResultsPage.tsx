@@ -613,6 +613,9 @@ export function ResultsPage({
     nestResponse.sheets.length > 0 ||
     nestResponse.unplacedItems.length > 0;
   const stiffenerSummary = stiffenerTakeoffReport?.overallSummary;
+  const activeStiffenerGroup = stiffenerTakeoffReport?.optimizationGroups.find(
+    (group) => group.optimizationGroupId === activeOptimizationGroup?.optimizationGroupId,
+  );
   const stiffenerNote = !stiffenerTakeoffEnabled
     ? 'Enable stiffener takeoff in Project settings to populate this tab.'
     : !canPreviewStiffenerTakeoff
@@ -1029,6 +1032,32 @@ export function ResultsPage({
                             </tbody>
                           </table>
                         </div>
+                        {activeStiffenerGroup ? (
+                          <>
+                            <div className="results-sidebar__section-head">
+                              <span>{activeStiffenerGroup.name}</span>
+                              <small>Optimization Group</small>
+                            </div>
+                            <div className="stats-grid results-stiffener-stats">
+                              <article className="stat-card">
+                                <span>Eligible</span>
+                                <strong>{activeStiffenerGroup.summary.eligiblePanelCount}</strong>
+                              </article>
+                              <article className="stat-card">
+                                <span>Stiffeners</span>
+                                <strong>{activeStiffenerGroup.summary.totalStiffenerCount}</strong>
+                              </article>
+                              <article className="stat-card">
+                                <span>Linear feet</span>
+                                <strong>{activeStiffenerGroup.summary.totalLinearFeet.toFixed(1)}</strong>
+                              </article>
+                              <article className="stat-card">
+                                <span>Stock count</span>
+                                <strong>{activeStiffenerGroup.summary.requiredStockCount}</strong>
+                              </article>
+                            </div>
+                          </>
+                        ) : null}
                         </>
                       ) : (
                         <div className="empty-state">

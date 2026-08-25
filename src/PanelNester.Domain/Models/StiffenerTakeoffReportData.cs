@@ -16,5 +16,8 @@ public sealed record StiffenerTakeoffReportData
 
     public IReadOnlyList<StiffenerTakeoffMaterialSection> Materials { get; init; } = Array.Empty<StiffenerTakeoffMaterialSection>();
 
+    public IReadOnlyList<StiffenerTakeoffOptimizationGroupSection> OptimizationGroups { get; init; } =
+        Array.Empty<StiffenerTakeoffOptimizationGroupSection>();
+
     public bool HasTakeoff { get; init; }
 }

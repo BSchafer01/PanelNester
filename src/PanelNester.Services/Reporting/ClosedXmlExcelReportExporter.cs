@@ -9,6 +9,7 @@ namespace PanelNester.Services.Reporting;
 public sealed class ClosedXmlExcelReportExporter : IExcelReportExporter
 {
     private const string SummaryWorksheetName = "Summary";
+    private const string ProjectSummaryWorksheetName = "Project Summary";
     private const int SummaryColumnCount = 6;
     private const int PatternColumnCount = 8;
 
@@ -33,7 +34,74 @@ public sealed class ClosedXmlExcelReportExporter : IExcelReportExporter
             .GroupBy(material => material.MaterialName, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
 
-        if (report.MaterialSummaryGroups.Count > 0)
+        if (report.OptimizationGroups.Count > 0)
+        {
+            var projectSummary = workbook.Worksheets.Add(ProjectSummaryWorksheetName);
+            WriteSummaryWorksheet(
+                projectSummary,
+                "Project Material Summary",
+                report.Materials.Select(ToSummaryRow).ToArray());
+            FinalizeWorksheet(projectSummary);
+
+            foreach (var optimizationGroup in report.OptimizationGroups.OrderBy(group => group.Order))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var worksheet = workbook.Worksheets.Add(BuildUniqueWorksheetName(workbook, optimizationGroup.Name));
+                var nextRow = WriteSummaryWorksheet(
+                    worksheet,
+                    DisplayGroupName(optimizationGroup.Name),
+                    optimizationGroup.Materials.Select(ToSummaryRow).ToArray());
+
+                nextRow += 2;
+                var partGroups = optimizationGroup.PartGroups.Count > 0
+                    ? optimizationGroup.PartGroups
+                    :
+                    [
+                        new ReportMaterialSummaryGroup
+                        {
+                            Materials = optimizationGroup.Materials
+                                .Select(material => new ReportMaterialSummaryRow
+                                {
+                                    MaterialName = material.MaterialName,
+                                    MaterialId = material.MaterialId,
+                                    SheetLength = material.SheetLength,
+                                    SheetWidth = material.SheetWidth,
+                                    Summary = material.Summary
+                                })
+                                .ToArray()
+                        }
+                    ];
+
+                foreach (var partGroup in partGroups)
+                {
+                    foreach (var material in partGroup.Materials)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        var materialSection = optimizationGroup.Materials.FirstOrDefault(section =>
+                            string.Equals(section.MaterialName, material.MaterialName, StringComparison.Ordinal));
+                        if (materialSection is null)
+                        {
+                            continue;
+                        }
+
+                        var patterns = BuildPatternRows(partGroup.GroupName, material.MaterialName, materialSection);
+                        if (patterns.Count == 0)
+                        {
+                            continue;
+                        }
+
+                        var sectionTitle = partGroups.Count > 1 || !string.IsNullOrWhiteSpace(partGroup.GroupName)
+                            ? $"{DisplayGroupName(partGroup.GroupName)} — {DisplayMaterialName(material.MaterialName)}"
+                            : DisplayMaterialName(material.MaterialName);
+                        nextRow = WritePatternWorksheetSection(worksheet, nextRow, sectionTitle, patterns);
+                        nextRow += 2;
+                    }
+                }
+
+                FinalizeWorksheet(worksheet);
+            }
+        }
+        else if (report.MaterialSummaryGroups.Count > 0)
         {
             foreach (var group in report.MaterialSummaryGroups)
             {
@@ -294,6 +362,20 @@ public sealed class ClosedXmlExcelReportExporter : IExcelReportExporter
         }
 
         return sanitized.Length <= 31 ? sanitized : sanitized[..31];
+    }
+
+    private static string BuildUniqueWorksheetName(XLWorkbook workbook, string groupName)
+    {
+        var baseName = BuildWorksheetName(groupName);
+        var candidate = baseName;
+        var suffix = 2;
+        while (workbook.Worksheets.Any(sheet => string.Equals(sheet.Name, candidate, StringComparison.OrdinalIgnoreCase)))
+        {
+            var suffixText = $" ({suffix++})";
+            candidate = $"{baseName[..Math.Min(baseName.Length, 31 - suffixText.Length)]}{suffixText}";
+        }
+
+        return candidate;
     }
 
     private static string FormatSheetSize(decimal sheetLength, decimal sheetWidth) =>

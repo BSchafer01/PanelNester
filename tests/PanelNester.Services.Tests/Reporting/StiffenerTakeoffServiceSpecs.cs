@@ -204,4 +204,62 @@ public sealed class StiffenerTakeoffServiceSpecs
         Assert.Equal(2, report.OverallSummary.TotalStiffenerCount);
         Assert.Equal(2, report.OverallSummary.RequiredStockCount);
     }
+
+    [Fact]
+    public async Task Build_async_keeps_project_totals_and_adds_ordered_optimization_group_breakdowns()
+    {
+        var first = CreateEligiblePart("row-first", 1);
+        var second = CreateEligiblePart("row-second", 2);
+        var project = new Project
+        {
+            Settings = new ProjectSettings
+            {
+                StiffenerTakeoff = new StiffenerTakeoffSettings
+                {
+                    Enabled = true,
+                    MinimumLengthInches = 40m,
+                    MinimumWidthInches = 36m,
+                    WidthDeductionInches = 0m,
+                    StockLengthFeet = 20m
+                }
+            },
+            State = new ProjectState
+            {
+                Parts = [second, first],
+                OptimizationGroups =
+                [
+                    new OptimizationGroup { OptimizationGroupId = "second", Name = "Second", Order = 2, Parts = [second] },
+                    new OptimizationGroup { OptimizationGroupId = "first", Name = "First", Order = 1, Parts = [first] }
+                ]
+            }
+        };
+
+        var report = await new StiffenerTakeoffService().BuildAsync(new StiffenerTakeoffRequest { Project = project });
+
+        Assert.Equal(3, report.OverallSummary.EligiblePanelCount);
+        Assert.Collection(
+            report.OptimizationGroups,
+            group =>
+            {
+                Assert.Equal("first", group.OptimizationGroupId);
+                Assert.Equal(1, group.Summary.EligiblePanelCount);
+            },
+            group =>
+            {
+                Assert.Equal("second", group.OptimizationGroupId);
+                Assert.Equal(2, group.Summary.EligiblePanelCount);
+            });
+    }
+
+    private static PartRow CreateEligiblePart(string rowId, int quantity) =>
+        new()
+        {
+            RowId = rowId,
+            ImportedId = rowId,
+            Length = 40m,
+            Width = 48m,
+            Quantity = quantity,
+            MaterialName = "ACM",
+            ValidationStatus = ValidationStatuses.Valid
+        };
 }

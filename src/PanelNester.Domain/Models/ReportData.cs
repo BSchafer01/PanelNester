@@ -10,6 +10,9 @@ public sealed record ReportData
 
     public IReadOnlyList<ReportMaterialSection> Materials { get; init; } = Array.Empty<ReportMaterialSection>();
 
+    public IReadOnlyList<ReportOptimizationGroupSection> OptimizationGroups { get; init; } =
+        Array.Empty<ReportOptimizationGroupSection>();
+
     public IReadOnlyList<ReportMaterialSummaryGroup> MaterialSummaryGroups { get; init; } = Array.Empty<ReportMaterialSummaryGroup>();
 
     public IReadOnlyList<UnplacedItem> UnplacedItems { get; init; } = Array.Empty<UnplacedItem>();

@@ -87,6 +87,19 @@ public sealed class QuestPdfStiffenerReportExporter : IStiffenerPdfReportExporte
                 if (report.HasTakeoff)
                 {
                     column.Item().Element(content => ComposePieceTable(content, report));
+                    if (report.OptimizationGroups.Count > 0)
+                    {
+                        column.Item().PageBreak();
+                    }
+
+                    foreach (var optimizationGroup in report.OptimizationGroups.OrderBy(group => group.Order))
+                    {
+                        column.Item().Element(content => ComposePieceTable(
+                            content,
+                            $"Optimization Group — {optimizationGroup.Name}",
+                            optimizationGroup.Lengths,
+                            optimizationGroup.Summary));
+                    }
                 }
                 else
                 {
@@ -339,11 +352,22 @@ public sealed class QuestPdfStiffenerReportExporter : IStiffenerPdfReportExporte
     }
 
     private static void ComposePieceTable(IContainer container, StiffenerTakeoffReportData report)
+        => ComposePieceTable(
+            container,
+            "Stiffener Pieces — Project Total",
+            report.OverallLengths,
+            report.OverallSummary);
+
+    private static void ComposePieceTable(
+        IContainer container,
+        string title,
+        IReadOnlyList<StiffenerTakeoffLengthSummary> lengths,
+        StiffenerTakeoffSectionSummary summary)
     {
         container.Column(column =>
         {
             column.Spacing(8);
-            column.Item().Text("Stiffener Pieces").FontSize(12).SemiBold().FontColor(Colors.Black);
+            column.Item().Text(title).FontSize(12).SemiBold().FontColor(Colors.Black);
 
             column.Item().Table(table =>
             {
@@ -361,7 +385,7 @@ public sealed class QuestPdfStiffenerReportExporter : IStiffenerPdfReportExporte
                     header.Cell().Element(HeaderCell).AlignRight().Text("Length");
                 });
 
-                foreach (var (length, index) in report.OverallLengths.Select((item, index) => (item, index)))
+                foreach (var (length, index) in lengths.Select((item, index) => (item, index)))
                 {
                     var rowBackground = index % 2 == 0 ? Colors.White : Colors.Grey.Lighten4;
 
@@ -375,10 +399,10 @@ public sealed class QuestPdfStiffenerReportExporter : IStiffenerPdfReportExporte
                 table.Cell().ColumnSpan(3).PaddingTop(10).AlignRight().Text(text =>
                 {
                     text.Span("Subtotal pieces: ").SemiBold();
-                    text.Span(report.OverallSummary.TotalStiffenerCount.ToString("N0", CultureInfo.InvariantCulture));
+                    text.Span(summary.TotalStiffenerCount.ToString("N0", CultureInfo.InvariantCulture));
                     text.Span("   ");
                     text.Span("Total linear feet: ").SemiBold();
-                    text.Span(report.OverallSummary.TotalLinearFeet.ToString("N1", CultureInfo.InvariantCulture));
+                    text.Span(summary.TotalLinearFeet.ToString("N1", CultureInfo.InvariantCulture));
                 });
             });
         });

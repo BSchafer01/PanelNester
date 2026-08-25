@@ -184,6 +184,71 @@ public sealed class ExtrusionTakeoffServiceSpecs
             segment.LengthInches == 120m);
     }
 
+    [Fact]
+    public async Task Same_part_group_in_different_optimization_groups_remains_separate_and_filterable()
+    {
+        var first = CreatePart("row-first", "FIRST", "Elevation", 120m, 24m);
+        var second = CreatePart("row-second", "SECOND", "Elevation", 60m, 36m);
+        var project = new Project
+        {
+            State = new ProjectState
+            {
+                Parts = [second, first],
+                OptimizationGroups =
+                [
+                    new OptimizationGroup { OptimizationGroupId = "second", Name = "Alpha", Order = 2, Parts = [second] },
+                    new OptimizationGroup { OptimizationGroupId = "first", Name = "Zebra", Order = 1, Parts = [first] }
+                ],
+                ExtrusionLayout = new ExtrusionLayoutState
+                {
+                    GroupingMode = ExtrusionGroupingModes.Group,
+                    Groups =
+                    [
+                        new ExtrusionGroupLayout
+                        {
+                            GroupName = "Elevation",
+                            Rows = 1,
+                            Columns = 2,
+                            Cells =
+                            [
+                                new ExtrusionGridCell { InstanceId = "row-first#1", Row = 0, Column = 0 },
+                                new ExtrusionGridCell { InstanceId = "row-second#1", Row = 0, Column = 1 }
+                            ]
+                        }
+                    ]
+                }
+            }
+        };
+        var service = new ExtrusionTakeoffService();
+
+        var layout = await service.BuildLayoutAsync(new ExtrusionLayoutRequest { Project = project });
+        var report = await service.BuildReportAsync(new ExtrusionReportRequest { Project = project });
+
+        Assert.Collection(
+            layout.Groups,
+            group =>
+            {
+                Assert.Equal("first", group.OptimizationGroupId);
+                Assert.Equal("Elevation", group.GroupName);
+                Assert.Equal("row-first#1", Assert.Single(group.Cells).InstanceId);
+            },
+            group =>
+            {
+                Assert.Equal("second", group.OptimizationGroupId);
+                Assert.Equal("Elevation", group.GroupName);
+                Assert.Equal("row-second#1", Assert.Single(group.Cells).InstanceId);
+            });
+        Assert.Collection(
+            report.OptimizationGroups,
+            group => Assert.Equal("first", group.OptimizationGroupId),
+            group => Assert.Equal("second", group.OptimizationGroupId));
+        Assert.Collection(
+            report.Groups,
+            group => Assert.Equal("first", group.OptimizationGroupId),
+            group => Assert.Equal("second", group.OptimizationGroupId));
+        Assert.All(report.Panels, panel => Assert.False(string.IsNullOrWhiteSpace(panel.OptimizationGroupId)));
+    }
+
     private static PartRow CreatePart(
         string rowId,
         string importedId,

@@ -448,6 +448,157 @@ public sealed class ReportDataServiceSpecs
             });
     }
 
+    [Fact]
+    public async Task Report_data_preserves_optimization_group_order_and_same_material_sheet_ownership()
+    {
+        var material = BuildMaterial("mat-shared", "Shared ACM");
+        var secondPart = CreatePartRow("row-second", "SECOND", 24m, 12m, material.Name, "Frames");
+        var firstPart = CreatePartRow("row-first", "FIRST", 48m, 12m, material.Name, "Faces");
+        var project = new Project
+        {
+            MaterialSnapshots = [material],
+            State = new ProjectState
+            {
+                Parts = [secondPart, firstPart],
+                OptimizationGroups =
+                [
+                    CreateOptimizationGroup("group-second", "Second", 2, secondPart, "sheet-second"),
+                    CreateOptimizationGroup("group-first", "First", 1, firstPart, "sheet-first")
+                ]
+            }
+        };
+
+        var report = await new ReportDataService().BuildReportDataAsync(new ReportDataRequest { Project = project });
+
+        Assert.Collection(
+            report.OptimizationGroups,
+            group =>
+            {
+                Assert.Equal("group-first", group.OptimizationGroupId);
+                Assert.Equal("First", group.Name);
+                var section = Assert.Single(group.Materials);
+                Assert.Equal("sheet-first", Assert.Single(section.Sheets).SheetId);
+                Assert.Equal("Faces", Assert.Single(group.PartGroups).GroupName);
+            },
+            group =>
+            {
+                Assert.Equal("group-second", group.OptimizationGroupId);
+                Assert.Equal("Second", group.Name);
+                var section = Assert.Single(group.Materials);
+                Assert.Equal("sheet-second", Assert.Single(section.Sheets).SheetId);
+                Assert.Equal("Frames", Assert.Single(group.PartGroups).GroupName);
+            });
+
+        var projectMaterial = Assert.Single(report.Materials);
+        Assert.Equal(2, projectMaterial.Summary.TotalSheets);
+        Assert.Equal(2, projectMaterial.Sheets.Select(sheet => sheet.SheetId).Distinct().Count());
+    }
+
+    [Fact]
+    public async Task Report_data_keeps_persisted_failed_optimization_groups_in_order()
+    {
+        var failedBatch = new BatchNestResponse
+        {
+            Success = false,
+            OptimizationGroupResults =
+            [
+                new OptimizationGroupNestResult
+                {
+                    OptimizationGroupId = "failed",
+                    Name = "Failed",
+                    Order = 1,
+                    Success = false,
+                    FailureMessage = "Material could not be resolved."
+                }
+            ]
+        };
+        var project = new Project
+        {
+            State = new ProjectState
+            {
+                OptimizationGroups =
+                [
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "failed",
+                        Name = "Failed",
+                        Order = 1,
+                        LastBatchNestingResult = failedBatch,
+                        ResultStatus = OptimizationResultStatus.Valid
+                    }
+                ]
+            }
+        };
+
+        var report = await new ReportDataService().BuildReportDataAsync(new ReportDataRequest { Project = project });
+
+        var group = Assert.Single(report.OptimizationGroups);
+        Assert.False(group.Success);
+        Assert.Equal("Material could not be resolved.", group.FailureMessage);
+        Assert.Empty(group.Materials);
+    }
+
+    private static OptimizationGroup CreateOptimizationGroup(
+        string id,
+        string name,
+        int order,
+        PartRow part,
+        string sheetId) =>
+        new()
+        {
+            OptimizationGroupId = id,
+            Name = name,
+            Order = order,
+            Parts = [part],
+            ResultStatus = OptimizationResultStatus.Valid,
+            LastBatchNestingResult = new BatchNestResponse
+            {
+                Success = true,
+                MaterialResults =
+                [
+                    new MaterialNestResult
+                    {
+                        MaterialName = part.MaterialName,
+                        MaterialId = "mat-shared",
+                        Result = new NestResponse
+                        {
+                            Success = true,
+                            Sheets =
+                            [
+                                new NestSheet
+                                {
+                                    SheetId = sheetId,
+                                    SheetNumber = 1,
+                                    MaterialName = part.MaterialName,
+                                    SheetLength = 96m,
+                                    SheetWidth = 48m,
+                                    UtilizationPercent = 25m
+                                }
+                            ],
+                            Placements =
+                            [
+                                new NestPlacement
+                                {
+                                    PlacementId = $"placement-{id}",
+                                    SheetId = sheetId,
+                                    PartId = part.ImportedId,
+                                    Group = part.Group,
+                                    Width = part.Length,
+                                    Height = part.Width
+                                }
+                            ],
+                            Summary = new MaterialSummary
+                            {
+                                TotalSheets = 1,
+                                TotalPlaced = 1,
+                                OverallUtilization = 25m
+                            }
+                        }
+                    }
+                ]
+            }
+        };
+
     private static NestResponse CreateNestResponse(Material material) =>
         new()
         {

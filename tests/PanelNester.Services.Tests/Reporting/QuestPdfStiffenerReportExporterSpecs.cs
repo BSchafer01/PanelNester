@@ -1,6 +1,7 @@
 using System.Text;
 using PanelNester.Domain.Models;
 using PanelNester.Services.Reporting;
+using UglyToad.PdfPig;
 
 namespace PanelNester.Services.Tests.Reporting;
 
@@ -59,6 +60,27 @@ public sealed class QuestPdfStiffenerReportExporterSpecs : IDisposable
                         PieceCount = 2
                     }
                 ],
+                OptimizationGroups =
+                [
+                    new StiffenerTakeoffOptimizationGroupSection
+                    {
+                        OptimizationGroupId = "group-1",
+                        Name = "First",
+                        Order = 1,
+                        Summary = new StiffenerTakeoffSectionSummary
+                        {
+                            EligiblePanelCount = 3,
+                            TotalStiffenerCount = 6,
+                            TotalLinearFeet = 24.5m,
+                            StockLengthFeet = 20m,
+                            RequiredStockCount = 2
+                        },
+                        Lengths =
+                        [
+                            new StiffenerTakeoffLengthSummary { Label = "S44", LengthInches = 44m, PieceCount = 4 }
+                        ]
+                    }
+                ],
                 Materials = [],
                 HasTakeoff = true
             },
@@ -68,6 +90,11 @@ public sealed class QuestPdfStiffenerReportExporterSpecs : IDisposable
         var bytes = await File.ReadAllBytesAsync(filePath);
         Assert.True(bytes.Length > 0);
         Assert.StartsWith("%PDF-", Encoding.ASCII.GetString(bytes, 0, Math.Min(bytes.Length, 5)));
+        using var document = PdfDocument.Open(filePath);
+        Assert.True(document.NumberOfPages >= 2);
+        var words = document.GetPages().SelectMany(page => page.GetWords()).Select(word => word.Text).ToArray();
+        Assert.Contains("First", words);
+        Assert.Equal(2, words.Count(word => string.Equals(word, "S44", StringComparison.Ordinal)));
     }
 
     [Fact]

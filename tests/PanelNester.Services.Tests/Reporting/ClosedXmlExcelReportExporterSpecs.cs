@@ -290,6 +290,111 @@ public sealed class ClosedXmlExcelReportExporterSpecs : IDisposable
         Assert.Equal("B1", ungrouped.Cell("A4").GetString());
     }
 
+    [Fact]
+    public async Task Export_async_writes_ordered_optimization_group_worksheets_with_part_group_patterns()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var filePath = Path.Combine(_workspacePath, "optimization-groups.xlsx");
+        var firstMaterial = CreateGroupMaterial("sheet-first", "Face-1", "Faces");
+        var secondMaterial = CreateGroupMaterial("sheet-second", "Frame-1", "Frames");
+        var exporter = new ClosedXmlExcelReportExporter();
+
+        await exporter.ExportAsync(
+            new ReportData
+            {
+                OptimizationGroups =
+                [
+                    CreateReportGroup("group-first", "First", 1, firstMaterial, "Faces"),
+                    CreateReportGroup("group-second", "Second", 2, secondMaterial, "Frames")
+                ],
+                Materials =
+                [
+                    firstMaterial with
+                    {
+                        Sheets = firstMaterial.Sheets.Concat(secondMaterial.Sheets).ToArray(),
+                        Summary = new MaterialSummary
+                        {
+                            TotalSheets = 2,
+                            TotalPlaced = 2,
+                            OverallUtilization = 25m
+                        }
+                    }
+                ]
+            },
+            filePath);
+
+        using var workbook = new XLWorkbook(filePath);
+        Assert.Equal(["Project Summary", "First", "Second"], workbook.Worksheets.Select(sheet => sheet.Name).ToArray());
+        Assert.Equal(2d, workbook.Worksheet("Project Summary").Cell("B4").GetDouble());
+        Assert.Equal("First", workbook.Worksheet("First").Cell("A1").GetString());
+        Assert.Contains("Face-1", workbook.Worksheet("First").CellsUsed().Select(cell => cell.GetString()));
+        Assert.DoesNotContain("Frame-1", workbook.Worksheet("First").CellsUsed().Select(cell => cell.GetString()));
+        Assert.Contains("Frame-1", workbook.Worksheet("Second").CellsUsed().Select(cell => cell.GetString()));
+    }
+
+    private static ReportOptimizationGroupSection CreateReportGroup(
+        string id,
+        string name,
+        int order,
+        ReportMaterialSection material,
+        string partGroup) =>
+        new()
+        {
+            OptimizationGroupId = id,
+            Name = name,
+            Order = order,
+            Success = true,
+            Materials = [material],
+            PartGroups =
+            [
+                new ReportMaterialSummaryGroup
+                {
+                    GroupName = partGroup,
+                    Materials =
+                    [
+                        new ReportMaterialSummaryRow
+                        {
+                            MaterialName = material.MaterialName,
+                            SheetLength = material.SheetLength,
+                            SheetWidth = material.SheetWidth,
+                            Summary = material.Summary
+                        }
+                    ]
+                }
+            ]
+        };
+
+    private static ReportMaterialSection CreateGroupMaterial(string sheetId, string partId, string partGroup) =>
+        new()
+        {
+            MaterialName = "Shared ACM",
+            SheetLength = 96m,
+            SheetWidth = 48m,
+            Summary = new MaterialSummary { TotalSheets = 1, TotalPlaced = 1, OverallUtilization = 25m },
+            Sheets =
+            [
+                new ReportSheetDiagram
+                {
+                    SheetId = sheetId,
+                    SheetNumber = 1,
+                    SheetLength = 96m,
+                    SheetWidth = 48m,
+                    Placements =
+                    [
+                        new NestPlacement
+                        {
+                            PlacementId = $"placement-{sheetId}",
+                            SheetId = sheetId,
+                            PartId = partId,
+                            Group = partGroup,
+                            Width = 24m,
+                            Height = 12m
+                        }
+                    ]
+                }
+            ]
+        };
+
     public void Dispose()
     {
         if (Directory.Exists(_workspacePath))

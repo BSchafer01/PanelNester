@@ -16,7 +16,7 @@ public sealed class ExtrusionTakeoffService : IExtrusionTakeoffService
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        var panels = ExpandPanels(request.Project.State.Parts);
+        var panels = ExpandPanels(request.Project);
         var existing = request.Project.State.ExtrusionLayout ?? new ExtrusionLayoutState();
         return Task.FromResult(NormalizeLayout(existing, panels));
     }
@@ -30,17 +30,40 @@ public sealed class ExtrusionTakeoffService : IExtrusionTakeoffService
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        var panels = ExpandPanels(request.Project.State.Parts);
+        var panels = ExpandPanels(request.Project);
         var layout = NormalizeLayout(request.Project.State.ExtrusionLayout, panels);
         var segments = BuildSegments(layout, panels);
         var overall = BuildLengthSummaries(segments, layout);
         var groupSummaries = segments
-            .GroupBy(segment => segment.GroupName, StringComparer.Ordinal)
-            .OrderBy(group => DisplayGroupName(group.Key), StringComparer.OrdinalIgnoreCase)
+            .GroupBy(segment => LayoutKey(segment.OptimizationGroupId, segment.GroupName), StringComparer.Ordinal)
             .Select(group => new ExtrusionGroupSummary
             {
-                GroupName = group.Key,
+                OptimizationGroupId = group.First().OptimizationGroupId,
+                OptimizationGroupName = group.First().OptimizationGroupName,
+                GroupName = group.First().GroupName,
                 Lengths = BuildLengthSummaries(group.ToArray(), layout)
+            })
+            .ToArray();
+        var optimizationGroups = request.Project.State.OptimizationGroups
+            .OrderBy(group => group.Order)
+            .ThenBy(group => group.OptimizationGroupId, StringComparer.Ordinal)
+            .Select(group => new ExtrusionOptimizationGroupSummary
+            {
+                OptimizationGroupId = group.OptimizationGroupId,
+                Name = group.Name,
+                Order = group.Order,
+                OverallLengths = BuildLengthSummaries(
+                    segments.Where(segment => string.Equals(
+                        segment.OptimizationGroupId,
+                        group.OptimizationGroupId,
+                        StringComparison.Ordinal)).ToArray(),
+                    layout),
+                PartGroups = groupSummaries
+                    .Where(summary => string.Equals(
+                        summary.OptimizationGroupId,
+                        group.OptimizationGroupId,
+                        StringComparison.Ordinal))
+                    .ToArray()
             })
             .ToArray();
 
@@ -53,12 +76,40 @@ public sealed class ExtrusionTakeoffService : IExtrusionTakeoffService
                 Panels = panels,
                 OverallLengths = overall,
                 Groups = groupSummaries,
+                OptimizationGroups = optimizationGroups,
                 Segments = segments,
                 HasTakeoff = segments.Count > 0
             });
     }
 
-    internal static IReadOnlyList<ExtrusionPanelInstance> ExpandPanels(IReadOnlyList<PartRow>? parts)
+    private static IReadOnlyList<ExtrusionPanelInstance> ExpandPanels(Project project)
+    {
+        var ownership = project.State.OptimizationGroups
+            .SelectMany(group => group.Parts.Select(part => new
+            {
+                part.RowId,
+                group.OptimizationGroupId,
+                OptimizationGroupName = group.Name,
+                OptimizationGroupOrder = group.Order
+            }))
+            .Where(item => !string.IsNullOrWhiteSpace(item.RowId))
+            .GroupBy(item => item.RowId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        var parts = project.State.Parts.Count > 0
+            ? project.State.Parts
+            : project.State.OptimizationGroups.SelectMany(group => group.Parts).ToArray();
+
+        return ExpandPanels(parts, part => ownership.TryGetValue(part.RowId, out var owner)
+            ? (owner.OptimizationGroupId, owner.OptimizationGroupName, owner.OptimizationGroupOrder)
+            : (string.Empty, string.Empty, 0));
+    }
+
+    internal static IReadOnlyList<ExtrusionPanelInstance> ExpandPanels(IReadOnlyList<PartRow>? parts) =>
+        ExpandPanels(parts, _ => (string.Empty, string.Empty, 0));
+
+    private static IReadOnlyList<ExtrusionPanelInstance> ExpandPanels(
+        IReadOnlyList<PartRow>? parts,
+        Func<PartRow, (string Id, string Name, int Order)> resolveOptimizationGroup)
     {
         var panels = new List<ExtrusionPanelInstance>();
         foreach (var part in parts ?? Array.Empty<PartRow>())
@@ -75,11 +126,15 @@ public sealed class ExtrusionTakeoffService : IExtrusionTakeoffService
             }
 
             var sourceRowId = string.IsNullOrWhiteSpace(part.RowId) ? baseLabel : part.RowId;
+            var optimizationGroup = resolveOptimizationGroup(part);
             for (var index = 1; index <= part.Quantity; index++)
             {
                 panels.Add(
                     new ExtrusionPanelInstance
                     {
+                        OptimizationGroupId = optimizationGroup.Id,
+                        OptimizationGroupName = optimizationGroup.Name,
+                        OptimizationGroupOrder = optimizationGroup.Order,
                         InstanceId = $"{sourceRowId}#{index}",
                         SourceRowId = sourceRowId,
                         ImportedId = part.ImportedId,
@@ -114,21 +169,35 @@ public sealed class ExtrusionTakeoffService : IExtrusionTakeoffService
         var panelIds = panels.Select(panel => panel.InstanceId).ToHashSet(StringComparer.Ordinal);
         var groupingMode = NormalizeGroupingMode(layout.GroupingMode, panels);
         var existingGroups = layout.Groups
-            .GroupBy(group => NormalizeGroupName(group.GroupName), StringComparer.Ordinal)
+            .GroupBy(group => LayoutKey(group.OptimizationGroupId, NormalizeGroupName(group.GroupName)), StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.Last(), StringComparer.Ordinal);
 
         var groups = panels
-            .GroupBy(panel => GetPanelGroupName(panel, groupingMode), StringComparer.Ordinal)
-            .OrderBy(group => DisplayGroupName(group.Key), StringComparer.OrdinalIgnoreCase)
+            .GroupBy(
+                panel => LayoutKey(panel.OptimizationGroupId, GetPanelGroupName(panel, groupingMode)),
+                StringComparer.Ordinal)
+            .OrderBy(group => group.First().OptimizationGroupOrder)
+            .ThenBy(group => DisplayGroupName(GetPanelGroupName(group.First(), groupingMode)), StringComparer.OrdinalIgnoreCase)
             .Select(group => NormalizeGroupLayout(
-                group.Key,
+                group.First().OptimizationGroupId,
+                group.First().OptimizationGroupName,
+                GetPanelGroupName(group.First(), groupingMode),
                 group.ToArray(),
-                existingGroups.GetValueOrDefault(group.Key),
+                existingGroups.GetValueOrDefault(group.Key) ??
+                    existingGroups.GetValueOrDefault(LayoutKey(string.Empty, GetPanelGroupName(group.First(), groupingMode))),
                 layout))
             .ToArray();
 
         var staleGroups = layout.Groups
-            .Where(group => !groups.Any(next => string.Equals(next.GroupName, NormalizeGroupName(group.GroupName), StringComparison.Ordinal)))
+            .Where(group => !groups.Any(next => string.Equals(
+                LayoutKey(next.OptimizationGroupId, next.GroupName),
+                LayoutKey(group.OptimizationGroupId, NormalizeGroupName(group.GroupName)),
+                StringComparison.Ordinal)))
+            .Where(group => !groups.Any(next => next.Cells.Any(cell =>
+                group.Cells.Any(existingCell => string.Equals(
+                    existingCell.InstanceId,
+                    cell.InstanceId,
+                    StringComparison.Ordinal)))))
             .Select(group => group with
             {
                 Cells = group.Cells
@@ -159,6 +228,8 @@ public sealed class ExtrusionTakeoffService : IExtrusionTakeoffService
     }
 
     private static ExtrusionGroupLayout NormalizeGroupLayout(
+        string optimizationGroupId,
+        string optimizationGroupName,
         string groupName,
         IReadOnlyList<ExtrusionPanelInstance> panels,
         ExtrusionGroupLayout? existing,
@@ -270,6 +341,8 @@ public sealed class ExtrusionTakeoffService : IExtrusionTakeoffService
 
         return new ExtrusionGroupLayout
         {
+            OptimizationGroupId = optimizationGroupId,
+            OptimizationGroupName = optimizationGroupName,
             GroupName = groupName,
             Rows = rows,
             Columns = columns,
@@ -312,6 +385,8 @@ public sealed class ExtrusionTakeoffService : IExtrusionTakeoffService
                 segments.Add(
                     new ExtrusionSegmentDetail
                     {
+                        OptimizationGroupId = group.OptimizationGroupId,
+                        OptimizationGroupName = group.OptimizationGroupName,
                         GroupName = group.GroupName,
                         Category = ExtrusionCategories.Edge,
                         ExtrusionName = NormalizeName(assignment?.ExtrusionName, layout.EdgeExtrusionName),
@@ -326,9 +401,16 @@ public sealed class ExtrusionTakeoffService : IExtrusionTakeoffService
             }
         }
 
+        var layoutOrder = layout.Groups
+            .Select((group, index) => new { Key = LayoutKey(group.OptimizationGroupId, group.GroupName), Index = index })
+            .GroupBy(item => item.Key, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First().Index, StringComparer.Ordinal);
+
         return segments
             .Where(segment => segment.LengthInches > 0)
-            .OrderBy(segment => DisplayGroupName(segment.GroupName), StringComparer.OrdinalIgnoreCase)
+            .OrderBy(segment => layoutOrder.GetValueOrDefault(
+                LayoutKey(segment.OptimizationGroupId, segment.GroupName),
+                int.MaxValue))
             .ThenBy(segment => segment.Category, StringComparer.Ordinal)
             .ThenBy(segment => segment.ExtrusionName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(segment => segment.LengthInches)
@@ -422,6 +504,8 @@ public sealed class ExtrusionTakeoffService : IExtrusionTakeoffService
 
                 yield return new ExtrusionSegmentDetail
                 {
+                    OptimizationGroupId = group.OptimizationGroupId,
+                    OptimizationGroupName = group.OptimizationGroupName,
                     GroupName = group.GroupName,
                     Category = ExtrusionCategories.PanelToPanel,
                     ExtrusionName = NormalizeName(assignment?.ExtrusionName, defaultName),
@@ -446,6 +530,8 @@ public sealed class ExtrusionTakeoffService : IExtrusionTakeoffService
 
             yield return new ExtrusionSegmentDetail
             {
+                OptimizationGroupId = group.OptimizationGroupId,
+                OptimizationGroupName = group.OptimizationGroupName,
                 GroupName = group.GroupName,
                 Category = ExtrusionCategories.PanelToPanel,
                 ExtrusionName = NormalizeName(assignment.ExtrusionName, defaultName),
@@ -622,6 +708,9 @@ public sealed class ExtrusionTakeoffService : IExtrusionTakeoffService
     private static string EdgeLocationKey(string instanceId, string edge) => $"{instanceId}|{edge}";
 
     private static string CellKey(int row, int column) => $"{row}:{column}";
+
+    private static string LayoutKey(string? optimizationGroupId, string? partGroupName) =>
+        $"{optimizationGroupId?.Trim() ?? string.Empty}\u001f{NormalizeGroupName(partGroupName)}";
 
     private static string NormalizeJointId(ExtrusionJointAssignment joint) =>
         string.IsNullOrWhiteSpace(joint.JointId)

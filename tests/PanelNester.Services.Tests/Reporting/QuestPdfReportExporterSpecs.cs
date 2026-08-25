@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using PanelNester.Domain.Models;
 using PanelNester.Services.Reporting;
 using QuestPDF.Infrastructure;
+using UglyToad.PdfPig;
 
 namespace PanelNester.Services.Tests.Reporting;
 
@@ -134,6 +135,62 @@ public sealed class QuestPdfReportExporterSpecs : IDisposable
         var bytes = await File.ReadAllBytesAsync(filePath);
         Assert.True(bytes.Length > 0);
         Assert.StartsWith("%PDF-", Encoding.ASCII.GetString(bytes, 0, Math.Min(bytes.Length, 5)));
+    }
+
+    [Fact]
+    public async Task Export_async_writes_group_aware_pdf_sections()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var filePath = Path.Combine(_workspacePath, "optimization-groups.pdf");
+        var material = new ReportMaterialSection
+        {
+            MaterialName = "Shared ACM",
+            SheetLength = 96m,
+            SheetWidth = 48m,
+            Summary = new MaterialSummary { TotalSheets = 1, TotalPlaced = 1, OverallUtilization = 25m }
+        };
+
+        await new QuestPdfReportExporter().ExportAsync(
+            new ReportData
+            {
+                Materials = [material],
+                OptimizationGroups =
+                [
+                    new ReportOptimizationGroupSection
+                    {
+                        OptimizationGroupId = "first",
+                        Name = "First",
+                        Order = 1,
+                        Success = true,
+                        Materials = [material],
+                        PartGroups =
+                        [
+                            new ReportMaterialSummaryGroup
+                            {
+                                GroupName = "Faces",
+                                Materials =
+                                [
+                                    new ReportMaterialSummaryRow
+                                    {
+                                        MaterialName = material.MaterialName,
+                                        SheetLength = material.SheetLength,
+                                        SheetWidth = material.SheetWidth,
+                                        Summary = material.Summary
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            },
+            filePath);
+
+        var bytes = await File.ReadAllBytesAsync(filePath);
+        Assert.StartsWith("%PDF-", Encoding.ASCII.GetString(bytes, 0, Math.Min(bytes.Length, 5)));
+        using var document = PdfDocument.Open(filePath);
+        var text = string.Join(Environment.NewLine, document.GetPages().Select(page => page.Text));
+        Assert.Contains("First", text);
+        Assert.Contains("Faces", text);
     }
 
     [Fact]

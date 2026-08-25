@@ -29,42 +29,27 @@ public sealed class StiffenerTakeoffService : IStiffenerTakeoffService
                 });
         }
 
-        var overallRows = new Dictionary<int, int>();
-
-        var overallEligiblePanelCount = 0;
-
-        foreach (var part in project.State.Parts)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            if (!IsReadyPart(part) || !IsEligible(part, settings))
+        var kerfWidth = project.Settings?.KerfWidth ?? 0m;
+        var overallParts = project.State.Parts.Count > 0
+            ? project.State.Parts
+            : project.State.OptimizationGroups.SelectMany(group => group.Parts).ToArray();
+        var overall = BuildTakeoff(overallParts, settings, kerfWidth, cancellationToken);
+        var optimizationGroups = project.State.OptimizationGroups
+            .OrderBy(group => group.Order)
+            .ThenBy(group => group.OptimizationGroupId, StringComparer.Ordinal)
+            .Select(group =>
             {
-                continue;
-            }
-
-            var stiffenerCount = CalculateStiffenerCount(part, settings);
-            if (stiffenerCount <= 0)
-            {
-                continue;
-            }
-
-            var stiffenerLength = CalculateStiffenerLength(part, settings);
-            if (stiffenerLength <= 0)
-            {
-                continue;
-            }
-
-            AddCount(overallRows, stiffenerLength, stiffenerCount);
-
-            overallEligiblePanelCount += part.Quantity;
-        }
-
-        var overallLengths = BuildLengthSummaries(overallRows);
-        var overallSummary = BuildSectionSummary(
-            overallEligiblePanelCount,
-            overallLengths,
-            settings.StockLengthFeet,
-            project.Settings?.KerfWidth ?? 0m);
+                var takeoff = BuildTakeoff(group.Parts, settings, kerfWidth, cancellationToken);
+                return new StiffenerTakeoffOptimizationGroupSection
+                {
+                    OptimizationGroupId = group.OptimizationGroupId,
+                    Name = group.Name,
+                    Order = group.Order,
+                    Summary = takeoff.Summary,
+                    Lengths = takeoff.Lengths
+                };
+            })
+            .ToArray();
 
         return Task.FromResult(
             new StiffenerTakeoffReportData
@@ -72,11 +57,45 @@ public sealed class StiffenerTakeoffService : IStiffenerTakeoffService
                 ProjectMetadata = project.Metadata ?? new ProjectMetadata(),
                 ReportSettings = project.Settings?.ReportSettings ?? new ReportSettings(),
                 Settings = settings,
-                OverallSummary = overallSummary,
-                OverallLengths = overallLengths,
+                OverallSummary = overall.Summary,
+                OverallLengths = overall.Lengths,
                 Materials = Array.Empty<StiffenerTakeoffMaterialSection>(),
-                HasTakeoff = overallLengths.Count > 0
+                OptimizationGroups = optimizationGroups,
+                HasTakeoff = overall.Lengths.Count > 0
             });
+    }
+
+    private static TakeoffSection BuildTakeoff(
+        IReadOnlyList<PartRow> parts,
+        StiffenerTakeoffSettings settings,
+        decimal kerfWidth,
+        CancellationToken cancellationToken)
+    {
+        var rows = new Dictionary<int, int>();
+        var eligiblePanelCount = 0;
+        foreach (var part in parts)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!IsReadyPart(part) || !IsEligible(part, settings))
+            {
+                continue;
+            }
+
+            var stiffenerCount = CalculateStiffenerCount(part, settings);
+            var stiffenerLength = CalculateStiffenerLength(part, settings);
+            if (stiffenerCount <= 0 || stiffenerLength <= 0)
+            {
+                continue;
+            }
+
+            AddCount(rows, stiffenerLength, stiffenerCount);
+            eligiblePanelCount += part.Quantity;
+        }
+
+        var lengths = BuildLengthSummaries(rows);
+        return new TakeoffSection(
+            BuildSectionSummary(eligiblePanelCount, lengths, settings.StockLengthFeet, kerfWidth),
+            lengths);
     }
 
     private static bool IsReadyPart(PartRow part) =>
@@ -190,4 +209,8 @@ public sealed class StiffenerTakeoffService : IStiffenerTakeoffService
 
         return stickRemainders.Count;
     }
+
+    private sealed record TakeoffSection(
+        StiffenerTakeoffSectionSummary Summary,
+        IReadOnlyList<StiffenerTakeoffLengthSummary> Lengths);
 }
