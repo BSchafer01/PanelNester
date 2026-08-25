@@ -1226,6 +1226,42 @@ function canDisplayOptimizationGroupResult(
   return Boolean(group && group.resultStatus !== 'stale');
 }
 
+function getOptimizationGroupDisplayState(
+  group: OptimizationGroup | undefined,
+  currentMessage: string,
+): Pick<AppState, 'nestResponse' | 'batchNestResponse' | 'nestingMessage'> {
+  const isStale = group?.resultStatus === 'stale';
+  return {
+    nestResponse: canDisplayOptimizationGroupResult(group)
+      ? group?.lastNestingResult ?? emptyNestResponse
+      : emptyNestResponse,
+    batchNestResponse: canDisplayOptimizationGroupResult(group)
+      ? group?.lastBatchNestingResult ?? emptyBatchNestResponse
+      : emptyBatchNestResponse,
+    nestingMessage: isStale
+      ? `${group.name} has stale results. Re-run it before inspecting panels.`
+      : currentMessage,
+  };
+}
+
+function clearActiveResultsWhenAffected(
+  state: AppState,
+  affectedGroupIds: ReadonlySet<string>,
+  staleMessage: string,
+): Pick<AppState, 'nestResponse' | 'batchNestResponse' | 'nestingMessage'> {
+  return affectedGroupIds.has(state.activeOptimizationGroupId ?? '')
+    ? {
+        nestResponse: emptyNestResponse,
+        batchNestResponse: emptyBatchNestResponse,
+        nestingMessage: staleMessage,
+      }
+    : {
+        nestResponse: state.nestResponse,
+        batchNestResponse: state.batchNestResponse,
+        nestingMessage: state.nestingMessage,
+      };
+}
+
 function arePartRowsEqual(left: PartRow, right: PartRow | undefined): boolean {
   return Boolean(
     right &&
@@ -1462,15 +1498,11 @@ function reducer(state: AppState, action: AppAction): AppState {
           state.optimizationGroups,
           (group) => affectedGroupIds.has(group.optimizationGroupId),
         ),
-        nestResponse: affectedGroupIds.has(state.activeOptimizationGroupId ?? '')
-          ? emptyNestResponse
-          : state.nestResponse,
-        batchNestResponse: affectedGroupIds.has(state.activeOptimizationGroupId ?? '')
-          ? emptyBatchNestResponse
-          : state.batchNestResponse,
-        nestingMessage: affectedGroupIds.has(state.activeOptimizationGroupId ?? '')
-          ? 'Material details changed. Re-run the active Optimization Group before inspecting panels.'
-          : state.nestingMessage,
+        ...clearActiveResultsWhenAffected(
+          state,
+          affectedGroupIds,
+          'Material details changed. Re-run the active Optimization Group before inspecting panels.',
+        ),
         materialsMessage: action.message,
       };
 
@@ -1507,15 +1539,11 @@ function reducer(state: AppState, action: AppAction): AppState {
           state.optimizationGroups,
           (group) => affectedGroupIds.has(group.optimizationGroupId),
         ),
-        nestResponse: affectedGroupIds.has(state.activeOptimizationGroupId ?? '')
-          ? emptyNestResponse
-          : state.nestResponse,
-        batchNestResponse: affectedGroupIds.has(state.activeOptimizationGroupId ?? '')
-          ? emptyBatchNestResponse
-          : state.batchNestResponse,
-        nestingMessage: affectedGroupIds.has(state.activeOptimizationGroupId ?? '')
-          ? 'A material used by the active Optimization Group was deleted. Re-run after resolving its materials.'
-          : state.nestingMessage,
+        ...clearActiveResultsWhenAffected(
+          state,
+          affectedGroupIds,
+          'A material used by the active Optimization Group was deleted. Re-run after resolving its materials.',
+        ),
         selectedMaterialId: pickMaterialId(
           materials,
           state.importResponse,
@@ -1841,16 +1869,7 @@ function reducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         activeOptimizationGroupId: action.optimizationGroupId,
-        nestResponse: canDisplayOptimizationGroupResult(activeGroup)
-          ? activeGroup?.lastNestingResult ?? emptyNestResponse
-          : emptyNestResponse,
-        batchNestResponse: canDisplayOptimizationGroupResult(activeGroup)
-          ? activeGroup?.lastBatchNestingResult ?? emptyBatchNestResponse
-          : emptyBatchNestResponse,
-        nestingMessage:
-          activeGroup?.resultStatus === 'stale'
-            ? `${activeGroup.name} has stale results. Re-run it before inspecting panels.`
-            : state.nestingMessage,
+        ...getOptimizationGroupDisplayState(activeGroup, state.nestingMessage),
         lastNestMaterial: undefined,
       };
     }
@@ -1876,16 +1895,7 @@ function reducer(state: AppState, action: AppAction): AppState {
           optimizationGroups: action.project.state.optimizationGroups,
           activeOptimizationGroupId: nextActiveOptimizationGroupId,
           importResponse,
-          nestResponse: canDisplayOptimizationGroupResult(activeGroup)
-            ? activeGroup?.lastNestingResult ?? emptyNestResponse
-            : emptyNestResponse,
-          batchNestResponse: canDisplayOptimizationGroupResult(activeGroup)
-            ? activeGroup?.lastBatchNestingResult ?? emptyBatchNestResponse
-            : emptyBatchNestResponse,
-          nestingMessage:
-            activeGroup?.resultStatus === 'stale'
-              ? `${activeGroup.name} has stale results. Re-run it before inspecting panels.`
-              : state.nestingMessage,
+          ...getOptimizationGroupDisplayState(activeGroup, state.nestingMessage),
           projectMessage: action.message,
         },
         `${action.message} Save the project to persist this change.`,
