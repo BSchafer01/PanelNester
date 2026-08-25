@@ -14,14 +14,12 @@ public sealed record OptimizationGroup
 
     public BatchNestResponse? LastBatchNestingResult { get; init; }
 
-    public string ResultStatus { get; init; } = OptimizationResultStatuses.None;
+    public OptimizationResultStatus ResultStatus { get; init; } = OptimizationResultStatus.None;
 }
 
-public static class OptimizationResultStatuses
+public enum OptimizationResultStatus
 {
-    public const string None = "none";
-
-    public const string Valid = "valid";
-
-    public const string Stale = "stale";
+    None,
+    Valid,
+    Stale
 }

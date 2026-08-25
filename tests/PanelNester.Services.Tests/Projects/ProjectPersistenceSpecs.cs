@@ -30,7 +30,7 @@ public sealed class ProjectPersistenceSpecs : IDisposable
         Assert.Equal("Parts", group.Name);
         Assert.Equal(0, group.Order);
         Assert.Empty(group.Parts);
-        Assert.Equal(OptimizationResultStatuses.None, group.ResultStatus);
+        Assert.Equal(OptimizationResultStatus.None, group.ResultStatus);
     }
 
     [Fact]
@@ -96,7 +96,7 @@ public sealed class ProjectPersistenceSpecs : IDisposable
 
         Assert.True(result.Success);
         var group = Assert.Single(result.Project!.State.OptimizationGroups);
-        Assert.Equal(OptimizationResultStatuses.Stale, group.ResultStatus);
+        Assert.Equal(OptimizationResultStatus.Stale, group.ResultStatus);
         Assert.Equal("missing-sheet", Assert.Single(group.LastNestingResult!.Placements).SheetId);
     }
 
@@ -114,7 +114,7 @@ public sealed class ProjectPersistenceSpecs : IDisposable
             Parts = [sample.State.Parts[0] with { Group = "Casework" }],
             LastNestingResult = sample.State.LastNestingResult,
             LastBatchNestingResult = sample.State.LastBatchNestingResult,
-            ResultStatus = OptimizationResultStatuses.Valid
+            ResultStatus = OptimizationResultStatus.Valid
         };
         var project = sample with
         {
@@ -130,7 +130,7 @@ public sealed class ProjectPersistenceSpecs : IDisposable
         Assert.Equal("Lobby Panels", restoredGroup.Name);
         Assert.Equal(0, restoredGroup.Order);
         Assert.Equal("Casework", Assert.Single(restoredGroup.Parts).Group);
-        Assert.Equal(OptimizationResultStatuses.Valid, restoredGroup.ResultStatus);
+        Assert.Equal(OptimizationResultStatus.Valid, restoredGroup.ResultStatus);
         Assert.Equivalent(group.LastBatchNestingResult, restoredGroup.LastBatchNestingResult, strict: true);
     }
 
@@ -164,7 +164,7 @@ public sealed class ProjectPersistenceSpecs : IDisposable
         Assert.Equal("project-phase3-001", group.OptimizationGroupId);
         Assert.Equal("North Lobby", group.Name);
         Assert.Equal("Casework", Assert.Single(group.Parts).Group);
-        Assert.Equal(OptimizationResultStatuses.Valid, group.ResultStatus);
+        Assert.Equal(OptimizationResultStatus.Valid, group.ResultStatus);
         Assert.Equivalent(legacy.State.LastBatchNestingResult, group.LastBatchNestingResult, strict: true);
     }
 
@@ -184,7 +184,7 @@ public sealed class ProjectPersistenceSpecs : IDisposable
         var part = Assert.Single(group.Parts);
         Assert.Equal("P-001", part.ImportedId);
         Assert.Equal("Casework", part.Group);
-        Assert.Equal(OptimizationResultStatuses.None, group.ResultStatus);
+        Assert.Equal(OptimizationResultStatus.None, group.ResultStatus);
     }
 
     [Fact]
@@ -226,7 +226,7 @@ public sealed class ProjectPersistenceSpecs : IDisposable
                         Parts = sample.State.Parts,
                         LastNestingResult = sample.State.LastNestingResult,
                         LastBatchNestingResult = sample.State.LastBatchNestingResult,
-                        ResultStatus = OptimizationResultStatuses.Valid
+                        ResultStatus = OptimizationResultStatus.Valid
                     }
                 ]
             }
@@ -240,6 +240,104 @@ public sealed class ProjectPersistenceSpecs : IDisposable
         var group = Assert.Single(loaded.Project!.State.OptimizationGroups);
         Assert.Equal("stable-group-id", group.OptimizationGroupId);
         Assert.Equal("Edited Group Name", group.Name);
+    }
+
+    [Fact]
+    public async Task Project_service_round_trips_multiple_groups_without_losing_order_parts_or_part_groups()
+    {
+        var filePath = Path.Combine(_workspacePath, "multiple-groups.pnest");
+        var service = new ProjectService(new FakeMaterialService());
+        var sample = Phase03ProjectPersistenceSpec.CreateSampleProject();
+        var firstPart = sample.State.Parts[0] with { Group = "Phase A" };
+        var secondPart = firstPart with
+        {
+            RowId = "row-002",
+            ImportedId = "B-200",
+            Group = "Phase B"
+        };
+        var project = sample with
+        {
+            State = sample.State with
+            {
+                OptimizationGroups =
+                [
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "group-b",
+                        Name = "Panels",
+                        Order = 20,
+                        Parts = [secondPart]
+                    },
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "group-a",
+                        Name = "Panels",
+                        Order = 10,
+                        Parts = [firstPart],
+                        LastNestingResult = sample.State.LastNestingResult,
+                        LastBatchNestingResult = sample.State.LastBatchNestingResult,
+                        ResultStatus = OptimizationResultStatus.Valid
+                    }
+                ]
+            }
+        };
+
+        var saved = await service.SaveAsync(project, filePath);
+        var loaded = await service.LoadAsync(filePath);
+
+        Assert.True(saved.Success);
+        Assert.True(loaded.Success);
+        Assert.Collection(
+            loaded.Project!.State.OptimizationGroups,
+            group =>
+            {
+                Assert.Equal("group-a", group.OptimizationGroupId);
+                Assert.Equal("Panels", group.Name);
+                Assert.Equal(10, group.Order);
+                Assert.Equal("Phase A", Assert.Single(group.Parts).Group);
+                Assert.NotNull(group.LastBatchNestingResult);
+            },
+            group =>
+            {
+                Assert.Equal("group-b", group.OptimizationGroupId);
+                Assert.Equal("Panels (2)", group.Name);
+                Assert.Equal(20, group.Order);
+                Assert.Equal("Phase B", Assert.Single(group.Parts).Group);
+            });
+    }
+
+    [Fact]
+    public async Task Migration_marks_saved_results_stale_when_a_placement_references_an_unknown_part()
+    {
+        var filePath = Path.Combine(_workspacePath, "unknown-result-part.pnest");
+        var service = new ProjectService(new FakeMaterialService());
+        var sample = Phase03ProjectPersistenceSpec.CreateSampleProject();
+        var invalidResult = sample.State.LastNestingResult! with
+        {
+            Placements =
+            [
+                sample.State.LastNestingResult.Placements[0] with
+                {
+                    PartId = "not-a-project-part"
+                }
+            ],
+            Summary = sample.State.LastNestingResult.Summary with { TotalPlaced = 1 }
+        };
+        var project = sample with
+        {
+            State = sample.State with
+            {
+                LastNestingResult = invalidResult,
+                LastBatchNestingResult = null
+            }
+        };
+
+        var result = await service.SaveAsync(project, filePath);
+
+        Assert.True(result.Success);
+        Assert.Equal(
+            OptimizationResultStatus.Stale,
+            Assert.Single(result.Project!.State.OptimizationGroups).ResultStatus);
     }
 
     [Fact]
@@ -722,7 +820,7 @@ public sealed class ProjectPersistenceSpecs : IDisposable
                         Parts = project.State.Parts,
                         LastNestingResult = project.State.LastNestingResult,
                         LastBatchNestingResult = project.State.LastBatchNestingResult,
-                        ResultStatus = OptimizationResultStatuses.Valid
+                        ResultStatus = OptimizationResultStatus.Valid
                     }
                 ]
             }

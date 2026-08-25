@@ -36,7 +36,7 @@ internal static class BridgeJson
             WriteIndented = false
         };
 
-        options.Converters.Add(new JsonStringEnumConverter());
+        options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
         return options;
     }
 }

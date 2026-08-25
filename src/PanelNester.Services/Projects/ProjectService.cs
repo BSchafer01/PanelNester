@@ -302,75 +302,14 @@ public sealed class ProjectService : IProjectService
     private static ProjectState NormalizeState(ProjectState? state, string projectId)
     {
         state ??= new ProjectState();
+        var groupedState = ProjectSchemaMigrator.NormalizeOptimizationGroups(state, projectId);
 
-        var parts = (state.Parts ?? Array.Empty<PartRow>()).ToArray();
-        var existingGroup = state.OptimizationGroups?.FirstOrDefault();
-        var group = new OptimizationGroup
+        return groupedState with
         {
-            OptimizationGroupId = NormalizeOptional(existingGroup?.OptimizationGroupId) ?? projectId,
-            Name = NormalizeOptional(existingGroup?.Name) ?? CreateDefaultOptimizationGroupName(state.SourceFilePath),
-            Order = existingGroup?.Order ?? 0,
-            Parts = parts,
-            LastNestingResult = state.LastNestingResult,
-            LastBatchNestingResult = state.LastBatchNestingResult,
-            ResultStatus = state.LastNestingResult is null && state.LastBatchNestingResult is null
-                ? OptimizationResultStatuses.None
-                : AreSavedResultsConsistent(state.LastNestingResult, state.LastBatchNestingResult)
-                    ? OptimizationResultStatuses.Valid
-                    : OptimizationResultStatuses.Stale
-        };
-
-        return state with
-        {
-            SourceFilePath = NormalizeOptional(state.SourceFilePath),
-            SelectedMaterialId = NormalizeOptional(state.SelectedMaterialId),
-            OptimizationGroups = [group],
-            Parts = parts,
+            SourceFilePath = NormalizeOptional(groupedState.SourceFilePath),
+            SelectedMaterialId = NormalizeOptional(groupedState.SelectedMaterialId),
             ExtrusionLayout = NormalizeExtrusionLayout(state.ExtrusionLayout)
         };
-    }
-
-    private static bool AreSavedResultsConsistent(
-        NestResponse? nestingResult,
-        BatchNestResponse? batchResult)
-    {
-        if (nestingResult is not null && !IsNestResultConsistent(nestingResult))
-        {
-            return false;
-        }
-
-        if (batchResult is null)
-        {
-            return true;
-        }
-
-        if (batchResult.LegacyResult is not null && !IsNestResultConsistent(batchResult.LegacyResult))
-        {
-            return false;
-        }
-
-        return batchResult.MaterialResults.All(result => IsNestResultConsistent(result.Result));
-    }
-
-    private static bool IsNestResultConsistent(NestResponse result)
-    {
-        var sheetIds = result.Sheets
-            .Select(sheet => sheet.SheetId)
-            .Where(sheetId => !string.IsNullOrWhiteSpace(sheetId))
-            .ToHashSet(StringComparer.Ordinal);
-
-        return result.Placements.All(placement => sheetIds.Contains(placement.SheetId));
-    }
-
-    private static string CreateDefaultOptimizationGroupName(string? sourceFilePath)
-    {
-        if (string.IsNullOrWhiteSpace(sourceFilePath))
-        {
-            return "Parts";
-        }
-
-        var fileName = Path.GetFileNameWithoutExtension(sourceFilePath.Trim());
-        return string.IsNullOrWhiteSpace(fileName) ? "Parts" : fileName;
     }
 
     private static ExtrusionLayoutState NormalizeExtrusionLayout(ExtrusionLayoutState? layout)

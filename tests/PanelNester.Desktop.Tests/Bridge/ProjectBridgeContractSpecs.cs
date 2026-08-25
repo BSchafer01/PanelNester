@@ -11,6 +11,15 @@ namespace PanelNester.Desktop.Tests.Bridge;
 public sealed class ProjectBridgeContractSpecs
 {
     [Fact]
+    public void Optimization_result_status_uses_the_web_contracts_camel_case_values()
+    {
+        var json = BridgeJson.ToElement(
+            new OptimizationGroup { ResultStatus = OptimizationResultStatus.Valid });
+
+        Assert.Equal("valid", json.GetProperty("resultStatus").GetString());
+    }
+
+    [Fact]
     public void Phase_three_project_bridge_message_names_follow_the_existing_request_response_pattern()
     {
         var responseTypes = Phase03ProjectBridgeExpectations.ProjectMessageTypes

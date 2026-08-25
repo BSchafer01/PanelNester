@@ -131,8 +131,19 @@ internal static class Phase03ProjectPersistenceSpec
                         {
                             PlacementId = "placement-001",
                             SheetId = "sheet-001",
-                            PartId = "row-001#1",
+                            PartId = "A-100#1",
                             X = 0.5m,
+                            Y = 0.5m,
+                            Width = 24m,
+                            Height = 12m,
+                            Rotated90 = false
+                        },
+                        new NestPlacement
+                        {
+                            PlacementId = "placement-002",
+                            SheetId = "sheet-001",
+                            PartId = "A-100#2",
+                            X = 25m,
                             Y = 0.5m,
                             Width = 24m,
                             Height = 12m,
@@ -171,8 +182,19 @@ internal static class Phase03ProjectPersistenceSpec
                             {
                                 PlacementId = "placement-001",
                                 SheetId = "sheet-001",
-                                PartId = "row-001#1",
+                                PartId = "A-100#1",
                                 X = 0.5m,
+                                Y = 0.5m,
+                                Width = 24m,
+                                Height = 12m,
+                                Rotated90 = false
+                            },
+                            new NestPlacement
+                            {
+                                PlacementId = "placement-002",
+                                SheetId = "sheet-001",
+                                PartId = "A-100#2",
+                                X = 25m,
                                 Y = 0.5m,
                                 Width = 24m,
                                 Height = 12m,
@@ -214,8 +236,19 @@ internal static class Phase03ProjectPersistenceSpec
                                     {
                                         PlacementId = "placement-001",
                                         SheetId = "sheet-001",
-                                        PartId = "row-001#1",
+                                        PartId = "A-100#1",
                                         X = 0.5m,
+                                        Y = 0.5m,
+                                        Width = 24m,
+                                        Height = 12m,
+                                        Rotated90 = false
+                                    },
+                                    new NestPlacement
+                                    {
+                                        PlacementId = "placement-002",
+                                        SheetId = "sheet-001",
+                                        PartId = "A-100#2",
+                                        X = 25m,
                                         Y = 0.5m,
                                         Width = 24m,
                                         Height = 12m,
