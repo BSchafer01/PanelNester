@@ -227,6 +227,8 @@ public sealed record ImportFileResponse(
     BridgeError? Error,
     string? Message)
 {
+    public IReadOnlyList<ImportSourceColumn> SourceColumns { get; init; } = Array.Empty<ImportSourceColumn>();
+
     public ImportWorksheetDescriptor? Worksheet { get; init; }
 
     public static ImportFileResponse Cancelled() =>
@@ -261,6 +263,7 @@ public sealed record ImportFileResponse(
             null,
             message)
         {
+            SourceColumns = response.SourceColumns,
             Worksheet = response.Worksheet
         };
 }
@@ -404,6 +407,8 @@ public sealed record ImportSessionResponse(
     string? Message)
 {
     public WorkbookDiscovery? Workbook { get; init; }
+
+    public IReadOnlyList<ImportSourceColumn> SourceColumns { get; init; } = Array.Empty<ImportSourceColumn>();
 
     public ImportWorksheetDescriptor? Worksheet { get; init; }
 

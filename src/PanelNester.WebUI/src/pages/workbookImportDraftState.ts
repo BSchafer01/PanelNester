@@ -51,6 +51,7 @@ function emptyPreview(): ImportFileResponse {
     errors: [],
     warnings: [],
     availableColumns: [],
+    sourceColumns: [],
     columnMappings: [],
     materialResolutions: [],
   };

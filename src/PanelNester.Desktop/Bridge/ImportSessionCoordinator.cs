@@ -393,6 +393,10 @@ internal sealed class ImportSessionCoordinator
 
         public CancellationToken CancellationToken { get; }
 
+        public bool IsWorkbook =>
+            string.Equals(_session.Extension, ".xlsx", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(_session.Extension, ".xlsm", StringComparison.OrdinalIgnoreCase);
+
         public async Task<ImportSessionResult> ImportAsync(
             ImportOptions? options,
             string? worksheetName = null)

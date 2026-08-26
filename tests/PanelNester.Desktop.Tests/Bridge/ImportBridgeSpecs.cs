@@ -75,6 +75,10 @@ public sealed class ImportBridgeSpecs : IDisposable
             BridgeMessageTypes.PreviewImportSession,
             new PreviewImportSessionRequest { SessionId = sessionId, WorksheetName = "Second" });
         Assert.Equal("SECOND", Assert.Single(preview.Parts).ImportedId);
+        Assert.Contains(preview.SourceColumns, column => column.Address == "A" && column.Heading == "Id");
+        Assert.Contains(
+            preview.ColumnMappings,
+            mapping => mapping.TargetField == ImportFieldNames.Id && mapping.SourceColumn == "A");
 
         var finalized = await DispatchAsync<ImportSessionResponse>(
             dispatcher,
@@ -114,7 +118,46 @@ public sealed class ImportBridgeSpecs : IDisposable
         Assert.Equal(["FIRST", "THIRD"], group.Parts.Select(part => part.ImportedId));
         Assert.All(
             project.State.ImportConfiguration!.Worksheets,
-            worksheet => Assert.Equal("combined", worksheet.OptimizationGroupId));
+            worksheet =>
+            {
+                Assert.Equal("combined", worksheet.OptimizationGroupId);
+                Assert.Contains(
+                    worksheet.ColumnMappings,
+                    mapping => mapping.TargetField == ImportFieldNames.Id && mapping.SourceColumn == "A");
+            });
+    }
+
+    [Fact]
+    public async Task Excel_session_rejects_finalization_without_a_selected_Worksheet()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "no-selection.xlsx");
+        using (var workbook = new XLWorkbook())
+        {
+            WriteWorkbookWorksheet(workbook.AddWorksheet("First"), "FIRST", "Demo Material");
+            workbook.SaveAs(workbookPath);
+        }
+
+        var dispatcher = CreateDispatcher();
+        const string sessionId = "no-selection-session";
+        var started = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest { SessionId = sessionId, ImportSourcePath = workbookPath });
+        Assert.True(started.Success);
+
+        var finalized = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.FinalizeImportSession,
+            new FinalizeImportSessionRequest
+            {
+                SessionId = sessionId,
+                Project = new Project { ProjectId = "no-selection-project" }
+            });
+
+        Assert.False(finalized.Success);
+        Assert.Equal("import-worksheet-selection-required", finalized.Error?.Code);
+        Assert.Null(finalized.Project);
     }
 
     [Fact]

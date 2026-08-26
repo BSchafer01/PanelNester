@@ -209,9 +209,15 @@ export interface ImportResponse {
   errors: ValidationError[];
   warnings: ValidationWarning[];
   availableColumns: string[];
+  sourceColumns: ImportSourceColumn[];
   columnMappings: ImportFieldMappingStatus[];
   materialResolutions: ImportMaterialResolution[];
   worksheet?: ImportWorksheetDescriptor | null;
+}
+
+export interface ImportSourceColumn {
+  address: string;
+  heading: string;
 }
 
 export interface ImportWorksheetDescriptor {
@@ -1180,7 +1186,8 @@ export const emptyImportResponse: ImportResponse = {
   parts: [],
   errors: [],
   warnings: [],
-  availableColumns: [],
+    availableColumns: [],
+    sourceColumns: [],
   columnMappings: [],
   materialResolutions: [],
 };

@@ -654,6 +654,7 @@ function getProjectImportResponse(project: ProjectRecord): ImportResponse {
     warnings,
     errors,
     availableColumns: [],
+    sourceColumns: [],
     columnMappings: [],
     materialResolutions: [],
   };
@@ -770,6 +771,7 @@ function normalizeImportResponse(response: {
   errors?: ImportResponse['errors'];
   warnings?: ImportResponse['warnings'];
   availableColumns?: string[];
+  sourceColumns?: ImportResponse['sourceColumns'];
   columnMappings?: ImportResponse['columnMappings'];
   materialResolutions?: ImportResponse['materialResolutions'];
   worksheet?: ImportResponse['worksheet'];
@@ -781,6 +783,9 @@ function normalizeImportResponse(response: {
     warnings: Array.isArray(response.warnings) ? response.warnings : [],
     availableColumns: Array.isArray(response.availableColumns)
       ? response.availableColumns
+      : [],
+    sourceColumns: Array.isArray(response.sourceColumns)
+      ? response.sourceColumns
       : [],
     columnMappings: Array.isArray(response.columnMappings)
       ? response.columnMappings

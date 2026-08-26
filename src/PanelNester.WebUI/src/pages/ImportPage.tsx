@@ -1448,9 +1448,16 @@ export function ImportPage({
                           value={selectedSource}
                         >
                           <option value="">Choose a column</option>
-                          {mappingSession.preview.availableColumns.map((column) => (
-                            <option key={column} value={column}>
-                              {column}
+                          {(mappingSession.preview.sourceColumns.length > 0
+                            ? mappingSession.preview.sourceColumns
+                            : mappingSession.preview.availableColumns.map((column) => ({
+                                address: column,
+                                heading: column,
+                              }))).map((column) => (
+                            <option key={column.address} value={column.address}>
+                              {column.heading
+                                ? `${column.address} — ${column.heading}`
+                                : column.address}
                             </option>
                           ))}
                         </select>

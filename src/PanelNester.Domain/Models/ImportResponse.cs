@@ -12,9 +12,18 @@ public sealed record ImportResponse
 
     public IReadOnlyList<string> AvailableColumns { get; init; } = Array.Empty<string>();
 
+    public IReadOnlyList<ImportSourceColumn> SourceColumns { get; init; } = Array.Empty<ImportSourceColumn>();
+
     public IReadOnlyList<ImportFieldMappingStatus> ColumnMappings { get; init; } = Array.Empty<ImportFieldMappingStatus>();
 
     public IReadOnlyList<ImportMaterialResolution> MaterialResolutions { get; init; } = Array.Empty<ImportMaterialResolution>();
 
     public ImportWorksheetDescriptor? Worksheet { get; init; }
+}
+
+public sealed record ImportSourceColumn
+{
+    public string Address { get; init; } = string.Empty;
+
+    public string Heading { get; init; } = string.Empty;
 }

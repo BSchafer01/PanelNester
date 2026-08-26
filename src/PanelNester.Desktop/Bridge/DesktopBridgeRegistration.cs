@@ -374,6 +374,16 @@ public static class DesktopBridgeRegistration
                 try
                 {
                     using var finalization = importSessions.BeginFinalization(request.SessionId, cancellationToken);
+                    if (finalization.IsWorkbook && request.Worksheets.Count == 0)
+                    {
+                        return ImportSessionResponse.Failure(
+                            request.SessionId,
+                            null,
+                            ImportSessionPhase.Failed,
+                            "import-worksheet-selection-required",
+                            "Select at least one Worksheet before finalizing the Import Session.");
+                    }
+
                     if (request.Worksheets.Count > 0)
                     {
                         var worksheetImports = new List<FinalizedWorksheetImport>();
@@ -2192,6 +2202,7 @@ public static class DesktopBridgeRegistration
             BuildImportFileMessage(response, result.ImportSource.ImportSourcePath))
         {
             Workbook = result.Workbook,
+            SourceColumns = response.SourceColumns,
             Worksheet = response.Worksheet
         };
     }
@@ -2275,6 +2286,7 @@ public static class DesktopBridgeRegistration
                 Errors = responses.SelectMany(response => response.Errors).ToArray(),
                 Warnings = responses.SelectMany(response => response.Warnings).ToArray(),
                 AvailableColumns = responses.FirstOrDefault()?.AvailableColumns ?? Array.Empty<string>(),
+                SourceColumns = responses.FirstOrDefault()?.SourceColumns ?? Array.Empty<ImportSourceColumn>(),
                 ColumnMappings = responses.FirstOrDefault()?.ColumnMappings ?? Array.Empty<ImportFieldMappingStatus>(),
                 MaterialResolutions = responses
                     .SelectMany(response => response.MaterialResolutions)

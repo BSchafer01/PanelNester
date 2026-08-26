@@ -89,11 +89,34 @@ internal sealed class ImportMappingResolver
         ICollection<ValidationError> errors)
     {
         ArgumentNullException.ThrowIfNull(availableColumns);
+        return ResolveColumnCandidates(
+            availableColumns.Select(column => new SourceColumnCandidate(column, column)).ToArray(),
+            options,
+            errors);
+    }
+
+    public ColumnMappingPlan ResolveWorksheetColumns(
+        IReadOnlyList<ImportSourceColumn> sourceColumns,
+        ImportOptions? options,
+        ICollection<ValidationError> errors)
+    {
+        ArgumentNullException.ThrowIfNull(sourceColumns);
+        return ResolveColumnCandidates(
+            sourceColumns.Select(column => new SourceColumnCandidate(column.Address, column.Heading)).ToArray(),
+            options,
+            errors);
+    }
+
+    private static ColumnMappingPlan ResolveColumnCandidates(
+        IReadOnlyList<SourceColumnCandidate> sourceColumns,
+        ImportOptions? options,
+        ICollection<ValidationError> errors)
+    {
         ArgumentNullException.ThrowIfNull(errors);
 
-        var availableSet = availableColumns
-            .Where(column => !string.IsNullOrWhiteSpace(column))
-            .Select(column => column.Trim())
+        var availableSet = sourceColumns
+            .Where(column => !string.IsNullOrWhiteSpace(column.Identifier))
+            .Select(column => column.Identifier.Trim())
             .ToHashSet(StringComparer.Ordinal);
         var explicitMappings = new Dictionary<string, string>(StringComparer.Ordinal);
         var explicitTargets = new HashSet<string>(StringComparer.Ordinal);
@@ -153,7 +176,7 @@ internal sealed class ImportMappingResolver
             ResolveFieldMapping(
                 field,
                 isRequired: true,
-                availableColumns,
+                sourceColumns,
                 availableSet,
                 explicitMappings,
                 explicitTargets,
@@ -169,7 +192,7 @@ internal sealed class ImportMappingResolver
             ResolveFieldMapping(
                 field,
                 isRequired: false,
-                availableColumns,
+                sourceColumns,
                 availableSet,
                 explicitMappings,
                 explicitTargets,
@@ -259,7 +282,7 @@ internal sealed class ImportMappingResolver
 
     private static string? FindSuggestedSource(
         string field,
-        IReadOnlyList<string> availableColumns,
+        IReadOnlyList<SourceColumnCandidate> sourceColumns,
         IReadOnlySet<string> resolvedSources)
     {
         if (!SuggestedHeaderAliases.TryGetValue(field, out var aliases))
@@ -269,17 +292,17 @@ internal sealed class ImportMappingResolver
 
         var aliasSet = aliases.ToHashSet(StringComparer.Ordinal);
 
-        foreach (var column in availableColumns)
+        foreach (var column in sourceColumns)
         {
-            var trimmedColumn = column?.Trim() ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(trimmedColumn) || resolvedSources.Contains(trimmedColumn))
+            var identifier = column.Identifier.Trim();
+            if (string.IsNullOrWhiteSpace(identifier) || resolvedSources.Contains(identifier))
             {
                 continue;
             }
 
-            if (aliasSet.Contains(Normalize(trimmedColumn)))
+            if (aliasSet.Contains(Normalize(column.Heading.Trim())))
             {
-                return trimmedColumn;
+                return identifier;
             }
         }
 
@@ -322,7 +345,7 @@ internal sealed class ImportMappingResolver
     private static void ResolveFieldMapping(
         string field,
         bool isRequired,
-        IReadOnlyList<string> availableColumns,
+        IReadOnlyList<SourceColumnCandidate> sourceColumns,
         IReadOnlySet<string> availableSet,
         IReadOnlyDictionary<string, string> explicitMappings,
         IReadOnlySet<string> explicitTargets,
@@ -334,9 +357,16 @@ internal sealed class ImportMappingResolver
     {
         explicitMappings.TryGetValue(field, out var sourceColumn);
 
-        if (sourceColumn is null && !explicitTargets.Contains(field) && availableSet.Contains(field))
+        if (sourceColumn is null && !explicitTargets.Contains(field))
         {
-            sourceColumn = field;
+            sourceColumn = sourceColumns
+                .FirstOrDefault(column =>
+                    !resolvedSources.Contains(column.Identifier) &&
+                    string.Equals(
+                        column.Heading.Trim(),
+                        field,
+                        StringComparison.Ordinal))
+                ?.Identifier;
         }
 
         if (sourceColumn is not null)
@@ -346,7 +376,7 @@ internal sealed class ImportMappingResolver
         }
 
         var suggestion = sourceColumn is null
-            ? FindSuggestedSource(field, availableColumns, resolvedSources)
+            ? FindSuggestedSource(field, sourceColumns, resolvedSources)
             : null;
 
         if (sourceColumn is null && isRequired)
@@ -370,6 +400,8 @@ internal sealed record ColumnMappingPlan(
     IReadOnlyList<ImportFieldMappingStatus> FieldMappings,
     IReadOnlyDictionary<string, string> FieldToSource,
     bool HasAllRequiredFields);
+
+internal sealed record SourceColumnCandidate(string Identifier, string Heading);
 
 internal sealed record MaterialMappingPlan(
     IReadOnlyList<PartRowUpdate> Updates,

@@ -36,6 +36,58 @@ public sealed class XlsxImportServiceSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Excel_import_uses_column_addresses_to_distinguish_duplicate_headings()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "duplicate-headings.xlsx");
+        using (var workbook = new XLWorkbook())
+        {
+            var worksheet = workbook.AddWorksheet("Parts");
+            string[] headings = ["Id", "Length", "Width", "Quantity", "Material", "Width"];
+            for (var index = 0; index < headings.Length; index++)
+            {
+                worksheet.Cell(1, index + 1).Value = headings[index];
+            }
+
+            worksheet.Cell(2, 1).Value = "P-001";
+            worksheet.Cell(2, 2).Value = 20;
+            worksheet.Cell(2, 3).Value = 10;
+            worksheet.Cell(2, 4).Value = 1;
+            worksheet.Cell(2, 5).Value = "Demo Material";
+            worksheet.Cell(2, 6).Value = 42;
+            workbook.SaveAs(workbookPath);
+        }
+
+        var response = await new XlsxImportService().ImportAsync(new ImportRequest
+        {
+            FilePath = workbookPath,
+            Options = new ImportOptions
+            {
+                ColumnMappings =
+                [
+                    new ImportColumnMapping
+                    {
+                        SourceColumn = "F",
+                        TargetField = ImportFieldNames.Width
+                    }
+                ]
+            }
+        });
+
+        Assert.True(response.Success);
+        Assert.Equal(42m, Assert.Single(response.Parts).Width);
+        Assert.Contains(
+            response.SourceColumns,
+            column => column.Address == "C" && column.Heading == "Width");
+        Assert.Contains(
+            response.SourceColumns,
+            column => column.Address == "F" && column.Heading == "Width");
+        Assert.Contains(
+            response.ColumnMappings,
+            mapping => mapping.TargetField == ImportFieldNames.Width && mapping.SourceColumn == "F");
+    }
+
+    [Fact]
     public async Task Xlsx_import_matches_csv_validation_output_for_equivalent_rows()
     {
         Directory.CreateDirectory(_workspacePath);
@@ -274,6 +326,9 @@ public sealed class XlsxImportServiceSpecs : IDisposable
         response with
         {
             Worksheet = null,
+            AvailableColumns = Array.Empty<string>(),
+            SourceColumns = Array.Empty<ImportSourceColumn>(),
+            ColumnMappings = Array.Empty<ImportFieldMappingStatus>(),
             Parts = response.Parts.Select(part => part with
             {
                 SourceReferences = Array.Empty<SourceReference>()

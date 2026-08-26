@@ -26,6 +26,7 @@ public sealed class ImportResultsRevisionGateSpecs
         Assert.Contains("workbook.initialWorksheetName || workbook.worksheets[0]?.worksheetName", draftState);
         Assert.Contains("optimizationGroupName: worksheet.worksheetName", draftState);
         Assert.Contains("setWorkbookWorksheetSelected", importPage);
+        Assert.Contains("`${column.address} — ${column.heading}`", importPage);
         Assert.Contains("selectedWorksheetDrafts.map((draft) => ({", app);
         Assert.Contains("Select all Worksheets", importPage);
         Assert.Contains("Clear selection", importPage);

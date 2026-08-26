@@ -50,6 +50,7 @@ const preview = {
   errors: [],
   warnings: [],
   availableColumns: ['Id'],
+  sourceColumns: [],
   columnMappings: [],
   materialResolutions: [],
 };

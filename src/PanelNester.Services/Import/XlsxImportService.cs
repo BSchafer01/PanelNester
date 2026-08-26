@@ -62,6 +62,7 @@ public sealed class XlsxImportService : IImportService
         var warnings = new List<ValidationWarning>();
         var rowUpdates = new List<PartRowUpdate>();
         var availableColumns = Array.Empty<string>();
+        var sourceColumns = Array.Empty<ImportSourceColumn>();
         IReadOnlyList<ImportFieldMappingStatus> columnMappings = Array.Empty<ImportFieldMappingStatus>();
         IReadOnlyList<ImportMaterialResolution> materialResolutions = Array.Empty<ImportMaterialResolution>();
         ImportWorksheetDescriptor? worksheetDescriptor = null;
@@ -111,10 +112,15 @@ public sealed class XlsxImportService : IImportService
                 HeadingRange = $"R{headerRow.RowNumber()}C1:R{headerRow.RowNumber()}C{lastHeaderColumn}"
             };
 
-            availableColumns = Enumerable.Range(1, lastHeaderColumn)
-                .Select(columnNumber => GetCellText(headerRow.Cell(columnNumber)))
+            sourceColumns = Enumerable.Range(1, lastHeaderColumn)
+                .Select(columnNumber => new ImportSourceColumn
+                {
+                    Address = headerRow.Cell(columnNumber).Address.ColumnLetter,
+                    Heading = GetCellText(headerRow.Cell(columnNumber))
+                })
                 .ToArray();
-            var columnPlan = _mappingResolver.ResolveColumns(availableColumns, request.Options, errors);
+            availableColumns = sourceColumns.Select(column => column.Address).ToArray();
+            var columnPlan = _mappingResolver.ResolveWorksheetColumns(sourceColumns, request.Options, errors);
             columnMappings = columnPlan.FieldMappings;
 
             if (!columnPlan.HasAllRequiredFields)
@@ -122,15 +128,14 @@ public sealed class XlsxImportService : IImportService
                 return PartRowValidator.CreateResponse([], errors, warnings) with
                 {
                     AvailableColumns = availableColumns,
+                    SourceColumns = sourceColumns,
                     ColumnMappings = columnMappings
                 };
             }
 
-            var headerMap = availableColumns
-                .Select((header, index) => new { header, columnNumber = index + 1 })
-                .Where(item => !string.IsNullOrWhiteSpace(item.header))
-                .GroupBy(item => item.header, StringComparer.Ordinal)
-                .ToDictionary(group => group.Key, group => group.First().columnNumber, StringComparer.Ordinal);
+            var headerMap = sourceColumns
+                .Select((column, index) => new { column.Address, columnNumber = index + 1 })
+                .ToDictionary(item => item.Address, item => item.columnNumber, StringComparer.Ordinal);
 
             var rowIndex = 0;
             var hasGroupColumn = columnPlan.FieldToSource.TryGetValue(ImportFieldNames.Group, out var groupSourceColumn);
@@ -194,6 +199,7 @@ public sealed class XlsxImportService : IImportService
         return _validator.ValidateRows(rowUpdates, knownMaterials, errors, warnings) with
         {
             AvailableColumns = availableColumns,
+            SourceColumns = sourceColumns,
             ColumnMappings = columnMappings,
             MaterialResolutions = materialResolutions,
             Worksheet = worksheetDescriptor
