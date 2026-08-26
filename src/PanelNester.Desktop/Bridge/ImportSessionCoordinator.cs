@@ -355,7 +355,12 @@ internal sealed class ImportSessionCoordinator
                     worksheet.HeadingRange,
                     BuildColumnMappingSignature(response.ColumnMappings.Select(mapping =>
                         (mapping.TargetField, mapping.SourceColumn))),
-                    materialResolutions);
+                    materialResolutions,
+                    response.Errors,
+                    response.Parts.ToDictionary(
+                        part => part.RowId,
+                        part => part.SourceReferences,
+                        StringComparer.Ordinal));
             }
         }
 
@@ -378,7 +383,44 @@ internal sealed class ImportSessionCoordinator
                         "import-worksheet-not-ready",
                         $"Worksheet '{selection.WorksheetName}' must be previewed with its confirmed Heading Range and Column Mappings before finalization.");
                 }
+
+                var unresolvedError = preview.Errors.FirstOrDefault(error =>
+                    !string.Equals(error.Code, "material-not-found", StringComparison.Ordinal) &&
+                    !IsResolved(error, selection, preview.SourceReferencesByRowId));
+                if (unresolvedError is not null)
+                {
+                    throw new ImportSessionException(
+                        "import-worksheet-has-blockers",
+                        $"Worksheet '{selection.WorksheetName}' still has unresolved validation errors.");
+                }
             }
+        }
+
+        private static bool IsResolved(
+            ValidationError error,
+            ImportWorksheetSelection selection,
+            IReadOnlyDictionary<string, IReadOnlyList<SourceReference>> sourceReferencesByRowId)
+        {
+            if (string.IsNullOrWhiteSpace(error.RowId) ||
+                !sourceReferencesByRowId.TryGetValue(error.RowId, out var sourceReferences))
+            {
+                return false;
+            }
+
+            var excluded = selection.ExcludedSourceRows.Any(row =>
+                string.Equals(row.RowId, error.RowId, StringComparison.Ordinal) &&
+                sourceReferences.Any(reference => reference.MatchesIdentity(row.SourceReference)));
+            if (excluded)
+            {
+                return true;
+            }
+
+            return selection.PartOverrides.Any(partOverride =>
+                string.Equals(partOverride.RowId, error.RowId, StringComparison.Ordinal) &&
+                partOverride.CurrentValues.ValidationStatus != ValidationStatuses.Error &&
+                partOverride.SourceReferences.Count > 0 &&
+                partOverride.SourceReferences.All(overrideReference =>
+                    sourceReferences.Any(reference => reference.MatchesIdentity(overrideReference))));
         }
 
         public CancellationToken BeginOperation(CancellationToken cancellationToken)
@@ -470,7 +512,11 @@ internal sealed class ImportSessionCoordinator
             {
                 if (!string.Equals(error.Code, "material-not-found", StringComparison.Ordinal))
                 {
-                    return null;
+                    if (error.RowId is null || error.Location is null)
+                    {
+                        return null;
+                    }
+                    continue;
                 }
 
                 hasMaterialErrors = true;
@@ -577,7 +623,9 @@ internal sealed class ImportSessionCoordinator
             int OriginalPosition,
             string HeadingRange,
             string ColumnMappingSignature,
-            IReadOnlyList<ReadyMaterialResolution> MaterialResolutions);
+            IReadOnlyList<ReadyMaterialResolution> MaterialResolutions,
+            IReadOnlyList<ValidationError> Errors,
+            IReadOnlyDictionary<string, IReadOnlyList<SourceReference>> SourceReferencesByRowId);
 
         private sealed record ReadyMaterialResolution(
             string SourceMaterialName,

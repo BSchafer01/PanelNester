@@ -7,6 +7,7 @@ import type {
   ImportPreviewSummary,
   ImportSourceColumn,
   ImportWorksheetDraft,
+  PartRow,
   WorkbookDiscovery,
 } from '../types/contracts';
 
@@ -20,8 +21,9 @@ export function summarizeWorkbookPreview(
     sourceRowCount: draft.preview.parts.reduce(
       (count, part) => count + Math.max(1, part.sourceReferences?.length ?? 0),
       0,
-    ),
+    ) + draft.excludedSourceRows.length,
     importedPartCount: draft.preview.parts.length,
+    excludedRowCount: draft.excludedSourceRows.length,
     issueCount: draft.preview.errors.length + draft.preview.warnings.length,
   }));
   const groupedDrafts = new Map<string, ImportWorksheetDraft[]>();
@@ -36,6 +38,9 @@ export function summarizeWorkbookPreview(
     const parts = groupDrafts.flatMap((draft) => draft.preview.parts);
     const sourceRowCount = parts.reduce(
       (count, part) => count + Math.max(1, part.sourceReferences?.length ?? 0),
+      0,
+    ) + groupDrafts.reduce(
+      (count, draft) => count + draft.excludedSourceRows.length,
       0,
     );
     const compatibleKeys = new Set<string>();
@@ -95,7 +100,97 @@ export function createWorkbookWorksheetDrafts(
     hasPendingChanges: worksheet.worksheetName !== initialWorksheetName,
     headingRange: worksheet.headingRange,
     headingRangeConfirmed: false,
+    excludedSourceRows: [],
+    partOverrides: [],
   }));
+}
+
+export function editInvalidSourceRow(
+  draft: ImportWorksheetDraft,
+  rowId: string,
+  currentValues: PartRow,
+): ImportWorksheetDraft {
+  const importedValues = draft.preview.parts.find((part) => part.rowId === rowId);
+  if (!importedValues) {
+    return draft;
+  }
+
+  const sourceReferences = importedValues.sourceReferences ?? [];
+  const existing = draft.partOverrides.find((item) => item.rowId === rowId);
+  const partOverride = {
+    rowId,
+    importedValues: existing?.importedValues ?? importedValues,
+    currentValues: { ...currentValues, sourceReferences },
+    sourceReferences,
+  };
+  const errors = draft.preview.errors.filter((error) => error.rowId !== rowId);
+  const warnings = draft.preview.warnings.filter((warning) => warning.rowId !== rowId);
+  return {
+    ...draft,
+    preview: {
+      ...draft.preview,
+      success: errors.length === 0,
+      parts: draft.preview.parts.map((part) =>
+        part.rowId === rowId ? partOverride.currentValues : part,
+      ),
+      errors,
+      warnings,
+    },
+    partOverrides: [
+      ...draft.partOverrides.filter((item) => item.rowId !== rowId),
+      partOverride,
+    ],
+  };
+}
+
+export function excludeInvalidSourceRow(
+  draft: ImportWorksheetDraft,
+  rowId: string,
+): ImportWorksheetDraft {
+  const sourceRow = draft.preview.parts.find((part) => part.rowId === rowId);
+  const originalValidationError = draft.preview.errors.find((error) => error.rowId === rowId);
+  const sourceReference = sourceRow?.sourceReferences?.[0];
+  if (!sourceRow || !originalValidationError || !sourceReference) {
+    return draft;
+  }
+
+  const errors = draft.preview.errors.filter((error) => error.rowId !== rowId);
+  return {
+    ...draft,
+    preview: {
+      ...draft.preview,
+      success: errors.length === 0,
+      parts: draft.preview.parts.filter((part) => part.rowId !== rowId),
+      errors,
+      warnings: draft.preview.warnings.filter((warning) => warning.rowId !== rowId),
+    },
+    excludedSourceRows: [
+      ...draft.excludedSourceRows.filter((item) => item.rowId !== rowId),
+      { rowId, sourceReference, originalValidationError, sourceRow },
+    ],
+    partOverrides: draft.partOverrides.filter((item) => item.rowId !== rowId),
+  };
+}
+
+export function restoreExcludedSourceRow(
+  draft: ImportWorksheetDraft,
+  rowId: string,
+): ImportWorksheetDraft {
+  const excluded = draft.excludedSourceRows.find((item) => item.rowId === rowId);
+  if (!excluded) {
+    return draft;
+  }
+
+  return {
+    ...draft,
+    preview: {
+      ...draft.preview,
+      success: false,
+      parts: [...draft.preview.parts, excluded.sourceRow],
+      errors: [...draft.preview.errors, excluded.originalValidationError],
+    },
+    excludedSourceRows: draft.excludedSourceRows.filter((item) => item.rowId !== rowId),
+  };
 }
 
 export interface WorksheetDraftOperationResult {

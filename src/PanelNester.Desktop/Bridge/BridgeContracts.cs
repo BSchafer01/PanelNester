@@ -362,6 +362,12 @@ public sealed record ImportWorksheetSelection
     public string OptimizationGroupName { get; init; } = string.Empty;
 
     public string HeadingRange { get; init; } = string.Empty;
+
+    public IReadOnlyList<ExcludedSourceRow> ExcludedSourceRows { get; init; } =
+        Array.Empty<ExcludedSourceRow>();
+
+    public IReadOnlyList<PartOverride> PartOverrides { get; init; } =
+        Array.Empty<PartOverride>();
 }
 
 public sealed record FinalizeImportSessionRequest

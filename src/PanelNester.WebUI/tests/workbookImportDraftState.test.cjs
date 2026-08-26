@@ -36,10 +36,14 @@ const {
   copyColumnMappingsFromPreviousSelectedWorksheet,
   copyHeadingRangeFromPreviousSelectedWorksheet,
   createWorkbookWorksheetDrafts,
+  editInvalidSourceRow,
+  excludeInvalidSourceRow,
   getWorksheetNavigationStatus,
   headingRangeFromPreviewCells,
   mergeRecognizedColumnMappings,
   setWorkbookWorksheetSelected,
+  restoreExcludedSourceRow,
+  summarizeWorkbookPreview,
   summarizeHighConfidenceHeadingRanges,
   synchronizeWorkbookMaterialResolution,
 } = loadTsModule(statePath);
@@ -361,4 +365,69 @@ test('Worksheet navigation exposes heading, mapping, error, and ready states wit
     getWorksheetNavigationStatus({ ...base, headingRangeConfirmed: true, preview: { ...mappedPreview, errors: [{ code: 'bad-row', message: 'Bad row' }] } }),
     getWorksheetNavigationStatus({ ...base, headingRangeConfirmed: true, preview: mappedPreview, hasPendingChanges: false }),
   ], ['Needs heading', 'Needs mapping', 'Has errors', 'Ready']);
+});
+
+test('invalid source rows can be corrected with imported values and Source References retained', () => {
+  const sourceReference = {
+    worksheetName: 'First', worksheetPosition: 1, physicalRow: 7, sourceFingerprint: 'ABC123',
+  };
+  const invalid = {
+    rowId: 'row-7', importedId: 'P-7', lengthText: 'bad', length: 0,
+    widthText: '24', width: 24, quantityText: '1', quantity: 1,
+    materialName: 'ACM', isManual: false, validationStatus: 'error',
+    validationMessages: ['Length must be a decimal value.'], sourceReferences: [sourceReference],
+  };
+  const draft = {
+    ...createWorkbookWorksheetDrafts('fixture', workbook, preview, options)[0],
+    preview: { ...preview, success: false, parts: [invalid], errors: [{
+      code: 'invalid-length', message: 'Length must be a decimal value.', rowId: 'row-7',
+      location: sourceReference,
+    }] },
+  };
+
+  const edited = editInvalidSourceRow(draft, 'row-7', { ...invalid, lengthText: '48', length: 48 });
+
+  assert.equal(edited.preview.parts[0].length, 48);
+  assert.equal(edited.partOverrides.length, 1);
+  assert.equal(edited.partOverrides[0].importedValues.lengthText, 'bad');
+  assert.equal(edited.partOverrides[0].currentValues.lengthText, '48');
+  assert.deepEqual(edited.partOverrides[0].sourceReferences, [sourceReference]);
+  assert.equal(edited.preview.errors.length, 0);
+});
+
+test('invalid source rows are excluded only explicitly and can be restored with the original error', () => {
+  const sourceReference = {
+    worksheetName: 'First', worksheetPosition: 1, physicalRow: 9, sourceFingerprint: 'DEF456',
+  };
+  const invalid = {
+    rowId: 'row-9', importedId: '', lengthText: '48', length: 48,
+    widthText: '24', width: 24, quantityText: '1', quantity: 1,
+    materialName: 'ACM', isManual: false, validationStatus: 'error',
+    validationMessages: ['Id is required.'], sourceReferences: [sourceReference],
+  };
+  const base = {
+    ...createWorkbookWorksheetDrafts('fixture', workbook, preview, options)[0],
+    preview: { ...preview, success: false, parts: [invalid], errors: [{
+      code: 'missing-id', message: 'Id is required.', rowId: 'row-9', location: sourceReference,
+    }] },
+  };
+
+  const excluded = excludeInvalidSourceRow(base, 'row-9');
+  assert.equal(excluded.preview.parts.length, 0);
+  assert.equal(excluded.excludedSourceRows.length, 1);
+  assert.equal(excluded.excludedSourceRows[0].sourceReference.sourceFingerprint, 'DEF456');
+  assert.equal(excluded.excludedSourceRows[0].originalValidationError.code, 'missing-id');
+  assert.deepEqual(summarizeWorkbookPreview([excluded]).worksheets[0], {
+    worksheetName: 'First', originalPosition: 1, sourceRowCount: 1,
+    importedPartCount: 0, excludedRowCount: 1, issueCount: 0,
+  });
+  assert.equal(
+    summarizeWorkbookPreview([excluded]).optimizationGroups[0].sourceRowCount,
+    1,
+  );
+
+  const restored = restoreExcludedSourceRow(excluded, 'row-9');
+  assert.equal(restored.preview.parts.length, 1);
+  assert.equal(restored.preview.errors[0].code, 'missing-id');
+  assert.equal(restored.excludedSourceRows.length, 0);
 });

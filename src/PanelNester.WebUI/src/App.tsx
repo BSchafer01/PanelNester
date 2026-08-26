@@ -3603,6 +3603,8 @@ export default function App() {
               optimizationGroupId: draft.optimizationGroupId,
               optimizationGroupName: draft.optimizationGroupName,
               headingRange: draft.headingRange,
+              excludedSourceRows: draft.excludedSourceRows,
+              partOverrides: draft.partOverrides,
             })),
           }),
           session.sessionId,

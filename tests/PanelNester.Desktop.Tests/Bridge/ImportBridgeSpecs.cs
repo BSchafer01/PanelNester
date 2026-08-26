@@ -13,6 +13,308 @@ namespace PanelNester.Desktop.Tests.Bridge;
 
 public sealed class ImportBridgeSpecs : IDisposable
 {
+    [Fact]
+    public async Task Workbook_finalization_revalidates_a_Part_Override_marked_valid_by_the_caller()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "invalid-override.xlsx");
+        using (var workbook = new XLWorkbook())
+        {
+            WriteWorkbookWorksheet(workbook.AddWorksheet("Parts"), "PART", "Demo Material");
+            workbook.Worksheet("Parts").Cell("B2").Value = "bad";
+            workbook.SaveAs(workbookPath);
+        }
+
+        var dispatcher = CreateDispatcher();
+        const string sessionId = "invalid-override-session";
+        await DispatchAsync<ImportSessionResponse>(dispatcher, BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest { SessionId = sessionId, ImportSourcePath = workbookPath });
+        var preview = await DispatchAsync<ImportSessionResponse>(dispatcher, BridgeMessageTypes.PreviewImportSession,
+            new PreviewImportSessionRequest
+            {
+                SessionId = sessionId, WorksheetName = "Parts", HeadingRange = "A1:E1",
+                Options = RequiredWorkbookOptions()
+            });
+        var imported = Assert.Single(preview.Parts);
+        var reference = Assert.Single(imported.SourceReferences);
+        var forgedCurrentValues = imported with
+        {
+            LengthText = "48",
+            Length = 48,
+            RowNumber = -1,
+            ValidationStatus = ValidationStatuses.Valid,
+            ValidationMessages = []
+        };
+        var selection = SelectionFromPreview(preview, "parts", "Parts", RequiredWorkbookOptions()) with
+        {
+            PartOverrides =
+            [
+                new PartOverride
+                {
+                    RowId = imported.RowId,
+                    ImportedValues = imported,
+                    CurrentValues = forgedCurrentValues,
+                    SourceReferences = [reference]
+                }
+            ]
+        };
+
+        var finalized = await DispatchAsync<ImportSessionResponse>(dispatcher, BridgeMessageTypes.FinalizeImportSession,
+            new FinalizeImportSessionRequest
+            {
+                SessionId = sessionId,
+                Project = new Project { ProjectId = "invalid-override-project" },
+                Worksheets = [selection]
+            });
+
+        Assert.False(finalized.Success);
+        Assert.Contains(finalized.Errors, error => error.Code == "row-number-out-of-range");
+    }
+
+    [Fact]
+    public async Task Warning_Worksheet_finalizes_after_a_blocking_Worksheet_is_deselected()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "warning-and-blocker.xlsx");
+        using (var workbook = new XLWorkbook())
+        {
+            WriteWorkbookWorksheet(workbook.AddWorksheet("Warning"), "WARN", "Demo Material");
+            workbook.Worksheet("Warning").Cell("D2").Value = 10001;
+            WriteWorkbookWorksheet(workbook.AddWorksheet("Blocked"), "BLOCKED", "Demo Material");
+            workbook.Worksheet("Blocked").Cell("B2").Value = "bad";
+            workbook.SaveAs(workbookPath);
+        }
+
+        var dispatcher = CreateDispatcher();
+        const string sessionId = "warning-and-blocker-session";
+        await DispatchAsync<ImportSessionResponse>(dispatcher, BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest { SessionId = sessionId, ImportSourcePath = workbookPath });
+        var warningPreview = await DispatchAsync<ImportSessionResponse>(dispatcher, BridgeMessageTypes.PreviewImportSession,
+            new PreviewImportSessionRequest
+            {
+                SessionId = sessionId, WorksheetName = "Warning", HeadingRange = "A1:E1",
+                Options = RequiredWorkbookOptions()
+            });
+        var blockedPreview = await DispatchAsync<ImportSessionResponse>(dispatcher, BridgeMessageTypes.PreviewImportSession,
+            new PreviewImportSessionRequest
+            {
+                SessionId = sessionId, WorksheetName = "Blocked", HeadingRange = "A1:E1",
+                Options = RequiredWorkbookOptions()
+            });
+
+        Assert.True(warningPreview.Success);
+        Assert.Single(warningPreview.Warnings);
+        Assert.Equal("WARN", Assert.Single(warningPreview.Parts).ImportedId);
+        Assert.False(blockedPreview.Success);
+        Assert.Equal("BLOCKED", Assert.Single(blockedPreview.Parts).ImportedId);
+        var warningSelection = SelectionFromPreview(
+            warningPreview, "warning", "Warning", RequiredWorkbookOptions());
+
+        var finalized = await DispatchAsync<ImportSessionResponse>(dispatcher, BridgeMessageTypes.FinalizeImportSession,
+            new FinalizeImportSessionRequest
+            {
+                SessionId = sessionId,
+                Project = new Project { ProjectId = "warning-and-blocker-project" },
+                Worksheets = [warningSelection]
+            });
+
+        Assert.True(finalized.Success);
+        Assert.Equal("WARN", Assert.Single(finalized.Parts).ImportedId);
+        Assert.Single(finalized.Warnings);
+        Assert.Equal("Warning", Assert.Single(finalized.Project!.State.ImportConfiguration!.Worksheets).WorksheetName);
+    }
+
+    [Fact]
+    public void Corrected_source_rows_retain_override_provenance_and_only_invalidate_their_Optimization_Group()
+    {
+        var reference = new SourceReference
+        {
+            WorksheetName = "Parts",
+            WorksheetPosition = 1,
+            PhysicalRow = 2,
+            SourceFingerprint = "SOURCE-FINGERPRINT"
+        };
+        var imported = new PartRow
+        {
+            RowId = "row-1",
+            ImportedId = "P-1",
+            LengthText = "bad",
+            WidthText = "24",
+            Width = 24,
+            QuantityText = "1",
+            Quantity = 1,
+            MaterialName = "Demo Material",
+            ValidationStatus = ValidationStatuses.Error,
+            ValidationMessages = ["Length must be a decimal value."],
+            SourceReferences = [reference]
+        };
+        var corrected = imported with
+        {
+            LengthText = "48",
+            Length = 48,
+            QuantityText = "10001",
+            Quantity = 10001,
+            ValidationStatus = ValidationStatuses.Warning,
+            ValidationMessages = ["Quantity is very large."]
+        };
+        var partOverride = new PartOverride
+        {
+            RowId = imported.RowId,
+            ImportedValues = imported with { ImportedId = "FORGED" },
+            CurrentValues = corrected,
+            SourceReferences = [reference]
+        };
+        var selection = new ImportWorksheetSelection
+        {
+            WorksheetName = "Parts",
+            OriginalPosition = 1,
+            HeadingRange = "A1:E1",
+            OptimizationGroupId = "affected",
+            OptimizationGroupName = "Affected",
+            PartOverrides = [partOverride]
+        };
+        var importedResponse = new ImportResponse
+        {
+            Success = false,
+            Parts = [imported],
+            Errors = [new ValidationError("invalid-length", "Length must be a decimal value.", imported.RowId, reference)],
+            Worksheet = new ImportWorksheetDescriptor
+            {
+                WorksheetName = "Parts", OriginalPosition = 1, HeadingRange = "A1:E1"
+            }
+        };
+        var validatedResponse = importedResponse with
+        {
+            Success = true,
+            Parts = [corrected],
+            Errors = [],
+            Warnings = [new ValidationWarning("quantity-large", "Quantity is very large.", imported.RowId, reference)]
+        };
+        selection = ProjectImportFinalizer.ReconcilePartOverrides(
+            selection,
+            importedResponse,
+            validatedResponse);
+        var resolved = ProjectImportFinalizer.ResolveSourceRows(
+            validatedResponse,
+            selection);
+        var unaffectedResult = new NestResponse { Success = true };
+        var project = new Project
+        {
+            ProjectId = "override-project",
+            State = new ProjectState
+            {
+                OptimizationGroups =
+                [
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "affected", Name = "Affected", Order = 0,
+                        LastNestingResult = new NestResponse { Success = true },
+                        ResultStatus = OptimizationResultStatus.Valid
+                    },
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "unaffected", Name = "Unaffected", Order = 1,
+                        Parts = [new PartRow { RowId = "other", ImportedId = "OTHER" }],
+                        LastNestingResult = unaffectedResult,
+                        ResultStatus = OptimizationResultStatus.Valid
+                    }
+                ]
+            }
+        };
+
+        var finalized = ProjectImportFinalizer.FinalizeWorkbook(
+            project,
+            new ImportSourceMetadata { ImportSourcePath = "parts.xlsx" },
+            [new FinalizedWorksheetImport(selection, new ImportOptions(), resolved)]);
+
+        Assert.True(resolved.Success);
+        Assert.Single(resolved.Warnings);
+        Assert.Equal(48, Assert.Single(finalized.State.OptimizationGroups[0].Parts).Length);
+        Assert.Null(finalized.State.OptimizationGroups[0].LastNestingResult);
+        Assert.Same(unaffectedResult, finalized.State.OptimizationGroups[1].LastNestingResult);
+        var persisted = Assert.Single(finalized.State.ImportConfiguration!.PartOverrides);
+        Assert.Equal("P-1", persisted.ImportedValues.ImportedId);
+        Assert.Equal("bad", persisted.ImportedValues.LengthText);
+        Assert.Equal("48", persisted.CurrentValues.LengthText);
+        Assert.Equal("SOURCE-FINGERPRINT", Assert.Single(persisted.SourceReferences).SourceFingerprint);
+    }
+
+    [Fact]
+    public async Task Workbook_finalization_accepts_an_explicit_exclusion_and_persists_its_provenance()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "excluded-invalid-row.xlsx");
+        using (var workbook = new XLWorkbook())
+        {
+            var worksheet = workbook.AddWorksheet("Parts");
+            worksheet.Cell("A1").Value = "Id";
+            worksheet.Cell("B1").Value = "Length";
+            worksheet.Cell("C1").Value = "Width";
+            worksheet.Cell("D1").Value = "Quantity";
+            worksheet.Cell("E1").Value = "Material";
+            worksheet.Cell("A2").Value = "GOOD";
+            worksheet.Cell("B2").Value = 48;
+            worksheet.Cell("C2").Value = 24;
+            worksheet.Cell("D2").Value = 1;
+            worksheet.Cell("E2").Value = "Demo Material";
+            worksheet.Cell("A3").Value = "BAD";
+            worksheet.Cell("B3").Value = "not-a-length";
+            worksheet.Cell("C3").Value = 24;
+            worksheet.Cell("D3").Value = 1;
+            worksheet.Cell("E3").Value = "Demo Material";
+            workbook.SaveAs(workbookPath);
+        }
+
+        var dispatcher = CreateDispatcher();
+        const string sessionId = "excluded-invalid-row-session";
+        await DispatchAsync<ImportSessionResponse>(dispatcher, BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest { SessionId = sessionId, ImportSourcePath = workbookPath });
+        var preview = await DispatchAsync<ImportSessionResponse>(dispatcher, BridgeMessageTypes.PreviewImportSession,
+            new PreviewImportSessionRequest
+            {
+                SessionId = sessionId,
+                WorksheetName = "Parts",
+                HeadingRange = "A1:E1",
+                Options = RequiredWorkbookOptions()
+            });
+        Assert.False(preview.Success);
+        var invalidPart = Assert.Single(preview.Parts, part => part.ValidationStatus == ValidationStatuses.Error);
+        var sourceReference = Assert.Single(invalidPart.SourceReferences);
+        var validationError = Assert.Single(preview.Errors, error => error.RowId == invalidPart.RowId);
+        var selection = SelectionFromPreview(preview, "parts", "Parts", RequiredWorkbookOptions()) with
+        {
+            ExcludedSourceRows =
+            [
+                new ExcludedSourceRow
+                {
+                    RowId = invalidPart.RowId,
+                    SourceReference = sourceReference,
+                    OriginalValidationError = new SourceRowValidationError
+                    {
+                        Code = "forged-error",
+                        Message = "Caller supplied description"
+                    }
+                }
+            ]
+        };
+
+        var finalized = await DispatchAsync<ImportSessionResponse>(dispatcher, BridgeMessageTypes.FinalizeImportSession,
+            new FinalizeImportSessionRequest
+            {
+                SessionId = sessionId,
+                Project = new Project { ProjectId = "excluded-invalid-row-project" },
+                Worksheets = [selection]
+            });
+
+        Assert.True(finalized.Success);
+        Assert.Equal("GOOD", Assert.Single(finalized.Parts).ImportedId);
+        var persisted = Assert.Single(Assert.Single(finalized.Project!.State.ImportConfiguration!.Worksheets).ExcludedSourceRows);
+        Assert.Equal(3, persisted.SourceReference.PhysicalRow);
+        Assert.False(string.IsNullOrWhiteSpace(persisted.SourceReference.SourceFingerprint));
+        Assert.Equal("invalid-length", persisted.OriginalValidationError.Code);
+        Assert.Equal(1, Assert.Single(finalized.PreviewSummary!.Worksheets).ExcludedRowCount);
+    }
+
     [Theory]
     [InlineData(".xlsx", false)]
     [InlineData(".xlsm", true)]

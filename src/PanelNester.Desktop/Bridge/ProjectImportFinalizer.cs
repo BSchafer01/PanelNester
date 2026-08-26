@@ -1,9 +1,143 @@
 using PanelNester.Domain.Models;
+using PanelNester.Domain.Contracts;
 
 namespace PanelNester.Desktop.Bridge;
 
 internal static class ProjectImportFinalizer
 {
+    public static async Task<ImportResponse> ApplyPartOverridesAsync(
+        ImportResponse response,
+        IReadOnlyList<PartOverride> partOverrides,
+        IPartEditorService partEditorService,
+        CancellationToken cancellationToken)
+    {
+        var current = response;
+        foreach (var partOverride in partOverrides)
+        {
+            var imported = current.Parts.FirstOrDefault(part =>
+                string.Equals(part.RowId, partOverride.RowId, StringComparison.Ordinal));
+            if (imported is null ||
+                partOverride.SourceReferences.Count == 0 ||
+                !partOverride.SourceReferences.All(overrideReference =>
+                    imported.SourceReferences.Any(reference =>
+                        reference.MatchesIdentity(overrideReference))))
+            {
+                continue;
+            }
+
+            var values = partOverride.CurrentValues;
+            var validated = await partEditorService.UpdateRowAsync(
+                    current.Parts,
+                    new PartRowUpdate
+                    {
+                        RowId = imported.RowId,
+                        ImportedId = values.ImportedId,
+                        Length = values.LengthText ?? values.Length.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        Width = values.WidthText ?? values.Width.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        Quantity = values.QuantityText ?? values.Quantity.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        MaterialName = values.MaterialName,
+                        Group = values.Group,
+                        IsManual = false,
+                        SheetNumber = values.SheetNumber,
+                        RowNumber = values.RowNumber?.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ColumnNumber = values.ColumnNumber?.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        SourceReferences = imported.SourceReferences
+                    },
+                    cancellationToken)
+                .ConfigureAwait(false);
+            current = current with
+            {
+                Success = validated.Success,
+                Parts = validated.Parts,
+                Errors = validated.Errors,
+                Warnings = validated.Warnings
+            };
+        }
+
+        return current;
+    }
+
+    public static ImportWorksheetSelection ReconcilePartOverrides(
+        ImportWorksheetSelection selection,
+        ImportResponse importedResponse,
+        ImportResponse validatedResponse)
+    {
+        var importedPartsById = importedResponse.Parts.ToDictionary(part => part.RowId, StringComparer.Ordinal);
+        var partsById = validatedResponse.Parts.ToDictionary(part => part.RowId, StringComparer.Ordinal);
+        return selection with
+        {
+            PartOverrides = selection.PartOverrides.Select(partOverride =>
+                importedPartsById.TryGetValue(partOverride.RowId, out var importedValues) &&
+                partsById.TryGetValue(partOverride.RowId, out var currentValues)
+                    ? partOverride with
+                    {
+                        ImportedValues = importedValues,
+                        CurrentValues = currentValues,
+                        SourceReferences = currentValues.SourceReferences
+                    }
+                    : partOverride).ToArray(),
+            ExcludedSourceRows = selection.ExcludedSourceRows.Select(excluded =>
+            {
+                if (!importedPartsById.TryGetValue(excluded.RowId, out var importedValues))
+                {
+                    return excluded;
+                }
+
+                var sourceReference = importedValues.SourceReferences.FirstOrDefault(reference =>
+                    reference.MatchesIdentity(excluded.SourceReference));
+                var originalError = importedResponse.Errors.FirstOrDefault(error =>
+                    string.Equals(error.RowId, excluded.RowId, StringComparison.Ordinal));
+                return sourceReference is null || originalError is null
+                    ? excluded
+                    : excluded with
+                    {
+                        SourceReference = sourceReference,
+                        OriginalValidationError = new SourceRowValidationError
+                        {
+                            Code = originalError.Code,
+                            Message = originalError.Message
+                        }
+                    };
+            }).ToArray()
+        };
+    }
+
+    public static ImportResponse ResolveSourceRows(
+        ImportResponse response,
+        ImportWorksheetSelection selection)
+    {
+        var partsById = response.Parts.ToDictionary(part => part.RowId, StringComparer.Ordinal);
+        var excludedIds = selection.ExcludedSourceRows
+            .Where(row => partsById.TryGetValue(row.RowId, out var part) &&
+                part.SourceReferences.Any(reference => reference.MatchesIdentity(row.SourceReference)))
+            .Select(row => row.RowId)
+            .ToHashSet(StringComparer.Ordinal);
+        var overrides = selection.PartOverrides
+            .Where(partOverride => partsById.TryGetValue(partOverride.RowId, out var part) &&
+                part.ValidationStatus != ValidationStatuses.Error &&
+                partOverride.SourceReferences.Count > 0 &&
+                partOverride.SourceReferences.All(overrideReference =>
+                    part.SourceReferences.Any(reference => reference.MatchesIdentity(overrideReference))))
+            .ToDictionary(partOverride => partOverride.RowId, StringComparer.Ordinal);
+        var parts = response.Parts
+            .Where(part => !excludedIds.Contains(part.RowId))
+            .ToArray();
+        var resolvedIds = excludedIds.Concat(overrides.Keys).ToHashSet(StringComparer.Ordinal);
+        var errors = response.Errors
+            .Where(error => error.RowId is null || !resolvedIds.Contains(error.RowId))
+            .ToArray();
+        var warnings = response.Warnings
+            .Where(warning => warning.RowId is null || !excludedIds.Contains(warning.RowId))
+            .ToArray();
+        return response with
+        {
+            Success = errors.Length == 0,
+            Parts = parts,
+            Errors = errors,
+            Warnings = warnings
+        };
+    }
+
     public static Project FinalizeWorkbook(
         Project project,
         ImportSourceMetadata importSource,
@@ -39,11 +173,14 @@ internal static class ProjectImportFinalizer
                 "Every selected Worksheet must belong to an Optimization Group.");
         }
 
+        var selectedGroupIds = orderedImports
+            .Select(item => item.Selection.OptimizationGroupId)
+            .ToHashSet(StringComparer.Ordinal);
         var groups = project.State.OptimizationGroups
             .OrderBy(group => group.Order)
-            .Select(group => UpdateParts(
-                group,
-                group.Parts.Where(part => part.IsManual).ToArray()))
+            .Select(group => selectedGroupIds.Contains(group.OptimizationGroupId)
+                ? UpdateParts(group, group.Parts.Where(part => part.IsManual).ToArray())
+                : group)
             .ToList();
 
         foreach (var worksheetImport in orderedImports)
@@ -98,6 +235,7 @@ internal static class ProjectImportFinalizer
             {
                 MaterialMappings = resolvedMaterialMappings
             },
+            PartOverrides = orderedImports.SelectMany(item => item.Selection.PartOverrides).ToArray(),
             Worksheets = orderedImports.Select(item => new ImportWorksheetConfiguration
             {
                 WorksheetName = item.Selection.WorksheetName,
@@ -112,7 +250,7 @@ internal static class ProjectImportFinalizer
                     })
                     .ToArray(),
                 OptimizationGroupId = item.Selection.OptimizationGroupId,
-                ExcludedSourceRows = Array.Empty<int>()
+                ExcludedSourceRows = item.Selection.ExcludedSourceRows
             }).ToArray()
         };
 
@@ -226,7 +364,7 @@ internal static class ProjectImportFinalizer
                         HeadingRange = worksheet.HeadingRange,
                         ColumnMappings = resolvedColumnMappings,
                         OptimizationGroupId = optimizationGroupId,
-                        ExcludedSourceRows = Array.Empty<int>()
+                        ExcludedSourceRows = Array.Empty<ExcludedSourceRow>()
                     }
                 ]
         };

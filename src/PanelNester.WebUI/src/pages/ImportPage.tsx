@@ -7,9 +7,12 @@ import {
   confirmWorksheetHeadingRange,
   copyColumnMappingsFromPreviousSelectedWorksheet,
   copyHeadingRangeFromPreviousSelectedWorksheet,
+  editInvalidSourceRow,
+  excludeInvalidSourceRow,
   getWorksheetNavigationStatus,
   headingRangeFromPreviewCells,
   setWorkbookWorksheetSelected,
+  restoreExcludedSourceRow,
   summarizeHighConfidenceHeadingRanges,
   summarizeWorkbookPreview,
   synchronizeWorkbookMaterialResolution,
@@ -166,6 +169,7 @@ function createDraft(
       sheetNumber: part.sheetNumber ?? '',
       rowNumber: part.rowNumber?.toString() ?? '',
       columnNumber: part.columnNumber?.toString() ?? '',
+      sourceReferences: part.sourceReferences ?? [],
     };
   }
 
@@ -180,6 +184,45 @@ function createDraft(
     sheetNumber: '',
     rowNumber: '',
     columnNumber: '',
+  };
+}
+
+function correctedPartRow(part: PartRow, update: PartRowUpdate): PartRow {
+  const length = Number(update.length);
+  const width = Number(update.width);
+  const quantity = Number(update.quantity);
+  const messages = [
+    !update.importedId.trim() ? 'Id is required.' : '',
+    !Number.isFinite(length) || length <= 0 ? 'Length must be greater than zero.' : '',
+    !Number.isFinite(width) || width <= 0 ? 'Width must be greater than zero.' : '',
+    !Number.isInteger(quantity) || quantity <= 0 ? 'Quantity must be a positive integer.' : '',
+    !update.materialName.trim() ? 'Material is required.' : '',
+    update.rowNumber?.trim() &&
+    (!Number.isInteger(Number(update.rowNumber)) || Number(update.rowNumber) <= 0)
+      ? 'Row Number must be a positive integer.'
+      : '',
+    update.columnNumber?.trim() &&
+    (!Number.isInteger(Number(update.columnNumber)) || Number(update.columnNumber) <= 0)
+      ? 'Column Number must be a positive integer.'
+      : '',
+  ].filter((message): message is string => Boolean(message));
+  return {
+    ...part,
+    importedId: update.importedId.trim(),
+    lengthText: update.length,
+    length: Number.isFinite(length) ? length : 0,
+    widthText: update.width,
+    width: Number.isFinite(width) ? width : 0,
+    quantityText: update.quantity,
+    quantity: Number.isFinite(quantity) ? quantity : 0,
+    materialName: update.materialName.trim(),
+    group: update.group?.trim() || null,
+    sheetNumber: update.sheetNumber?.trim() || null,
+    rowNumber: update.rowNumber ? Number(update.rowNumber) : null,
+    columnNumber: update.columnNumber ? Number(update.columnNumber) : null,
+    validationStatus: messages.length > 0 ? 'error' : 'valid',
+    validationMessages: messages,
+    sourceReferences: part.sourceReferences ?? [],
   };
 }
 
@@ -681,7 +724,8 @@ export function ImportPage({
   const activeWorksheetDraft = worksheetDrafts.find(
     (draft) => draft.worksheet.worksheetName === mappingSession?.activeWorksheetName,
   );
-  const showRowActions = !hasPendingImportReview && (canEditRows || canDeleteRows);
+  const showRowActions = (hasPendingImportReview && Boolean(activeWorksheetDraft)) ||
+    (!hasPendingImportReview && (canEditRows || canDeleteRows));
   const hasParts = activeImportResponse.parts.length > 0;
   const busy = importBusy || partMutationBusy;
   const optimizationGroupOptions = useMemo<ThemedSelectOption[]>(
@@ -898,6 +942,7 @@ export function ImportPage({
             draft.newMaterials.map((material) => material.sourceMaterialName),
           );
           return !draft.hasPendingChanges &&
+            draft.preview.errors.length === 0 &&
             requiredImportFieldNames.every((field) =>
               draft.options.columnMappings.some(
                 (mapping) =>
@@ -1240,8 +1285,6 @@ export function ImportPage({
 
     if (hasPendingImportReview) {
       setShowAddRow(false);
-      setEditingRowId(undefined);
-      setEditingDraft(undefined);
     }
   }, [
     activeImportResponse.parts,
@@ -1285,8 +1328,71 @@ export function ImportPage({
       return;
     }
 
-    await onUpdatePartRow(editingDraft);
+    if (mappingSession?.worksheets && activeWorksheetDraft && editingRowId) {
+      const imported = activeWorksheetDraft.preview.parts.find(
+        (part) => part.rowId === editingRowId,
+      );
+      if (!imported) {
+        return;
+      }
+      const currentValues = correctedPartRow(imported, editingDraft);
+      if (currentValues.validationStatus === 'error') {
+        setEditingDraft(editingDraft);
+        return;
+      }
+      const updatedDraft = editInvalidSourceRow(
+        activeWorksheetDraft,
+        editingRowId,
+        currentValues,
+      );
+      onUpdateImportMappingSession({
+        ...mappingSession,
+        preview: updatedDraft.preview,
+        options: updatedDraft.options,
+        newMaterials: updatedDraft.newMaterials,
+        hasPendingChanges: updatedDraft.hasPendingChanges,
+        worksheets: mappingSession.worksheets.map((draft) =>
+          draft.worksheet.worksheetName === updatedDraft.worksheet.worksheetName
+            ? updatedDraft
+            : draft,
+        ),
+      });
+    } else {
+      await onUpdatePartRow(editingDraft);
+    }
     cancelEdit();
+  };
+
+  const excludeSourceRow = (rowId: string) => {
+    if (!mappingSession?.worksheets || !activeWorksheetDraft) {
+      return;
+    }
+    const updatedDraft = excludeInvalidSourceRow(activeWorksheetDraft, rowId);
+    onUpdateImportMappingSession({
+      ...mappingSession,
+      preview: updatedDraft.preview,
+      worksheets: mappingSession.worksheets.map((draft) =>
+        draft.worksheet.worksheetName === updatedDraft.worksheet.worksheetName
+          ? updatedDraft
+          : draft,
+      ),
+    });
+  };
+
+  const undoSourceRowExclusion = (rowId: string) => {
+    if (!mappingSession?.worksheets || !activeWorksheetDraft) {
+      return;
+    }
+    const updatedDraft = restoreExcludedSourceRow(activeWorksheetDraft, rowId);
+    onUpdateImportMappingSession({
+      ...mappingSession,
+      preview: updatedDraft.preview,
+      worksheets: mappingSession.worksheets.map((draft) =>
+        draft.worksheet.worksheetName === updatedDraft.worksheet.worksheetName
+          ? updatedDraft
+          : draft,
+      ),
+    });
   };
 
   const startAddRow = () => {
@@ -2281,9 +2387,15 @@ export function ImportPage({
 
         <div className="stats-grid module-stats-grid">
           <article className="stat-card">
-            <span>Rows</span>
+            <span>Imported</span>
             <strong>{activeImportResponse.parts.length}</strong>
           </article>
+          {hasPendingImportReview ? (
+            <article className="stat-card">
+              <span>Excluded</span>
+              <strong>{activeWorksheetDraft?.excludedSourceRows.length ?? 0}</strong>
+            </article>
+          ) : null}
           <article className="stat-card">
             <span>Valid</span>
             <strong>{counts.valid}</strong>
@@ -2880,7 +2992,7 @@ export function ImportPage({
                                 </>
                               ) : (
                                 <>
-                                  {canEditRows ? (
+                                  {canEditRows || (hasPendingImportReview && part.validationStatus === 'error') ? (
                                     <button
                                       className="module-table-action"
                                       disabled={!bridge.connected || busy}
@@ -2888,6 +3000,16 @@ export function ImportPage({
                                       type="button"
                                     >
                                       Edit
+                                    </button>
+                                  ) : null}
+                                  {hasPendingImportReview && part.validationStatus === 'error' ? (
+                                    <button
+                                      className="module-table-action module-table-action--danger"
+                                      disabled={busy}
+                                      onClick={() => excludeSourceRow(part.rowId)}
+                                      type="button"
+                                    >
+                                      Exclude
                                     </button>
                                   ) : null}
                                   {canDeleteRows ? (
@@ -2927,6 +3049,33 @@ export function ImportPage({
             </span>
           </div>
         )}
+
+        {hasPendingImportReview && (activeWorksheetDraft?.excludedSourceRows.length ?? 0) > 0 ? (
+          <details className="editor-card">
+            <summary>
+              Excluded source rows ({activeWorksheetDraft!.excludedSourceRows.length})
+            </summary>
+            <div className="mapping-resolution-list">
+              {activeWorksheetDraft!.excludedSourceRows.map((excluded) => (
+                <div className="mapping-resolution-card" key={excluded.rowId}>
+                  <strong>
+                    {excluded.sourceReference.worksheetName}!
+                    {excluded.sourceReference.physicalRow}
+                  </strong>
+                  <p>{excluded.originalValidationError.message}</p>
+                  <button
+                    className="secondary-button"
+                    disabled={busy}
+                    onClick={() => undoSourceRowExclusion(excluded.rowId)}
+                    type="button"
+                  >
+                    Undo
+                  </button>
+                </div>
+              ))}
+            </div>
+          </details>
+        ) : null}
 
         <div className="module-table-footer">
           <div className="module-legend">

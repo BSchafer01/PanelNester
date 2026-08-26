@@ -17,6 +17,9 @@ public sealed record ImportConfiguration
 
     public IReadOnlyList<ImportWorksheetConfiguration> Worksheets { get; init; } =
         Array.Empty<ImportWorksheetConfiguration>();
+
+    public IReadOnlyList<PartOverride> PartOverrides { get; init; } =
+        Array.Empty<PartOverride>();
 }
 
 public sealed record ImportWorksheetConfiguration
@@ -32,7 +35,36 @@ public sealed record ImportWorksheetConfiguration
 
     public string? OptimizationGroupId { get; init; }
 
-    public IReadOnlyList<int> ExcludedSourceRows { get; init; } = Array.Empty<int>();
+    public IReadOnlyList<ExcludedSourceRow> ExcludedSourceRows { get; init; } =
+        Array.Empty<ExcludedSourceRow>();
+}
+
+public sealed record PartOverride
+{
+    public string RowId { get; init; } = string.Empty;
+
+    public PartRow ImportedValues { get; init; } = new();
+
+    public PartRow CurrentValues { get; init; } = new();
+
+    public IReadOnlyList<SourceReference> SourceReferences { get; init; } =
+        Array.Empty<SourceReference>();
+}
+
+public sealed record ExcludedSourceRow
+{
+    public string RowId { get; init; } = string.Empty;
+
+    public SourceReference SourceReference { get; init; } = new();
+
+    public SourceRowValidationError OriginalValidationError { get; init; } = new();
+}
+
+public sealed record SourceRowValidationError
+{
+    public string Code { get; init; } = string.Empty;
+
+    public string Message { get; init; } = string.Empty;
 }
 
 public sealed record ImportWorksheetDescriptor
@@ -103,6 +135,13 @@ public sealed record SourceReference : WorksheetRowLocation
 {
 
     public string SourceFingerprint { get; init; } = string.Empty;
+
+    public bool MatchesIdentity(SourceReference other) =>
+        other is not null &&
+        WorksheetPosition == other.WorksheetPosition &&
+        PhysicalRow == other.PhysicalRow &&
+        !string.IsNullOrWhiteSpace(SourceFingerprint) &&
+        string.Equals(SourceFingerprint, other.SourceFingerprint, StringComparison.Ordinal);
 }
 
 public sealed record ImportSourceMetadata
@@ -134,6 +173,8 @@ public sealed record ImportWorksheetPreviewSummary
     public int SourceRowCount { get; init; }
 
     public int ImportedPartCount { get; init; }
+
+    public int ExcludedRowCount { get; init; }
 
     public int IssueCount { get; init; }
 }

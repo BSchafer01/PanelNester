@@ -164,6 +164,25 @@ public sealed class ProjectPersistenceSpecs : IDisposable
                             }
                         ]
                     },
+                    PartOverrides =
+                    [
+                        new PartOverride
+                        {
+                            RowId = "row-7",
+                            ImportedValues = new PartRow { RowId = "row-7", LengthText = "bad" },
+                            CurrentValues = new PartRow { RowId = "row-7", LengthText = "48", Length = 48 },
+                            SourceReferences =
+                            [
+                                new SourceReference
+                                {
+                                    WorksheetName = "Parts",
+                                    WorksheetPosition = 1,
+                                    PhysicalRow = 7,
+                                    SourceFingerprint = "ROW-7-FINGERPRINT"
+                                }
+                            ]
+                        }
+                    ],
                     Worksheets =
                     [
                         new ImportWorksheetConfiguration
@@ -180,7 +199,25 @@ public sealed class ProjectPersistenceSpecs : IDisposable
                                 }
                             ],
                             OptimizationGroupId = "group-stable-001",
-                            ExcludedSourceRows = [7]
+                            ExcludedSourceRows =
+                            [
+                                new ExcludedSourceRow
+                                {
+                                    RowId = "row-8",
+                                    SourceReference = new SourceReference
+                                    {
+                                        WorksheetName = "Parts",
+                                        WorksheetPosition = 1,
+                                        PhysicalRow = 8,
+                                        SourceFingerprint = "ROW-8-FINGERPRINT"
+                                    },
+                                    OriginalValidationError = new SourceRowValidationError
+                                    {
+                                        Code = "missing-id",
+                                        Message = "Id is required."
+                                    }
+                                }
+                            ]
                         }
                     ]
                 },
@@ -235,7 +272,7 @@ public sealed class ProjectPersistenceSpecs : IDisposable
 
         var restored = await serializer.LoadAsync(filePath);
 
-        Assert.Equal(2, Project.CurrentVersion);
+        Assert.Equal(3, Project.CurrentVersion);
         Assert.Equal(Project.CurrentVersion, restored.Version);
         var group = Assert.Single(restored.State.OptimizationGroups);
         Assert.Equal("project-phase3-001", group.OptimizationGroupId);
@@ -521,7 +558,8 @@ public sealed class ProjectPersistenceSpecs : IDisposable
     [Theory]
     [InlineData(false, true, 1, "project-not-found")]
     [InlineData(true, false, 1, "project-corrupt")]
-    [InlineData(true, true, 3, "project-unsupported-version")]
+    [InlineData(true, true, 4, "project-unsupported-version")]
+    [InlineData(true, true, 3, null)]
     [InlineData(true, true, 2, null)]
     [InlineData(true, true, 1, null)]
     public void Project_open_failures_stay_specific_and_user_actionable(

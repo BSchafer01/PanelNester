@@ -459,12 +459,27 @@ public static class DesktopBridgeRegistration
                                     WorksheetName = importedWorksheet.WorksheetName,
                                     OriginalPosition = importedWorksheet.OriginalPosition
                                 };
+                            var preparedResponse = MarkCreatedMaterialResolutions(
+                                worksheetResult.Response,
+                                workbookPreparation.CreatedSourceMaterials);
+                            var importedResponse = preparedResponse;
+                            preparedResponse = await ProjectImportFinalizer.ApplyPartOverridesAsync(
+                                    preparedResponse,
+                                    normalizedSelection.PartOverrides,
+                                    partEditorService,
+                                    finalization.CancellationToken)
+                                .ConfigureAwait(false);
+                            normalizedSelection = ProjectImportFinalizer.ReconcilePartOverrides(
+                                normalizedSelection,
+                                importedResponse,
+                                preparedResponse);
+                            preparedResponse = ProjectImportFinalizer.ResolveSourceRows(
+                                preparedResponse,
+                                normalizedSelection);
                             worksheetResult = worksheetResult with
                             {
                                 Response = PrefixWorksheetRowIds(
-                                    MarkCreatedMaterialResolutions(
-                                        worksheetResult.Response,
-                                        workbookPreparation.CreatedSourceMaterials),
+                                    preparedResponse,
                                     normalizedSelection.OriginalPosition)
                             };
                             workbookImportSource = worksheetResult.ImportSource;
@@ -2344,8 +2359,10 @@ public static class DesktopBridgeRegistration
         {
             WorksheetName = item.Selection.WorksheetName,
             OriginalPosition = item.Selection.OriginalPosition,
-            SourceRowCount = item.Response.Parts.Sum(part => part.SourceReferences.Count),
+            SourceRowCount = item.Response.Parts.Sum(part => part.SourceReferences.Count) +
+                item.Selection.ExcludedSourceRows.Count,
             ImportedPartCount = item.Response.Parts.Count,
+            ExcludedRowCount = item.Selection.ExcludedSourceRows.Count,
             IssueCount = item.Response.Errors.Count + item.Response.Warnings.Count
         }).ToArray();
         var positionsByGroup = worksheetImports
@@ -2358,7 +2375,9 @@ public static class DesktopBridgeRegistration
             .GroupBy(item => item.Selection.OptimizationGroupId, StringComparer.Ordinal)
             .ToDictionary(
                 group => group.Key,
-                group => group.Sum(item => item.Response.Parts.Sum(part => part.SourceReferences.Count)),
+                group => group.Sum(item =>
+                    item.Response.Parts.Sum(part => part.SourceReferences.Count) +
+                    item.Selection.ExcludedSourceRows.Count),
                 StringComparer.Ordinal);
 
         var groupSummaries = optimizationGroups

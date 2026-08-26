@@ -145,6 +145,20 @@ export interface SourceReference extends WorksheetRowLocation {
   sourceFingerprint: string;
 }
 
+export interface PartOverride {
+  rowId: string;
+  importedValues: PartRow;
+  currentValues: PartRow;
+  sourceReferences: SourceReference[];
+}
+
+export interface ExcludedSourceRow {
+  rowId: string;
+  sourceReference: SourceReference;
+  originalValidationError: ValidationError;
+  sourceRow: PartRow;
+}
+
 export interface ImportRequest {
   filePath: string;
 }
@@ -325,6 +339,8 @@ export interface ImportWorksheetSelection {
   optimizationGroupId: string;
   optimizationGroupName: string;
   headingRange: string;
+  excludedSourceRows?: ExcludedSourceRow[];
+  partOverrides?: PartOverride[];
 }
 
 export interface FinalizeImportSessionRequest {
@@ -361,6 +377,7 @@ export interface ImportWorksheetPreviewSummary {
   originalPosition: number;
   sourceRowCount: number;
   importedPartCount: number;
+  excludedRowCount: number;
   issueCount: number;
 }
 
@@ -419,6 +436,8 @@ export interface ImportWorksheetDraft {
   headingRange: string;
   headingRangeConfirmed: boolean;
   clearedColumnMappingFields?: string[];
+  excludedSourceRows: ExcludedSourceRow[];
+  partOverrides: PartOverride[];
 }
 
 export interface Material {

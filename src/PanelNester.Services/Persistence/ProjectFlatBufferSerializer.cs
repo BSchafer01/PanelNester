@@ -745,7 +745,49 @@ internal sealed class ProjectFlatBufferSerializer
         }
         catch (JsonException)
         {
-            return new PersistedImportContext(null, null);
+            try
+            {
+                var legacy = JsonSerializer.Deserialize<LegacyPersistedImportContext>(
+                    importContextJson,
+                    ProjectJsonSerializer.CreateOptions());
+                return new PersistedImportContext(
+                    legacy?.ImportSource,
+                    legacy?.ImportConfiguration is null
+                        ? null
+                        : new ImportConfiguration
+                        {
+                            Options = legacy.ImportConfiguration.Options,
+                            Worksheets = legacy.ImportConfiguration.Worksheets.Select(worksheet =>
+                                new ImportWorksheetConfiguration
+                                {
+                                    WorksheetName = worksheet.WorksheetName,
+                                    OriginalPosition = worksheet.OriginalPosition,
+                                    HeadingRange = worksheet.HeadingRange,
+                                    ColumnMappings = worksheet.ColumnMappings,
+                                    OptimizationGroupId = worksheet.OptimizationGroupId,
+                                    ExcludedSourceRows = worksheet.ExcludedSourceRows.Select(row =>
+                                        new ExcludedSourceRow
+                                        {
+                                            RowId = $"legacy-row-{row}",
+                                            SourceReference = new SourceReference
+                                            {
+                                                WorksheetName = worksheet.WorksheetName,
+                                                WorksheetPosition = worksheet.OriginalPosition,
+                                                PhysicalRow = row
+                                            },
+                                            OriginalValidationError = new SourceRowValidationError
+                                            {
+                                                Code = "legacy-exclusion",
+                                                Message = "Excluded by an earlier project version."
+                                            }
+                                        }).ToArray()
+                                }).ToArray()
+                        });
+            }
+            catch (JsonException)
+            {
+                return new PersistedImportContext(null, null);
+            }
         }
     }
 
@@ -790,6 +832,34 @@ internal sealed class ProjectFlatBufferSerializer
     private sealed record PersistedImportContext(
         ImportSourceMetadata? ImportSource,
         ImportConfiguration? ImportConfiguration);
+
+    private sealed record LegacyPersistedImportContext(
+        ImportSourceMetadata? ImportSource,
+        LegacyImportConfiguration? ImportConfiguration);
+
+    private sealed record LegacyImportConfiguration
+    {
+        public ImportOptions Options { get; init; } = new();
+
+        public IReadOnlyList<LegacyImportWorksheetConfiguration> Worksheets { get; init; } =
+            Array.Empty<LegacyImportWorksheetConfiguration>();
+    }
+
+    private sealed record LegacyImportWorksheetConfiguration
+    {
+        public string WorksheetName { get; init; } = string.Empty;
+
+        public int OriginalPosition { get; init; }
+
+        public string HeadingRange { get; init; } = string.Empty;
+
+        public IReadOnlyList<ImportColumnMapping> ColumnMappings { get; init; } =
+            Array.Empty<ImportColumnMapping>();
+
+        public string? OptimizationGroupId { get; init; }
+
+        public IReadOnlyList<int> ExcludedSourceRows { get; init; } = Array.Empty<int>();
+    }
 
     private static IReadOnlyList<PartRow> ReadParts(Fb.ProjectState state)
     {
