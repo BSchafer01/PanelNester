@@ -56,7 +56,15 @@ internal sealed class ImportSessionCoordinator
         try
         {
             await session.CaptureAsync(cancellationToken).ConfigureAwait(false);
-            var workbook = await DiscoverWorkbookAsync(session, cancellationToken).ConfigureAwait(false);
+            WorkbookDiscovery? workbook;
+            try
+            {
+                workbook = await DiscoverWorkbookAsync(session, cancellationToken).ConfigureAwait(false);
+            }
+            catch (EncryptedWorkbookException exception)
+            {
+                throw new ImportSessionException("encrypted-workbook", exception.Message);
+            }
             return new ImportSessionResult(
                 session.ImportSource,
                 new ImportResponse { Success = true },

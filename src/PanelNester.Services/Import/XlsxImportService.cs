@@ -71,6 +71,8 @@ public sealed class XlsxImportService : IImportService
         try
         {
             await using var stream = ImportFileAccessGuard.OpenReadShared(request.FilePath);
+            ImportFileAccessGuard.RejectEncryptedOpenXmlPackage(stream);
+            var vbaProject = WorkbookVbaProjectInspector.Inspect(stream);
             using var workbook = new XLWorkbook(stream);
             var worksheet = string.IsNullOrWhiteSpace(request.WorksheetName)
                 ? workbook.Worksheets.FirstOrDefault(sheet =>
@@ -210,24 +212,52 @@ public sealed class XlsxImportService : IImportService
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                if (IsBlankTableRegionRow(row, firstHeadingColumn, lastHeadingColumn))
+                var cellValues = Enumerable
+                    .Range(firstHeadingColumn, lastHeadingColumn - firstHeadingColumn + 1)
+                    .ToDictionary(
+                        columnNumber => columnNumber,
+                        columnNumber => WorkbookCellValueReader.Read(row.Cell(columnNumber), vbaProject));
+                if (cellValues.Values.All(value =>
+                        !value.IsFormula && string.IsNullOrWhiteSpace(value.Value)))
                 {
                     continue;
                 }
 
                 rowIndex++;
+                var rowId = $"row-{rowIndex}";
+                foreach (var error in cellValues.Values
+                             .Select(value => value.Error)
+                             .OfType<WorkbookCellReadError>())
+                {
+                    errors.Add(new ValidationError(
+                        error.Code,
+                        error.Message,
+                        rowId,
+                        new WorksheetRowLocation
+                        {
+                            WorksheetName = worksheet.Name,
+                            WorksheetPosition = worksheet.Position,
+                            PhysicalRow = row.RowNumber()
+                        }));
+                }
+
+                string ReadMappedCell(string sourceColumn)
+                {
+                    return cellValues[headerMap[sourceColumn]].Value;
+                }
+
                 rowUpdates.Add(new PartRowUpdate
                 {
-                    RowId = $"row-{rowIndex}",
-                    ImportedId = GetCellText(row.Cell(headerMap[columnPlan.FieldToSource[ImportFieldNames.Id]])),
-                    Length = GetCellText(row.Cell(headerMap[columnPlan.FieldToSource[ImportFieldNames.Length]])),
-                    Width = GetCellText(row.Cell(headerMap[columnPlan.FieldToSource[ImportFieldNames.Width]])),
-                    Quantity = GetCellText(row.Cell(headerMap[columnPlan.FieldToSource[ImportFieldNames.Quantity]])),
-                    MaterialName = GetCellText(row.Cell(headerMap[columnPlan.FieldToSource[ImportFieldNames.Material]])),
-                    Group = hasGroupColumn ? GetCellText(row.Cell(headerMap[groupSourceColumn!])) : null,
-                    SheetNumber = hasSheetNumberColumn ? GetCellText(row.Cell(headerMap[sheetNumberSourceColumn!])) : null,
-                    RowNumber = hasRowNumberColumn ? GetCellText(row.Cell(headerMap[rowNumberSourceColumn!])) : null,
-                    ColumnNumber = hasColumnNumberColumn ? GetCellText(row.Cell(headerMap[columnNumberSourceColumn!])) : null,
+                    RowId = rowId,
+                    ImportedId = ReadMappedCell(columnPlan.FieldToSource[ImportFieldNames.Id]),
+                    Length = ReadMappedCell(columnPlan.FieldToSource[ImportFieldNames.Length]),
+                    Width = ReadMappedCell(columnPlan.FieldToSource[ImportFieldNames.Width]),
+                    Quantity = ReadMappedCell(columnPlan.FieldToSource[ImportFieldNames.Quantity]),
+                    MaterialName = ReadMappedCell(columnPlan.FieldToSource[ImportFieldNames.Material]),
+                    Group = hasGroupColumn ? ReadMappedCell(groupSourceColumn!) : null,
+                    SheetNumber = hasSheetNumberColumn ? ReadMappedCell(sheetNumberSourceColumn!) : null,
+                    RowNumber = hasRowNumberColumn ? ReadMappedCell(rowNumberSourceColumn!) : null,
+                    ColumnNumber = hasColumnNumberColumn ? ReadMappedCell(columnNumberSourceColumn!) : null,
                     SourceReferences =
                     [
                         new SourceReference
@@ -237,7 +267,7 @@ public sealed class XlsxImportService : IImportService
                             PhysicalRow = row.RowNumber(),
                             SourceFingerprint = Fingerprint(
                                 Enumerable.Range(firstHeadingColumn, lastHeadingColumn - firstHeadingColumn + 1)
-                                    .Select(columnNumber => GetCellText(row.Cell(columnNumber))))
+                                    .Select(columnNumber => cellValues[columnNumber].Value))
                         }
                     ]
                 });
@@ -253,6 +283,10 @@ public sealed class XlsxImportService : IImportService
                 .MergeCompatibleRows(materialPlan.Updates, hasGroupColumn, hasSheetNumberColumn, hasRowNumberColumn, hasColumnNumberColumn)
                 .ToList();
             materialResolutions = materialPlan.Resolutions;
+        }
+        catch (EncryptedWorkbookException exception)
+        {
+            errors.Add(new ValidationError("encrypted-workbook", exception.Message));
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -296,7 +330,7 @@ public sealed class XlsxImportService : IImportService
     }
 
     private static string GetCellText(IXLCell cell) =>
-        cell.GetString().Trim();
+        WorkbookCellValueReader.ReadText(cell);
 
     private static string Fingerprint(IEnumerable<string?> values)
     {
@@ -304,10 +338,4 @@ public sealed class XlsxImportService : IImportService
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonicalRow)));
     }
 
-    private static bool IsBlankTableRegionRow(
-        IXLRow row,
-        int firstHeadingColumn,
-        int lastHeadingColumn) =>
-        Enumerable.Range(firstHeadingColumn, lastHeadingColumn - firstHeadingColumn + 1)
-            .All(columnNumber => string.IsNullOrWhiteSpace(GetCellText(row.Cell(columnNumber))));
 }

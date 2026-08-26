@@ -110,6 +110,10 @@ public sealed record WorksheetPreviewCell
     public int ColumnNumber { get; init; }
 
     public string Value { get; init; } = string.Empty;
+
+    public bool IsHidden { get; init; }
+
+    public bool IsFormula { get; init; }
 }
 
 public sealed record WorkbookDiscovery

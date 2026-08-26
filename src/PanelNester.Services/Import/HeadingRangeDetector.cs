@@ -15,23 +15,32 @@ internal static class HeadingRangeDetector
         var firstRow = usedRange.RangeAddress.FirstAddress.RowNumber;
         var lastRow = Math.Min(usedRange.RangeAddress.LastAddress.RowNumber, firstRow + MaximumPreviewRows - 1);
         var firstColumn = usedRange.RangeAddress.FirstAddress.ColumnNumber;
+        var usedLastColumn = usedRange.RangeAddress.LastAddress.ColumnNumber;
         var lastColumn = Math.Min(
-            usedRange.RangeAddress.LastAddress.ColumnNumber,
+            usedLastColumn,
             firstColumn + MaximumPreviewColumns - 1);
+        var previewColumns = Enumerable.Range(firstColumn, usedLastColumn - firstColumn + 1)
+            .Where(columnNumber =>
+                columnNumber <= lastColumn || worksheet.Column(columnNumber).IsHidden)
+            .ToArray();
 
         var previewRows = Enumerable.Range(firstRow, lastRow - firstRow + 1)
             .Select(rowNumber => new WorksheetPreviewRow
             {
                 RowNumber = rowNumber,
-                Cells = Enumerable.Range(firstColumn, lastColumn - firstColumn + 1)
+                Cells = previewColumns
                     .Select(columnNumber =>
                     {
                         var cell = worksheet.Cell(rowNumber, columnNumber);
+                        var cellValue = WorkbookCellValueReader.Read(cell);
                         return new WorksheetPreviewCell
                         {
                             Address = cell.Address.ToStringRelative(),
                             ColumnNumber = columnNumber,
-                            Value = cell.GetString().Trim()
+                            Value = cellValue.Value,
+                            IsHidden = worksheet.Row(rowNumber).IsHidden ||
+                                       worksheet.Column(columnNumber).IsHidden,
+                            IsFormula = cellValue.IsFormula
                         };
                     })
                     .ToArray()
@@ -91,7 +100,7 @@ internal static class HeadingRangeDetector
         int lastPreviewColumn)
     {
         var populatedColumns = Enumerable.Range(firstPreviewColumn, lastPreviewColumn - firstPreviewColumn + 1)
-            .Where(columnNumber => !string.IsNullOrWhiteSpace(worksheet.Cell(rowNumber, columnNumber).GetString()))
+            .Where(columnNumber => !string.IsNullOrWhiteSpace(GetCellText(worksheet.Cell(rowNumber, columnNumber))))
             .ToArray();
         if (populatedColumns.Length == 0)
         {
@@ -104,7 +113,7 @@ internal static class HeadingRangeDetector
             .Select(columnNumber => new RecognizedHeading(
                 columnNumber,
                 ImportMappingResolver.RecognizeHeading(
-                    worksheet.Cell(rowNumber, columnNumber).GetString().Trim())))
+                    GetCellText(worksheet.Cell(rowNumber, columnNumber)))))
             .Where(item => item.Field is not null)
             .ToArray();
         if (recognized.Length == 0)
@@ -144,7 +153,7 @@ internal static class HeadingRangeDetector
         {
             foreach (var item in recognized)
             {
-                var value = worksheet.Cell(rowNumber, item.ColumnNumber).GetString().Trim();
+                var value = GetCellText(worksheet.Cell(rowNumber, item.ColumnNumber));
                 if (value.Length == 0)
                 {
                     continue;
@@ -164,4 +173,6 @@ internal static class HeadingRangeDetector
     }
 
     private sealed record RecognizedHeading(int ColumnNumber, string? Field);
+
+    private static string GetCellText(IXLCell cell) => WorkbookCellValueReader.ReadText(cell);
 }

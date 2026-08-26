@@ -351,6 +351,31 @@ public sealed class ImportBridgeSpecs : IDisposable
         Assert.Empty(response.Parts);
     }
 
+    [Theory]
+    [InlineData(".xlsx")]
+    [InlineData(".xlsm")]
+    public async Task Beginning_an_encrypted_Workbook_session_returns_copy_guidance(string extension)
+    {
+        var workbookPath = Path.Combine(
+            AppContext.BaseDirectory,
+            "Fixtures",
+            "Import",
+            $"encrypted-parts{extension}");
+
+        var response = await DispatchAsync<ImportSessionResponse>(
+            CreateDispatcher(),
+            BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest
+            {
+                SessionId = $"encrypted-{Guid.NewGuid():N}",
+                ImportSourcePath = workbookPath
+            });
+
+        Assert.False(response.Success);
+        Assert.Equal("encrypted-workbook", response.Error?.Code);
+        Assert.Contains("save an unencrypted copy", response.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public async Task Excel_session_previews_a_named_Worksheet_and_finalizes_only_selected_Worksheets_in_source_order()
     {

@@ -275,6 +275,8 @@ export interface WorksheetPreviewCell {
   address: string;
   columnNumber: number;
   value: string;
+  isHidden: boolean;
+  isFormula: boolean;
 }
 
 export interface WorkbookDiscovery {

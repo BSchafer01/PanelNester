@@ -93,6 +93,53 @@ public sealed class WorkbookDiscoveryServiceSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Discovery_identifies_hidden_rows_and_columns_in_the_Worksheet_preview()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "hidden-preview-content.xlsx");
+
+        using (var workbook = new XLWorkbook())
+        {
+            var worksheet = workbook.AddWorksheet("Parts");
+            WriteCandidate(worksheet, 1, "VISIBLE");
+            worksheet.Cell("F1").Value = "Part Group";
+            worksheet.Cell("F2").Value = "Hidden column value";
+            worksheet.Column(6).Hide();
+            worksheet.Row(2).Hide();
+            worksheet.Cell("Z1").Value = "Hidden beyond preview cap";
+            worksheet.Column(26).Hide();
+            workbook.SaveAs(workbookPath);
+        }
+
+        var result = await new WorkbookDiscoveryService().DiscoverAsync(workbookPath);
+
+        var preview = Assert.Single(result.Worksheets).PreviewRows;
+        Assert.True(preview.Single(row => row.RowNumber == 1).Cells.Single(cell => cell.Address == "F1").IsHidden);
+        Assert.True(preview.Single(row => row.RowNumber == 1).Cells.Single(cell => cell.Address == "Z1").IsHidden);
+        Assert.All(preview.Single(row => row.RowNumber == 2).Cells, cell => Assert.True(cell.IsHidden));
+    }
+
+    [Fact]
+    public async Task Discovery_identifies_formula_derived_cells_in_the_Worksheet_preview()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "formula-preview.xlsx");
+        using (var workbook = new XLWorkbook())
+        {
+            var worksheet = workbook.AddWorksheet("Parts");
+            WriteCandidate(worksheet, 1, "P-100");
+            worksheet.Cell("B2").FormulaA1 = "20+28";
+            workbook.SaveAs(workbookPath);
+        }
+
+        var result = await new WorkbookDiscoveryService().DiscoverAsync(workbookPath);
+
+        var formulaCell = Assert.Single(result.Worksheets).PreviewRows
+            .Single(row => row.RowNumber == 2).Cells.Single(cell => cell.Address == "B2");
+        Assert.True(formulaCell.IsFormula);
+    }
+
+    [Fact]
     public async Task Discovery_leaves_tied_heading_candidates_unset_for_manual_choice()
     {
         Directory.CreateDirectory(_workspacePath);

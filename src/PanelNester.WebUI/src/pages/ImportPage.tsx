@@ -1875,10 +1875,16 @@ export function ImportPage({
                                             cell.address,
                                           )
                                         }
-                                        title={cell.address}
+                                        title={`${cell.address}${cell.isHidden ? ' · Hidden in Workbook' : ''}${cell.isFormula ? ' · Stored formula value' : ''}`}
                                         type="button"
                                       >
                                         {cell.value}
+                                        {cell.isHidden ? (
+                                          <span className="worksheet-preview__cell-flag">Hidden</span>
+                                        ) : null}
+                                        {cell.isFormula ? (
+                                          <span className="worksheet-preview__cell-flag">Formula</span>
+                                        ) : null}
                                       </button>
                                     </td>
                                   ))}

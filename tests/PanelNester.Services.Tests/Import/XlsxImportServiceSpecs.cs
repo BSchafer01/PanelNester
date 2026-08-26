@@ -1,4 +1,7 @@
 using ClosedXML.Excel;
+using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Spreadsheet;
 using PanelNester.Domain.Models;
 using PanelNester.Services.Import;
 
@@ -45,6 +48,7 @@ public sealed class XlsxImportServiceSpecs : IDisposable
         {
             var worksheet = workbook.AddWorksheet("Parts");
             worksheet.Cell("A1").Value = "This title is outside the table";
+            worksheet.Range("A1:G1").Merge();
             worksheet.Cell("B3").Value = "Id";
             worksheet.Cell("C3").Value = "Length";
             worksheet.Cell("D3").Value = "Width";
@@ -118,6 +122,185 @@ public sealed class XlsxImportServiceSpecs : IDisposable
 
         Assert.False(response.Success);
         Assert.Contains(response.Errors, error => error.Code == "merged-heading-range");
+    }
+
+    [Fact]
+    public async Task Excel_import_reads_hidden_and_filtered_rows_and_confirmed_hidden_columns()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "hidden-table-region-content.xlsx");
+        using (var workbook = new XLWorkbook())
+        {
+            var worksheet = workbook.AddWorksheet("Parts");
+            WriteWorksheet(worksheet, "VISIBLE");
+            worksheet.Cell("F1").Value = "Group";
+            worksheet.Cell("F2").Value = "Visible Group";
+            worksheet.Column(6).Hide();
+            worksheet.Cell("G1").Value = "Outside";
+            worksheet.Cell("G2").Value = "ignored";
+
+            worksheet.Cell("A3").Value = "HIDDEN";
+            worksheet.Cell("B3").Value = 30;
+            worksheet.Cell("C3").Value = 15;
+            worksheet.Cell("D3").Value = 2;
+            worksheet.Cell("E3").Value = "Demo Material";
+            worksheet.Cell("F3").Value = "Filtered Group";
+            var filter = worksheet.Range("A1:F3").SetAutoFilter();
+            filter.Column(1).AddFilter("VISIBLE");
+            filter.Reapply();
+            Assert.True(worksheet.Row(3).IsHidden);
+            workbook.SaveAs(workbookPath);
+        }
+
+        var response = await new XlsxImportService().ImportAsync(new ImportRequest
+        {
+            FilePath = workbookPath,
+            HeadingRange = "A1:F1"
+        });
+
+        Assert.True(response.Success);
+        Assert.Equal(["VISIBLE", "HIDDEN"], response.Parts.Select(part => part.ImportedId));
+        Assert.Equal(["Visible Group", "Filtered Group"], response.Parts.Select(part => part.Group));
+        Assert.Contains(response.SourceColumns, column => column.Address == "F");
+        Assert.DoesNotContain(response.SourceColumns, column => column.Address == "G");
+    }
+
+    [Fact]
+    public async Task Excel_import_reads_only_the_top_left_value_of_merged_data_cells()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "merged-data-cells.xlsx");
+        using (var workbook = new XLWorkbook())
+        {
+            var worksheet = workbook.AddWorksheet("Parts");
+            WriteWorksheet(worksheet, "MERGED");
+            worksheet.Range("A2:B2").Merge();
+            workbook.SaveAs(workbookPath);
+        }
+
+        var response = await new XlsxImportService().ImportAsync(new ImportRequest
+        {
+            FilePath = workbookPath,
+            HeadingRange = "A1:E1"
+        });
+
+        Assert.False(response.Success);
+        var part = Assert.Single(response.Parts);
+        Assert.Equal("MERGED", part.ImportedId);
+        Assert.Contains(response.Errors, error => error.Code == "invalid-length" && error.RowId == part.RowId);
+    }
+
+    [Fact]
+    public async Task Excel_import_uses_stored_formula_values_without_recalculation()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "cached-formulas.xlsx");
+        using (var workbook = new XLWorkbook())
+        {
+            WriteWorksheet(workbook.AddWorksheet("Parts"), "placeholder");
+            workbook.SaveAs(workbookPath);
+        }
+
+        SetFormulaCell(workbookPath, "A2", "_xlfn.UNSUPPORTED_FUNCTION()", "CACHED-ID", CellValues.String);
+        SetFormulaCell(workbookPath, "B2", "999+999", "24", CellValues.Number);
+
+        var response = await new XlsxImportService().ImportAsync(new ImportRequest { FilePath = workbookPath });
+
+        Assert.True(response.Success);
+        var part = Assert.Single(response.Parts);
+        Assert.Equal("CACHED-ID", part.ImportedId);
+        Assert.Equal(24m, part.Length);
+    }
+
+    [Fact]
+    public async Task Excel_import_rejects_unusable_formula_results_with_Source_References()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "formula-failures.xlsm");
+        using (var workbook = new XLWorkbook())
+        {
+            var worksheet = workbook.AddWorksheet("Formula Parts");
+            WriteWorksheet(worksheet, "placeholder");
+            worksheet.Cell("F1").Value = "Group";
+            worksheet.Cell("F2").Value = "placeholder";
+            workbook.SaveAs(workbookPath);
+        }
+
+        SetFormulaCell(workbookPath, "B2", "1+1", null, CellValues.Number);
+        SetFormulaCell(workbookPath, "C2", "1/0", "#DIV/0!", CellValues.Error);
+        SetFormulaCell(workbookPath, "D2", "TRUE()", "1", CellValues.Boolean);
+        SetFormulaCell(workbookPath, "E2", "MaterialFromVba()", "Demo Material", CellValues.String);
+        AddVbaProject(workbookPath);
+
+        var response = await new XlsxImportService().ImportAsync(new ImportRequest { FilePath = workbookPath });
+
+        Assert.False(response.Success);
+        AssertFormulaError(response, "missing-formula-value", "B2");
+        AssertFormulaError(response, "formula-error", "C2");
+        AssertFormulaError(response, "unsupported-formula-result", "D2");
+        AssertFormulaError(response, "vba-formula-not-supported", "E2");
+    }
+
+    [Fact]
+    public async Task Excel_import_does_not_confuse_VBA_subroutines_with_Worksheet_functions()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "built-in-formula.xlsm");
+        using (var workbook = new XLWorkbook())
+        {
+            WriteWorksheet(workbook.AddWorksheet("Parts"), "placeholder");
+            workbook.SaveAs(workbookPath);
+        }
+
+        SetFormulaCell(workbookPath, "A2", "SUM(1,1)", "BUILTIN-ID", CellValues.String);
+        AddVbaProject(workbookPath);
+
+        var response = await new XlsxImportService().ImportAsync(new ImportRequest { FilePath = workbookPath });
+
+        Assert.True(response.Success);
+        Assert.Equal("BUILTIN-ID", Assert.Single(response.Parts).ImportedId);
+    }
+
+    [Fact]
+    public async Task Excel_import_reports_formula_failures_in_unmapped_columns_and_formula_only_rows()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "formula-only-rows.xlsx");
+        using (var workbook = new XLWorkbook())
+        {
+            var worksheet = workbook.AddWorksheet("Formula Rows");
+            WriteWorksheet(worksheet, "VALID");
+            worksheet.Cell("F1").Value = "Notes";
+            worksheet.Cell("F2").Value = "placeholder";
+            for (var column = 1; column <= 5; column++)
+            {
+                worksheet.Cell(3, column).Value = "placeholder";
+            }
+            workbook.SaveAs(workbookPath);
+        }
+
+        SetFormulaCell(workbookPath, "F2", "1+1", null, CellValues.Number);
+        for (var column = 1; column <= 5; column++)
+        {
+            SetFormulaCell(workbookPath, $"{XLHelper.GetColumnLetterFromNumber(column)}3", "1+1", null, CellValues.Number);
+        }
+
+        var response = await new XlsxImportService().ImportAsync(new ImportRequest
+        {
+            FilePath = workbookPath,
+            HeadingRange = "A1:F1"
+        });
+
+        Assert.Equal(2, response.Parts.Count);
+        Assert.Contains(response.Errors, error =>
+            error.Code == "missing-formula-value" &&
+            error.Message.Contains("F2", StringComparison.Ordinal) &&
+            error.Location?.PhysicalRow == 2);
+        Assert.Equal(
+            5,
+            response.Errors.Count(error =>
+                error.Code == "missing-formula-value" && error.Location?.PhysicalRow == 3));
+        Assert.Equal(3, Assert.Single(response.Parts[1].SourceReferences).PhysicalRow);
     }
 
     [Fact]
@@ -388,6 +571,49 @@ public sealed class XlsxImportServiceSpecs : IDisposable
         Assert.Contains("Close the file and try importing again.", error.Message);
     }
 
+    [Theory]
+    [InlineData(".xlsx")]
+    [InlineData(".xlsm")]
+    public async Task Encrypted_Workbooks_are_rejected_with_unencrypted_copy_guidance(string extension)
+    {
+        var workbookPath = FixturePath($"encrypted-parts{extension}");
+
+        var response = await new XlsxImportService().ImportAsync(new ImportRequest { FilePath = workbookPath });
+
+        Assert.False(response.Success);
+        var error = Assert.Single(response.Errors);
+        Assert.Equal("encrypted-workbook", error.Code);
+        Assert.Contains("save an unencrypted copy", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("password", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Macro_enabled_Workbooks_are_read_without_formula_or_source_modification()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "read-only-macros.xlsm");
+        File.Copy(FixturePath("macro-enabled-parts.xlsm"), workbookPath);
+        AddVbaProject(workbookPath);
+        var originalContents = await File.ReadAllBytesAsync(workbookPath);
+        File.SetAttributes(workbookPath, FileAttributes.ReadOnly);
+
+        ImportResponse response;
+        try
+        {
+            response = await new XlsxImportService().ImportAsync(new ImportRequest { FilePath = workbookPath });
+        }
+        finally
+        {
+            File.SetAttributes(workbookPath, FileAttributes.Normal);
+        }
+
+        Assert.True(response.Success);
+        var part = Assert.Single(response.Parts);
+        Assert.Equal("MACRO-PACKAGE", part.ImportedId);
+        Assert.Equal(20m, part.Length);
+        Assert.Equal(originalContents, await File.ReadAllBytesAsync(workbookPath));
+    }
+
     [Fact]
     public async Task Xlsx_group_mapping_matches_csv_group_mapping_output()
     {
@@ -592,6 +818,48 @@ public sealed class XlsxImportServiceSpecs : IDisposable
         worksheet.Cell(2, 3).Value = 10;
         worksheet.Cell(2, 4).Value = 1;
         worksheet.Cell(2, 5).Value = "Demo Material";
+    }
+
+    private static void AssertFormulaError(ImportResponse response, string code, string cellAddress)
+    {
+        var error = Assert.Single(response.Errors, error => error.Code == code);
+        var part = Assert.Single(response.Parts, part => part.RowId == error.RowId);
+        var sourceReference = Assert.Single(part.SourceReferences);
+        Assert.Contains(cellAddress, error.Message, StringComparison.Ordinal);
+        Assert.Equal("Formula Parts", error.Location?.WorksheetName);
+        Assert.Equal(2, error.Location?.PhysicalRow);
+        Assert.Equal("Formula Parts", sourceReference.WorksheetName);
+        Assert.Equal(2, sourceReference.PhysicalRow);
+    }
+
+    private static string FixturePath(string fileName) =>
+        Path.Combine(AppContext.BaseDirectory, "Fixtures", "Import", fileName);
+
+    private static void SetFormulaCell(
+        string workbookPath,
+        string cellAddress,
+        string formula,
+        string? cachedValue,
+        CellValues dataType)
+    {
+        using var document = SpreadsheetDocument.Open(workbookPath, isEditable: true);
+        var worksheetPart = document.WorkbookPart!.WorksheetParts.Single();
+        var cell = worksheetPart.Worksheet.Descendants<Cell>()
+            .Single(cell => string.Equals(cell.CellReference?.Value, cellAddress, StringComparison.Ordinal));
+        cell.CellFormula = new CellFormula(formula);
+        cell.CellValue = cachedValue is null ? null : new CellValue(cachedValue);
+        cell.DataType = dataType;
+        worksheetPart.Worksheet.Save();
+    }
+
+    private static void AddVbaProject(string workbookPath)
+    {
+        using var fixture = SpreadsheetDocument.Open(FixturePath("vba-udf-project.xlsm"), isEditable: false);
+        using var source = fixture.WorkbookPart!.VbaProjectPart!.GetStream(FileMode.Open, FileAccess.Read);
+        using var document = SpreadsheetDocument.Open(workbookPath, isEditable: true);
+        document.ChangeDocumentType(SpreadsheetDocumentType.MacroEnabledWorkbook);
+        var vbaProjectPart = document.WorkbookPart!.AddNewPart<VbaProjectPart>();
+        vbaProjectPart.FeedData(source);
     }
 
     private static void WritePart(

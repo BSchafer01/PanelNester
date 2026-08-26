@@ -12,7 +12,9 @@ public sealed class WorkbookDiscoveryService
         ArgumentException.ThrowIfNullOrWhiteSpace(workbookPath);
         cancellationToken.ThrowIfCancellationRequested();
 
-        using var workbook = new XLWorkbook(workbookPath);
+        using var stream = ImportFileAccessGuard.OpenReadShared(workbookPath);
+        ImportFileAccessGuard.RejectEncryptedOpenXmlPackage(stream);
+        using var workbook = new XLWorkbook(stream);
         var worksheets = workbook.Worksheets
             .Where(worksheet =>
                 worksheet.Visibility == XLWorksheetVisibility.Visible &&

@@ -16,6 +16,15 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="..\PanelNester.Services.Tests\Fixtures\Import\encrypted-parts.xlsx"
+          Link="Fixtures\Import\encrypted-parts.xlsx"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\PanelNester.Services.Tests\Fixtures\Import\encrypted-parts.xlsm"
+          Link="Fixtures\Import\encrypted-parts.xlsm"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>
 

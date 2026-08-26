@@ -24,4 +24,11 @@
     <ProjectReference Include="..\..\src\PanelNester.Services\PanelNester.Services.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="Fixtures\Import\encrypted-parts.xlsx" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures\Import\encrypted-parts.xlsm" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures\Import\macro-enabled-parts.xlsm" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures\Import\vba-udf-project.xlsm" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
