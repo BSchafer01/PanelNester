@@ -382,7 +382,8 @@ public static class DesktopBridgeRegistration
                             .OrderBy(selection => selection.OriginalPosition)
                             .ToArray();
                         var conflictingMaterialLabel = FindConflictingMaterialResolution(
-                            orderedSelections);
+                            orderedSelections,
+                            request.NewMaterials);
                         if (conflictingMaterialLabel is not null)
                         {
                             return ImportSessionResponse.Failure(
@@ -393,37 +394,43 @@ public static class DesktopBridgeRegistration
                                 $"Material label '{conflictingMaterialLabel}' has conflicting resolutions across the Workbook.");
                         }
 
+                        var workbookPreparation = await PrepareImportOptionsAsync(
+                                new ImportFileRequest
+                                {
+                                    Options = new ImportOptions
+                                    {
+                                        MaterialMappings = BuildWorkbookMaterialMappings(orderedSelections)
+                                    },
+                                    NewMaterials = request.NewMaterials
+                                },
+                                materialService,
+                                finalization.CancellationToken)
+                            .ConfigureAwait(false);
+                        createdMaterials.AddRange(workbookPreparation.CreatedMaterials);
+                        if (!workbookPreparation.Success)
+                        {
+                            var preparationMessage = GetFirstErrorMessage(
+                                workbookPreparation.Errors,
+                                "Import material preparation failed.");
+                            return ImportSessionResponse.Failure(
+                                request.SessionId,
+                                null,
+                                ImportSessionPhase.Failed,
+                                GetFirstErrorCode(
+                                    workbookPreparation.Errors,
+                                    "import-material-preparation-failed"),
+                                preparationMessage);
+                        }
+
                         foreach (var selection in orderedSelections)
                         {
-                            var worksheetPreparation = await PrepareImportOptionsAsync(
-                                    new ImportFileRequest
-                                    {
-                                        Options = selection.Options,
-                                        NewMaterials = worksheetImports.Count == 0
-                                            ? request.NewMaterials
-                                            : Array.Empty<ImportNewMaterialRequest>()
-                                    },
-                                    materialService,
-                                    finalization.CancellationToken)
-                                .ConfigureAwait(false);
-                            createdMaterials.AddRange(worksheetPreparation.CreatedMaterials);
-                            if (!worksheetPreparation.Success)
+                            var worksheetOptions = (selection.Options ?? new ImportOptions()) with
                             {
-                                await RollbackCreatedMaterialsAsync(materialService, createdMaterials)
-                                    .ConfigureAwait(false);
-                                var preparationMessage = GetFirstErrorMessage(
-                                    worksheetPreparation.Errors,
-                                    "Import material preparation failed.");
-                                return ImportSessionResponse.Failure(
-                                    request.SessionId,
-                                    null,
-                                    ImportSessionPhase.Failed,
-                                    GetFirstErrorCode(worksheetPreparation.Errors, "import-material-preparation-failed"),
-                                    preparationMessage);
-                            }
+                                MaterialMappings = workbookPreparation.Options.MaterialMappings
+                            };
 
                             var worksheetResult = await finalization
-                                .ImportAsync(worksheetPreparation.Options, selection.WorksheetName)
+                                .ImportAsync(worksheetOptions, selection.WorksheetName)
                                 .ConfigureAwait(false);
                             var importedWorksheet = worksheetResult.Response.Worksheet;
                             var normalizedSelection = importedWorksheet is null
@@ -438,7 +445,7 @@ public static class DesktopBridgeRegistration
                                 Response = PrefixWorksheetRowIds(
                                     MarkCreatedMaterialResolutions(
                                         worksheetResult.Response,
-                                        worksheetPreparation.CreatedSourceMaterials),
+                                        workbookPreparation.CreatedSourceMaterials),
                                     normalizedSelection.OriginalPosition)
                             };
                             workbookImportSource = worksheetResult.ImportSource;
@@ -454,7 +461,7 @@ public static class DesktopBridgeRegistration
 
                             worksheetImports.Add(new FinalizedWorksheetImport(
                                 normalizedSelection,
-                                worksheetPreparation.Options,
+                                worksheetOptions,
                                 worksheetResult.Response));
                         }
 
@@ -2213,8 +2220,10 @@ public static class DesktopBridgeRegistration
     }
 
     private static string? FindConflictingMaterialResolution(
-        IReadOnlyList<ImportWorksheetSelection> selections) =>
-        selections
+        IReadOnlyList<ImportWorksheetSelection> selections,
+        IReadOnlyList<ImportNewMaterialRequest> newMaterials)
+    {
+        var mappedConflict = selections
             .SelectMany(selection => selection.Options?.MaterialMappings ?? [])
             .Where(mapping =>
                 !string.IsNullOrWhiteSpace(mapping.SourceMaterialName) &&
@@ -2226,6 +2235,31 @@ public static class DesktopBridgeRegistration
                 .Skip(1)
                 .Any())
             ?.Key;
+        if (mappedConflict is not null)
+        {
+            return mappedConflict;
+        }
+
+        var mappedLabels = selections
+            .SelectMany(selection => selection.Options?.MaterialMappings ?? [])
+            .Select(mapping => mapping.SourceMaterialName.Trim())
+            .Where(label => !string.IsNullOrWhiteSpace(label))
+            .ToHashSet(StringComparer.Ordinal);
+        return newMaterials
+            .Where(request => !string.IsNullOrWhiteSpace(request.SourceMaterialName))
+            .GroupBy(request => request.SourceMaterialName.Trim(), StringComparer.Ordinal)
+            .FirstOrDefault(group => group.Skip(1).Any() || mappedLabels.Contains(group.Key))
+            ?.Key;
+    }
+
+    private static IReadOnlyList<ImportMaterialMapping> BuildWorkbookMaterialMappings(
+        IReadOnlyList<ImportWorksheetSelection> selections) =>
+        selections
+            .SelectMany(selection => selection.Options?.MaterialMappings ?? [])
+            .Where(mapping => !string.IsNullOrWhiteSpace(mapping.SourceMaterialName))
+            .GroupBy(mapping => mapping.SourceMaterialName.Trim(), StringComparer.Ordinal)
+            .Select(group => group.First())
+            .ToArray();
 
     private static ImportSessionResult CombineWorksheetImports(
         ImportSourceMetadata importSource,

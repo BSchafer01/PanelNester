@@ -1061,7 +1061,10 @@ function createWorkbookImportMappingSession(
   preview: ImportSessionResponse,
 ): ImportMappingSession {
   const workbook = started.workbook!;
-  const firstWorksheet = workbook.worksheets[0];
+  const firstWorksheet =
+    workbook.worksheets.find(
+      (worksheet) => worksheet.worksheetName === workbook.initialWorksheetName,
+    ) ?? workbook.worksheets[0];
   const firstOptions = buildImportOptionsFromResponse(preview);
 
   return {
@@ -3387,51 +3390,20 @@ export default function App() {
   };
 
   const updateImportMappingSession = (session: ImportMappingSession) => {
-    const sharedMaterialLabels = new Set(
-      session.preview.materialResolutions.map(
-        (resolution) => resolution.sourceMaterialName,
-      ),
-    );
     const synchronizedSession = session.worksheets && session.activeWorksheetName
       ? {
           ...session,
-          worksheets: session.worksheets.map((draft) => {
-            const sharedMaterialMappings = session.options.materialMappings.filter(
-              (mapping) => sharedMaterialLabels.has(mapping.sourceMaterialName),
-            );
-            const sharedNewMaterials = session.newMaterials.filter((material) =>
-              sharedMaterialLabels.has(material.sourceMaterialName),
-            );
-            const synchronizedMaterials = {
-              options: {
-                ...draft.options,
-                materialMappings: [
-                  ...draft.options.materialMappings.filter(
-                    (mapping) => !sharedMaterialLabels.has(mapping.sourceMaterialName),
-                  ),
-                  ...sharedMaterialMappings,
-                ],
-              },
-              newMaterials: [
-                ...draft.newMaterials.filter(
-                  (material) => !sharedMaterialLabels.has(material.sourceMaterialName),
-                ),
-                ...sharedNewMaterials,
-              ],
-            };
-            return draft.worksheet.worksheetName === session.activeWorksheetName
+          worksheets: session.worksheets.map((draft) =>
+            draft.worksheet.worksheetName === session.activeWorksheetName
               ? {
                   ...draft,
-                  ...synchronizedMaterials,
                   preview: session.preview,
-                  options: {
-                    ...session.options,
-                    materialMappings: synchronizedMaterials.options.materialMappings,
-                  },
+                  options: session.options,
+                  newMaterials: session.newMaterials,
                   hasPendingChanges: session.hasPendingChanges,
                 }
-              : { ...draft, ...synchronizedMaterials };
-          }),
+              : draft,
+          ),
         }
       : session;
     dispatch({
@@ -3573,13 +3545,7 @@ export default function App() {
     try {
       const selectedWorksheetDrafts = session.worksheets?.filter((draft) => draft.selected) ?? [];
       const sessionNewMaterials = selectedWorksheetDrafts.length > 0
-        ? Array.from(
-            new Map(
-              selectedWorksheetDrafts
-                .flatMap((draft) => draft.newMaterials)
-                .map((entry) => [entry.sourceMaterialName, entry]),
-            ).values(),
-          )
+        ? selectedWorksheetDrafts.flatMap((draft) => draft.newMaterials)
         : session.newMaterials;
       const usesImportSession =
         session.sessionId !== 'legacy-import' &&

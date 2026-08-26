@@ -44,6 +44,7 @@ public sealed class ImportBridgeSpecs : IDisposable
 
         Assert.True(response.Success);
         Assert.Equal(macrosPresent, response.Workbook?.MacrosPresent);
+        Assert.Equal("First", response.Workbook?.InitialWorksheetName);
         Assert.Equal(["First", "Second"], response.Workbook?.Worksheets.Select(sheet => sheet.WorksheetName));
         Assert.Empty(response.Parts);
     }
@@ -186,6 +187,127 @@ public sealed class ImportBridgeSpecs : IDisposable
 
         Assert.False(finalized.Success);
         Assert.Equal("import-material-resolution-conflict", finalized.Error?.Code);
+    }
+
+    [Fact]
+    public async Task Excel_session_rejects_a_new_Material_that_conflicts_with_a_Workbook_mapping()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "conflicting-new-material.xlsx");
+        using (var workbook = new XLWorkbook())
+        {
+            WriteWorkbookWorksheet(workbook.AddWorksheet("First"), "FIRST", "Shared Label");
+            WriteWorkbookWorksheet(workbook.AddWorksheet("Second"), "SECOND", "Shared Label");
+            workbook.SaveAs(workbookPath);
+        }
+
+        var dispatcher = CreateDispatcher();
+        const string sessionId = "conflicting-new-material-session";
+        var started = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest { SessionId = sessionId, ImportSourcePath = workbookPath });
+        Assert.True(started.Success);
+
+        var finalized = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.FinalizeImportSession,
+            new FinalizeImportSessionRequest
+            {
+                SessionId = sessionId,
+                Project = new Project { ProjectId = "conflicting-new-material-project" },
+                NewMaterials =
+                [
+                    new ImportNewMaterialRequest
+                    {
+                        SourceMaterialName = "Shared Label",
+                        Material = new Material
+                        {
+                            Name = "Created Shared Material",
+                            SheetLength = 96m,
+                            SheetWidth = 48m
+                        }
+                    }
+                ],
+                Worksheets =
+                [
+                    new ImportWorksheetSelection
+                    {
+                        WorksheetName = "First",
+                        OriginalPosition = 1,
+                        OptimizationGroupId = "first-group",
+                        OptimizationGroupName = "First"
+                    },
+                    new ImportWorksheetSelection
+                    {
+                        WorksheetName = "Second",
+                        OriginalPosition = 2,
+                        OptimizationGroupId = "second-group",
+                        OptimizationGroupName = "Second",
+                        Options = new ImportOptions
+                        {
+                            MaterialMappings =
+                            [
+                                new ImportMaterialMapping
+                                {
+                                    SourceMaterialName = "Shared Label",
+                                    TargetMaterialId = "material-b"
+                                }
+                            ]
+                        }
+                    }
+                ]
+            });
+
+        Assert.False(finalized.Success);
+        Assert.Equal("import-material-resolution-conflict", finalized.Error?.Code);
+    }
+
+    [Fact]
+    public void Workbook_finalization_preserves_results_for_an_unchanged_manual_only_group()
+    {
+        var manualPart = new PartRow { RowId = "manual", ImportedId = "MANUAL", IsManual = true };
+        var existingResult = new NestResponse { Success = true };
+        var project = new Project
+        {
+            ProjectId = "result-preservation-project",
+            State = new ProjectState
+            {
+                OptimizationGroups =
+                [
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "manual-group",
+                        Name = "Manual",
+                        Order = 0,
+                        Parts = [manualPart],
+                        LastNestingResult = existingResult,
+                        ResultStatus = OptimizationResultStatus.Valid
+                    }
+                ]
+            }
+        };
+        var importedPart = new PartRow { RowId = "imported", ImportedId = "IMPORTED" };
+
+        var finalized = ProjectImportFinalizer.FinalizeWorkbook(
+            project,
+            new ImportSourceMetadata { ImportSourcePath = "fixture.xlsx" },
+            [
+                new FinalizedWorksheetImport(
+                    new ImportWorksheetSelection
+                    {
+                        WorksheetName = "First",
+                        OriginalPosition = 1,
+                        OptimizationGroupId = "import-group",
+                        OptimizationGroupName = "First"
+                    },
+                    new ImportOptions(),
+                    new ImportResponse { Success = true, Parts = [importedPart] })
+            ]);
+
+        var manualGroup = finalized.State.OptimizationGroups[0];
+        Assert.Same(existingResult, manualGroup.LastNestingResult);
+        Assert.Equal(OptimizationResultStatus.Valid, manualGroup.ResultStatus);
     }
     private static readonly JsonSerializerOptions SerializerOptions = BridgeJson.SerializerOptions;
     private readonly string _workspacePath = Path.Combine(Path.GetTempPath(), $"PanelNester.ImportBridgeSpecs.{Guid.NewGuid():N}");

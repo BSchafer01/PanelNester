@@ -59,7 +59,7 @@ Pure domain layer
 ### Import and validation
 
 - CSV import with required-field validation
-- XLSX import through the same application pipeline
+- Excel Workbook (`.xlsx` and `.xlsm`) import through the same application pipeline
 - Row-level validation feedback for dimensions, quantities, and materials
 - Inline correction/editing support in the web UI
 - Material mapping/import review flow in the current UI
@@ -112,6 +112,7 @@ Build the web UI:
 ```powershell
 Set-Location .\src\PanelNester.WebUI
 npm ci
+npm test
 npm run build
 Set-Location ..\..
 ```

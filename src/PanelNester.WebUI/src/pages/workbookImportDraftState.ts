@@ -11,22 +11,23 @@ export function createWorkbookWorksheetDrafts(
   firstPreview: ImportFileResponse,
   firstOptions: ImportOptions,
 ): ImportWorksheetDraft[] {
-  const firstWorksheet = workbook.worksheets[0];
+  const initialWorksheetName =
+    workbook.initialWorksheetName || workbook.worksheets[0]?.worksheetName;
   return workbook.worksheets.map((worksheet) => ({
     worksheet,
-    selected: worksheet.worksheetName === firstWorksheet.worksheetName,
+    selected: worksheet.worksheetName === initialWorksheetName,
     optimizationGroupId: `import-${sessionId}-${worksheet.originalPosition}`,
     optimizationGroupName: worksheet.worksheetName,
     preview:
-      worksheet.worksheetName === firstWorksheet.worksheetName
+      worksheet.worksheetName === initialWorksheetName
         ? firstPreview
         : emptyPreview(),
     options:
-      worksheet.worksheetName === firstWorksheet.worksheetName
+      worksheet.worksheetName === initialWorksheetName
         ? firstOptions
         : { columnMappings: [], materialMappings: [] },
     newMaterials: [],
-    hasPendingChanges: worksheet.worksheetName !== firstWorksheet.worksheetName,
+    hasPendingChanges: worksheet.worksheetName !== initialWorksheetName,
   }));
 }
 

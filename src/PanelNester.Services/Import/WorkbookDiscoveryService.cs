@@ -27,6 +27,7 @@ public sealed class WorkbookDiscoveryService
 
         return Task.FromResult(new WorkbookDiscovery
         {
+            InitialWorksheetName = worksheets.FirstOrDefault()?.WorksheetName ?? string.Empty,
             Worksheets = worksheets,
             MacrosPresent = string.Equals(
                 Path.GetExtension(workbookPath),

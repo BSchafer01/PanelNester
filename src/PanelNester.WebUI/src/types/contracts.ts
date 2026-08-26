@@ -221,6 +221,7 @@ export interface ImportWorksheetDescriptor {
 }
 
 export interface WorkbookDiscovery {
+  initialWorksheetName: string;
   worksheets: ImportWorksheetDescriptor[];
   macrosPresent: boolean;
 }

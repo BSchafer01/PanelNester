@@ -42,10 +42,9 @@ internal static class ProjectImportFinalizer
         var allParts = orderedImports.SelectMany(item => item.Response.Parts).ToArray();
         var groups = project.State.OptimizationGroups
             .OrderBy(group => group.Order)
-            .Select(group => ClearResults(group with
-            {
-                Parts = group.Parts.Where(part => part.IsManual).ToArray()
-            }))
+            .Select(group => UpdateParts(
+                group,
+                group.Parts.Where(part => part.IsManual).ToArray()))
             .ToList();
 
         foreach (var worksheetImport in orderedImports)
@@ -69,10 +68,9 @@ internal static class ProjectImportFinalizer
                 });
             }
 
-            groups[groupIndex] = ClearResults(groups[groupIndex] with
-            {
-                Parts = groups[groupIndex].Parts.Concat(worksheetImport.Response.Parts).ToArray()
-            });
+            groups[groupIndex] = UpdateParts(
+                groups[groupIndex],
+                groups[groupIndex].Parts.Concat(worksheetImport.Response.Parts).ToArray());
         }
 
         var normalizedGroups = groups
@@ -230,7 +228,14 @@ internal static class ProjectImportFinalizer
             assignedIds.Add(part.RowId);
         }
 
-        var changed = parts.Length != group.Parts.Count ||
+        return UpdateParts(group, parts);
+    }
+
+    private static OptimizationGroup UpdateParts(
+        OptimizationGroup group,
+        IReadOnlyList<PartRow> parts)
+    {
+        var changed = parts.Count != group.Parts.Count ||
                       parts.Where((part, index) => !part.Equals(group.Parts[index])).Any();
         return changed ? ClearResults(group with { Parts = parts }) : group;
     }

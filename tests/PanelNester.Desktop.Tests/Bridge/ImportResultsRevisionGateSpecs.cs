@@ -23,7 +23,7 @@ public sealed class ImportResultsRevisionGateSpecs
             "workbookImportDraftState.ts");
 
         Assert.Contains("createWorkbookWorksheetDrafts", app);
-        Assert.Contains("worksheet.worksheetName === firstWorksheet.worksheetName", draftState);
+        Assert.Contains("workbook.initialWorksheetName || workbook.worksheets[0]?.worksheetName", draftState);
         Assert.Contains("optimizationGroupName: worksheet.worksheetName", draftState);
         Assert.Contains("setWorkbookWorksheetSelected", importPage);
         Assert.Contains("selectedWorksheetDrafts.map((draft) => ({", app);

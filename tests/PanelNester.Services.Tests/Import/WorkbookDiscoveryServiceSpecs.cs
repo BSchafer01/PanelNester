@@ -37,6 +37,7 @@ public sealed class WorkbookDiscoveryServiceSpecs : IDisposable
         var result = await new WorkbookDiscoveryService().DiscoverAsync(workbookPath);
 
         Assert.Equal(macrosPresent, result.MacrosPresent);
+        Assert.Equal("First", result.InitialWorksheetName);
         Assert.Collection(
             result.Worksheets,
             worksheet =>

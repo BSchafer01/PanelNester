@@ -35,6 +35,8 @@ public sealed record ImportWorksheetDescriptor
 
 public sealed record WorkbookDiscovery
 {
+    public string InitialWorksheetName { get; init; } = string.Empty;
+
     public IReadOnlyList<ImportWorksheetDescriptor> Worksheets { get; init; } =
         Array.Empty<ImportWorksheetDescriptor>();
 
