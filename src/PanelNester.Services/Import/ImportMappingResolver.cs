@@ -324,7 +324,27 @@ internal sealed class ImportMappingResolver
             : (null, false);
     }
 
-    private static string Normalize(string value)
+    internal static string? RecognizeHeading(string value)
+    {
+        var normalized = Normalize(value);
+        if (normalized.Length == 0)
+        {
+            return null;
+        }
+
+        foreach (var field in ImportFieldNames.All)
+        {
+            if (Normalize(field) == normalized ||
+                SuggestedHeaderAliases[field].Contains(normalized, StringComparer.Ordinal))
+            {
+                return field;
+            }
+        }
+
+        return null;
+    }
+
+    internal static string Normalize(string value)
     {
         Span<char> buffer = stackalloc char[value.Length];
         var bufferIndex = 0;

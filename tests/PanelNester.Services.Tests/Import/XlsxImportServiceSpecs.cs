@@ -36,6 +36,91 @@ public sealed class XlsxImportServiceSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Excel_import_uses_the_confirmed_shifted_heading_range_for_its_table_region()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "shifted-heading-range.xlsx");
+
+        using (var workbook = new XLWorkbook())
+        {
+            var worksheet = workbook.AddWorksheet("Parts");
+            worksheet.Cell("A1").Value = "This title is outside the table";
+            worksheet.Cell("B3").Value = "Id";
+            worksheet.Cell("C3").Value = "Length";
+            worksheet.Cell("D3").Value = "Width";
+            worksheet.Cell("E3").Value = "Quantity";
+            worksheet.Cell("F3").Value = "Material";
+            worksheet.Cell("G3").Value = "Notes outside the confirmed range";
+            worksheet.Cell("B4").Value = "P-200";
+            worksheet.Cell("C4").Value = 30;
+            worksheet.Cell("D4").Value = 12;
+            worksheet.Cell("E4").Value = 3;
+            worksheet.Cell("F4").Value = "Demo Material";
+            worksheet.Cell("G4").Value = "ignored";
+            workbook.SaveAs(workbookPath);
+        }
+
+        var response = await new XlsxImportService().ImportAsync(new ImportRequest
+        {
+            FilePath = workbookPath,
+            WorksheetName = "Parts",
+            HeadingRange = "B3:F3"
+        });
+
+        Assert.True(response.Success);
+        Assert.Equal("P-200", Assert.Single(response.Parts).ImportedId);
+        Assert.Equal("B3:F3", response.Worksheet?.HeadingRange);
+        Assert.Equal(["B", "C", "D", "E", "F"], response.AvailableColumns);
+        Assert.DoesNotContain(response.SourceColumns, column => column.Address == "G");
+    }
+
+    [Theory]
+    [InlineData("A1:E2")]
+    [InlineData("A1:C1,E1:F1")]
+    public async Task Excel_import_rejects_multi_row_and_noncontiguous_heading_ranges(string headingRange)
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "invalid-heading-range.xlsx");
+        using (var workbook = new XLWorkbook())
+        {
+            WriteWorksheet(workbook.AddWorksheet("Parts"), "P-001");
+            workbook.SaveAs(workbookPath);
+        }
+
+        var response = await new XlsxImportService().ImportAsync(new ImportRequest
+        {
+            FilePath = workbookPath,
+            HeadingRange = headingRange
+        });
+
+        Assert.False(response.Success);
+        Assert.Contains(response.Errors, error => error.Code == "invalid-heading-range");
+    }
+
+    [Fact]
+    public async Task Excel_import_rejects_merged_cells_inside_the_heading_range()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "merged-heading-range.xlsx");
+        using (var workbook = new XLWorkbook())
+        {
+            var worksheet = workbook.AddWorksheet("Parts");
+            WriteWorksheet(worksheet, "P-001");
+            worksheet.Range("A1:B1").Merge();
+            workbook.SaveAs(workbookPath);
+        }
+
+        var response = await new XlsxImportService().ImportAsync(new ImportRequest
+        {
+            FilePath = workbookPath,
+            HeadingRange = "A1:E1"
+        });
+
+        Assert.False(response.Success);
+        Assert.Contains(response.Errors, error => error.Code == "merged-heading-range");
+    }
+
+    [Fact]
     public async Task Excel_import_uses_column_addresses_to_distinguish_duplicate_headings()
     {
         Directory.CreateDirectory(_workspacePath);

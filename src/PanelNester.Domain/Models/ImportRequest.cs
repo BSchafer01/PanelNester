@@ -7,4 +7,6 @@ public sealed record ImportRequest
     public ImportOptions Options { get; init; } = new();
 
     public string? WorksheetName { get; init; }
+
+    public string? HeadingRange { get; init; }
 }

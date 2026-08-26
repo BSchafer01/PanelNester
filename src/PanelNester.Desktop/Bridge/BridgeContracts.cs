@@ -342,6 +342,8 @@ public sealed record PreviewImportSessionRequest
     public ImportOptions? Options { get; init; }
 
     public string? WorksheetName { get; init; }
+
+    public string? HeadingRange { get; init; }
 }
 
 public sealed record ImportWorksheetSelection
@@ -355,6 +357,8 @@ public sealed record ImportWorksheetSelection
     public string OptimizationGroupId { get; init; } = string.Empty;
 
     public string OptimizationGroupName { get; init; } = string.Empty;
+
+    public string HeadingRange { get; init; } = string.Empty;
 }
 
 public sealed record FinalizeImportSessionRequest

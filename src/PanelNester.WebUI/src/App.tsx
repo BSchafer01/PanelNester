@@ -3177,10 +3177,25 @@ export default function App() {
           phase: 'validating',
           message: `Validating the snapshot for ${fileNameFromPath(selectedFilePath)}…`,
         });
+        const initialWorksheet = started.workbook?.worksheets[0];
+        if (started.workbook && !initialWorksheet?.headingRange) {
+          dispatch({
+            type: 'import-mapping-ready',
+            session: createWorkbookImportMappingSession(
+              sessionId,
+              selectedFilePath,
+              started,
+              started,
+            ),
+            message: `Discovered ${started.workbook.worksheets.length} visible, nonempty Worksheet(s). Confirm each Heading Range before previewing mappings.`,
+          });
+          return;
+        }
         const response = normalizeImportSessionResponse(
           await hostBridge.previewImportSession({
             sessionId,
-            worksheetName: started.workbook?.worksheets[0]?.worksheetName ?? null,
+            worksheetName: initialWorksheet?.worksheetName ?? null,
+            headingRange: initialWorksheet?.headingRange ?? null,
           }),
           sessionId,
         );
@@ -3456,6 +3471,10 @@ export default function App() {
                 sessionId: session.sessionId,
                 options: session.options,
                 worksheetName: session.activeWorksheetName ?? null,
+                headingRange:
+                  session.worksheets?.find(
+                    (draft) => draft.worksheet.worksheetName === session.activeWorksheetName,
+                  )?.headingRange ?? null,
               }),
               session.sessionId,
             )
@@ -3569,8 +3588,9 @@ export default function App() {
               worksheetName: draft.worksheet.worksheetName,
               originalPosition: draft.worksheet.originalPosition,
               options: draft.options,
-              optimizationGroupId: draft.optimizationGroupId,
-              optimizationGroupName: draft.optimizationGroupName,
+                optimizationGroupId: draft.optimizationGroupId,
+                optimizationGroupName: draft.optimizationGroupName,
+                headingRange: draft.headingRange,
             })),
           }),
           session.sessionId,

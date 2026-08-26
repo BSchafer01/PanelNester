@@ -52,6 +52,97 @@ public sealed class WorkbookDiscoveryServiceSpecs : IDisposable
             });
     }
 
+    [Fact]
+    public async Task Discovery_detects_a_unique_heading_range_below_title_rows_and_returns_a_bounded_preview()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "headings-below-title.xlsx");
+
+        using (var workbook = new XLWorkbook())
+        {
+            var worksheet = workbook.AddWorksheet("Parts");
+            worksheet.Cell("A1").Value = "North elevation panels";
+            worksheet.Cell("A3").Value = "Part No";
+            worksheet.Cell("B3").Value = "Length";
+            worksheet.Cell("C3").Value = "Width";
+            worksheet.Cell("D3").Value = "Qty";
+            worksheet.Cell("E3").Value = "Material";
+            worksheet.Cell("F3").Value = "Part Group";
+            worksheet.Cell("A4").Value = "P-100";
+            worksheet.Cell("B4").Value = 48;
+            worksheet.Cell("C4").Value = 24;
+            worksheet.Cell("D4").Value = 2;
+            worksheet.Cell("E4").Value = "ACM";
+            worksheet.Cell("F4").Value = "North";
+            workbook.SaveAs(workbookPath);
+        }
+
+        var result = await new WorkbookDiscoveryService().DiscoverAsync(workbookPath);
+
+        var worksheetResult = Assert.Single(result.Worksheets);
+        Assert.Equal("A3:F3", worksheetResult.HeadingRange);
+        Assert.Equal("unique-high-confidence", worksheetResult.HeadingRangeDetectionStatus);
+        var candidate = Assert.Single(worksheetResult.HeadingRangeCandidates);
+        Assert.Equal("A3:F3", candidate.Address);
+        Assert.True(candidate.IsHighConfidence);
+        Assert.Contains(
+            worksheetResult.PreviewRows,
+            row => row.RowNumber == 3 && row.Cells.Any(cell => cell.Address == "D3" && cell.Value == "Qty"));
+        Assert.True(worksheetResult.PreviewRows.Count <= 25);
+        Assert.All(worksheetResult.PreviewRows, row => Assert.True(row.Cells.Count <= 16));
+    }
+
+    [Fact]
+    public async Task Discovery_leaves_tied_heading_candidates_unset_for_manual_choice()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "tied-headings.xlsx");
+
+        using (var workbook = new XLWorkbook())
+        {
+            var worksheet = workbook.AddWorksheet("Parts");
+            WriteCandidate(worksheet, 2, "P-100");
+            WriteCandidate(worksheet, 7, "P-200");
+            workbook.SaveAs(workbookPath);
+        }
+
+        var result = await new WorkbookDiscoveryService().DiscoverAsync(workbookPath);
+
+        var worksheetResult = Assert.Single(result.Worksheets);
+        Assert.Equal("tied", worksheetResult.HeadingRangeDetectionStatus);
+        Assert.Equal(string.Empty, worksheetResult.HeadingRange);
+        Assert.Equal(
+            ["A2:E2", "A7:E7"],
+            worksheetResult.HeadingRangeCandidates
+                .Where(candidate => candidate.IsHighConfidence)
+                .Select(candidate => candidate.Address)
+                .Order());
+    }
+
+    [Fact]
+    public async Task Discovery_leaves_low_confidence_candidates_unset()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "low-confidence.xlsx");
+
+        using (var workbook = new XLWorkbook())
+        {
+            var worksheet = workbook.AddWorksheet("Parts");
+            worksheet.Cell("C4").Value = "Part Number";
+            worksheet.Cell("D4").Value = "Qty";
+            worksheet.Cell("C5").Value = "P-100";
+            worksheet.Cell("D5").Value = 2;
+            workbook.SaveAs(workbookPath);
+        }
+
+        var result = await new WorkbookDiscoveryService().DiscoverAsync(workbookPath);
+
+        var worksheetResult = Assert.Single(result.Worksheets);
+        Assert.Equal("low-confidence", worksheetResult.HeadingRangeDetectionStatus);
+        Assert.Equal(string.Empty, worksheetResult.HeadingRange);
+        Assert.False(Assert.Single(worksheetResult.HeadingRangeCandidates).IsHighConfidence);
+    }
+
     private static void AddChartSheet(string workbookPath)
     {
         using var document = SpreadsheetDocument.Open(workbookPath, isEditable: true);
@@ -67,6 +158,21 @@ public sealed class WorkbookDiscoveryServiceSpecs : IDisposable
             SheetId = nextSheetId
         });
         workbookPart.Workbook.Save();
+    }
+
+    private static void WriteCandidate(IXLWorksheet worksheet, int rowNumber, string partId)
+    {
+        string[] headings = ["Id", "Length", "Width", "Quantity", "Material"];
+        for (var index = 0; index < headings.Length; index++)
+        {
+            worksheet.Cell(rowNumber, index + 1).Value = headings[index];
+        }
+
+        worksheet.Cell(rowNumber + 1, 1).Value = partId;
+        worksheet.Cell(rowNumber + 1, 2).Value = 48;
+        worksheet.Cell(rowNumber + 1, 3).Value = 24;
+        worksheet.Cell(rowNumber + 1, 4).Value = 1;
+        worksheet.Cell(rowNumber + 1, 5).Value = "ACM";
     }
 
     public void Dispose()

@@ -2,7 +2,16 @@ import { useEffect, useMemo, useState } from 'react';
 import { MaterialCombobox } from '../components/MaterialCombobox';
 import { StatusPill } from '../components/StatusPill';
 import { ThemedSelect, type ThemedSelectOption } from '../components/ThemedSelect';
-import { setWorkbookWorksheetSelected } from './workbookImportDraftState';
+import {
+  applyHighConfidenceHeadingRanges,
+  confirmWorksheetHeadingRange,
+  copyHeadingRangeFromPreviousSelectedWorksheet,
+  getWorksheetNavigationStatus,
+  headingRangeFromPreviewCells,
+  setWorkbookWorksheetSelected,
+  summarizeHighConfidenceHeadingRanges,
+  type BulkHeadingRangeConfirmationSummary,
+} from './workbookImportDraftState';
 import {
   requiredImportFieldNames,
   type HostBridgeSnapshot,
@@ -598,12 +607,21 @@ export function ImportPage({
   const [pageSize, setPageSize] = useState<number>(defaultPageSize);
   const [currentPage, setCurrentPage] = useState(1);
   const [bulkWorksheetGroupId, setBulkWorksheetGroupId] = useState('');
+  const [headingRangeInputs, setHeadingRangeInputs] = useState<Record<string, string>>({});
+  const [headingRangeErrors, setHeadingRangeErrors] = useState<Record<string, string>>({});
+  const [bulkHeadingSummary, setBulkHeadingSummary] =
+    useState<BulkHeadingRangeConfirmationSummary>();
+  const [headingSelectionStarts, setHeadingSelectionStarts] =
+    useState<Record<string, string>>({});
 
   const activeImportResponse = mappingSession?.preview ?? importResponse;
   const displayFilePath = mappingSession?.filePath ?? selectedFilePath;
   const hasPendingImportReview = Boolean(mappingSession);
   const worksheetDrafts = mappingSession?.worksheets ?? [];
   const selectedWorksheetDrafts = worksheetDrafts.filter((draft) => draft.selected);
+  const activeWorksheetDraft = worksheetDrafts.find(
+    (draft) => draft.worksheet.worksheetName === mappingSession?.activeWorksheetName,
+  );
   const showRowActions = !hasPendingImportReview && (canEditRows || canDeleteRows);
   const hasParts = activeImportResponse.parts.length > 0;
   const busy = importBusy || partMutationBusy;
@@ -799,6 +817,7 @@ export function ImportPage({
     hasPendingImportReview &&
     (mappingSession?.preview.columnMappings.length === 0 || allRequiredFieldsMapped) &&
     (!mappingSession?.workbook || selectedWorksheetDrafts.length > 0) &&
+    (!mappingSession?.workbook || Boolean(activeWorksheetDraft?.headingRangeConfirmed)) &&
     !busy;
   const canFinalizeMapping =
     hasPendingImportReview &&
@@ -808,6 +827,7 @@ export function ImportPage({
     !hasInvalidNewMaterialDraft &&
     (worksheetDrafts.length === 0 ||
       (selectedWorksheetDrafts.length > 0 &&
+        selectedWorksheetDrafts.every((draft) => draft.headingRangeConfirmed) &&
         selectedWorksheetDrafts.every((draft) => {
           const materialMappings = new Map(
             draft.options.materialMappings.map((mapping) => [
@@ -949,6 +969,108 @@ export function ImportPage({
           : draft,
       ),
     });
+  };
+
+  const confirmHeadingRange = (worksheetName: string, address: string) => {
+    if (!mappingSession?.worksheets) {
+      return;
+    }
+
+    const result = confirmWorksheetHeadingRange(
+      mappingSession.worksheets,
+      worksheetName,
+      address,
+    );
+    if (result.error) {
+      setHeadingRangeErrors((current) => ({ ...current, [worksheetName]: result.error! }));
+      return;
+    }
+
+    const activeDraft = result.drafts.find(
+      (draft) => draft.worksheet.worksheetName === mappingSession.activeWorksheetName,
+    );
+    setHeadingRangeInputs((current) => ({
+      ...current,
+      [worksheetName]: result.drafts.find(
+        (draft) => draft.worksheet.worksheetName === worksheetName,
+      )?.headingRange ?? address,
+    }));
+    setHeadingRangeErrors((current) => ({ ...current, [worksheetName]: '' }));
+    onUpdateImportMappingSession({
+      ...mappingSession,
+      worksheets: result.drafts,
+      hasPendingChanges: activeDraft?.hasPendingChanges ?? mappingSession.hasPendingChanges,
+    });
+  };
+
+  const copyPreviousHeadingRange = (worksheetName: string) => {
+    if (!mappingSession?.worksheets) {
+      return;
+    }
+
+    const result = copyHeadingRangeFromPreviousSelectedWorksheet(
+      mappingSession.worksheets,
+      worksheetName,
+    );
+    if (result.error) {
+      setHeadingRangeErrors((current) => ({ ...current, [worksheetName]: result.error! }));
+      return;
+    }
+
+    const copied = result.drafts.find(
+      (draft) => draft.worksheet.worksheetName === worksheetName,
+    );
+    setHeadingRangeInputs((current) => ({
+      ...current,
+      [worksheetName]: copied?.headingRange ?? '',
+    }));
+    onUpdateImportMappingSession({ ...mappingSession, worksheets: result.drafts });
+  };
+
+  const prepareBulkHeadingConfirmation = () => {
+    if (!mappingSession?.worksheets) {
+      return;
+    }
+    setBulkHeadingSummary(summarizeHighConfidenceHeadingRanges(mappingSession.worksheets));
+  };
+
+  const applyBulkHeadingConfirmation = () => {
+    if (!mappingSession?.worksheets || !bulkHeadingSummary) {
+      return;
+    }
+    onUpdateImportMappingSession({
+      ...mappingSession,
+      worksheets: applyHighConfidenceHeadingRanges(
+        mappingSession.worksheets,
+        bulkHeadingSummary,
+      ),
+    });
+    setBulkHeadingSummary(undefined);
+  };
+
+  const selectPreviewCell = (worksheetName: string, address: string) => {
+    const firstAddress = headingSelectionStarts[worksheetName];
+    if (!firstAddress) {
+      setHeadingSelectionStarts((current) => ({ ...current, [worksheetName]: address }));
+      setHeadingRangeErrors((current) => ({
+        ...current,
+        [worksheetName]: 'Select the final cell on the same row.',
+      }));
+      return;
+    }
+
+    const range = headingRangeFromPreviewCells(firstAddress, address);
+    if (!range) {
+      setHeadingSelectionStarts((current) => ({ ...current, [worksheetName]: address }));
+      setHeadingRangeErrors((current) => ({
+        ...current,
+        [worksheetName]: 'Heading Range endpoints must be on the same row. Select a new final cell.',
+      }));
+      return;
+    }
+
+    setHeadingSelectionStarts((current) => ({ ...current, [worksheetName]: '' }));
+    confirmHeadingRange(worksheetName, range);
   };
 
   useEffect(() => {
@@ -1243,7 +1365,50 @@ export function ImportPage({
                 >
                   Clear selection
                 </button>
+                <button
+                  className="secondary-button"
+                  disabled={
+                    busy ||
+                    selectedWorksheetDrafts.every(
+                      (draft) =>
+                        draft.headingRangeConfirmed ||
+                        draft.worksheet.headingRangeDetectionStatus !==
+                          'unique-high-confidence',
+                    )
+                  }
+                  onClick={prepareBulkHeadingConfirmation}
+                  type="button"
+                >
+                  Confirm high-confidence detections
+                </button>
               </div>
+              {bulkHeadingSummary ? (
+                <div className="heading-bulk-summary" role="status">
+                  <strong>Confirm Heading Ranges for {bulkHeadingSummary.worksheetNames.length} Worksheet(s)?</strong>
+                  <p>
+                    {bulkHeadingSummary.worksheetNames.length > 0
+                      ? bulkHeadingSummary.worksheetNames.join(', ')
+                      : 'No unique high-confidence detections are eligible.'}
+                  </p>
+                  <div className="button-row">
+                    <button
+                      className="primary-button"
+                      disabled={busy || bulkHeadingSummary.worksheetNames.length === 0}
+                      onClick={applyBulkHeadingConfirmation}
+                      type="button"
+                    >
+                      Apply confirmations
+                    </button>
+                    <button
+                      className="secondary-button"
+                      onClick={() => setBulkHeadingSummary(undefined)}
+                      type="button"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : null}
               <div className="button-row">
                 <label className="field">
                   <span>Move selected Worksheets to</span>
@@ -1297,6 +1462,18 @@ export function ImportPage({
                           {draft.worksheet.originalPosition}. {draft.worksheet.worksheetName}
                         </span>
                       </label>
+                      {draft.selected ? (
+                        <StatusPill
+                          label={getWorksheetNavigationStatus(draft)}
+                          tone={
+                            getWorksheetNavigationStatus(draft) === 'Ready'
+                              ? 'ok'
+                              : getWorksheetNavigationStatus(draft) === 'Has errors'
+                                ? 'error'
+                                : 'warn'
+                          }
+                        />
+                      ) : null}
                       <button
                         className="secondary-button"
                         disabled={busy || !draft.selected}
@@ -1309,25 +1486,143 @@ export function ImportPage({
                       </button>
                     </div>
                     {draft.selected ? (
-                      <label className="field">
-                        <span>Optimization Group</span>
-                        <select
-                          disabled={busy}
-                          onChange={(event) =>
-                            assignWorksheetGroup(
-                              draft.worksheet.worksheetName,
-                              event.target.value,
-                            )
-                          }
-                          value={draft.optimizationGroupId}
-                        >
-                          {worksheetOptimizationGroupOptions.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
+                      <div className="worksheet-configuration">
+                        <label className="field">
+                          <span>Optimization Group</span>
+                          <select
+                            disabled={busy}
+                            onChange={(event) =>
+                              assignWorksheetGroup(
+                                draft.worksheet.worksheetName,
+                                event.target.value,
+                              )
+                            }
+                            value={draft.optimizationGroupId}
+                          >
+                            {worksheetOptimizationGroupOptions.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <div className="heading-range-controls">
+                          <label className="field">
+                            <span>Heading Range (A1)</span>
+                            <input
+                              aria-invalid={Boolean(
+                                headingRangeErrors[draft.worksheet.worksheetName],
+                              )}
+                              disabled={busy}
+                              onBlur={(event) =>
+                                confirmHeadingRange(
+                                  draft.worksheet.worksheetName,
+                                  event.target.value,
+                                )
+                              }
+                              onChange={(event) =>
+                                setHeadingRangeInputs((current) => ({
+                                  ...current,
+                                  [draft.worksheet.worksheetName]: event.target.value,
+                                }))
+                              }
+                              value={
+                                headingRangeInputs[draft.worksheet.worksheetName] ??
+                                draft.headingRange
+                              }
+                            />
+                          </label>
+                          <button
+                            className="secondary-button"
+                            disabled={
+                              busy ||
+                              !worksheetDrafts
+                                .slice(0, worksheetDrafts.indexOf(draft))
+                                .some(
+                                  (previous) =>
+                                    previous.selected && previous.headingRangeConfirmed,
+                                )
+                            }
+                            onClick={() =>
+                              copyPreviousHeadingRange(draft.worksheet.worksheetName)
+                            }
+                            type="button"
+                          >
+                            Same Heading Range as Previous
+                          </button>
+                        </div>
+                        {headingRangeErrors[draft.worksheet.worksheetName] ? (
+                          <p className="field-error" role="alert">
+                            {headingRangeErrors[draft.worksheet.worksheetName]}
+                          </p>
+                        ) : null}
+                        {(draft.worksheet.headingRangeCandidates ?? []).length > 0 ? (
+                          <div className="heading-candidates">
+                            {(draft.worksheet.headingRangeCandidates ?? []).map((candidate) => (
+                              <button
+                                className={`heading-candidate${
+                                  draft.worksheet.headingRangeDetectionStatus === 'tied' &&
+                                  candidate.isHighConfidence
+                                    ? ' heading-candidate--tied'
+                                    : ''
+                                }`}
+                                disabled={busy}
+                                key={candidate.address}
+                                onClick={() =>
+                                  confirmHeadingRange(
+                                    draft.worksheet.worksheetName,
+                                    candidate.address,
+                                  )
+                                }
+                                type="button"
+                              >
+                                {candidate.address} · {Math.round(candidate.confidence * 100)}%
+                                {candidate.address === draft.worksheet.headingRange &&
+                                draft.worksheet.headingRangeDetectionStatus ===
+                                  'unique-high-confidence'
+                                  ? ' · Detected'
+                                  : ''}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+                        <div className="worksheet-preview" role="region" aria-label={`${draft.worksheet.worksheetName} cell preview`}>
+                          <table>
+                            <tbody>
+                              {(draft.worksheet.previewRows ?? []).map((row) => (
+                                <tr key={row.rowNumber}>
+                                  <th scope="row">{row.rowNumber}</th>
+                                  {row.cells.map((cell) => (
+                                    <td key={cell.address}>
+                                      <button
+                                        aria-label={`Select ${cell.address} as a Heading Range endpoint`}
+                                        className={
+                                          headingSelectionStarts[
+                                            draft.worksheet.worksheetName
+                                          ] === cell.address
+                                            ? 'worksheet-preview__cell worksheet-preview__cell--selected'
+                                            : 'worksheet-preview__cell'
+                                        }
+                                        disabled={busy}
+                                        onClick={() =>
+                                          selectPreviewCell(
+                                            draft.worksheet.worksheetName,
+                                            cell.address,
+                                          )
+                                        }
+                                        title={cell.address}
+                                        type="button"
+                                      >
+                                        {cell.value}
+                                      </button>
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
                     ) : null}
                   </div>
                 ))}

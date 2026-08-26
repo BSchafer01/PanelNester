@@ -224,6 +224,32 @@ export interface ImportWorksheetDescriptor {
   worksheetName: string;
   originalPosition: number;
   headingRange: string;
+  headingRangeDetectionStatus: HeadingRangeDetectionStatus;
+  headingRangeCandidates: HeadingRangeCandidate[];
+  previewRows: WorksheetPreviewRow[];
+}
+
+export type HeadingRangeDetectionStatus =
+  | 'none'
+  | 'low-confidence'
+  | 'tied'
+  | 'unique-high-confidence';
+
+export interface HeadingRangeCandidate {
+  address: string;
+  confidence: number;
+  isHighConfidence: boolean;
+}
+
+export interface WorksheetPreviewRow {
+  rowNumber: number;
+  cells: WorksheetPreviewCell[];
+}
+
+export interface WorksheetPreviewCell {
+  address: string;
+  columnNumber: number;
+  value: string;
 }
 
 export interface WorkbookDiscovery {
@@ -282,6 +308,7 @@ export interface PreviewImportSessionRequest {
   sessionId: string;
   options?: ImportOptions | null;
   worksheetName?: string | null;
+  headingRange?: string | null;
 }
 
 export interface ImportWorksheetSelection {
@@ -290,6 +317,7 @@ export interface ImportWorksheetSelection {
   options?: ImportOptions | null;
   optimizationGroupId: string;
   optimizationGroupName: string;
+  headingRange: string;
 }
 
 export interface FinalizeImportSessionRequest {
@@ -359,6 +387,8 @@ export interface ImportWorksheetDraft {
   options: ImportOptions;
   newMaterials: ImportNewMaterialRequest[];
   hasPendingChanges: boolean;
+  headingRange: string;
+  headingRangeConfirmed: boolean;
 }
 
 export interface Material {

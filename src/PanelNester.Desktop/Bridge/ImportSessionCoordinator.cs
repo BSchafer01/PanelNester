@@ -73,12 +73,13 @@ internal sealed class ImportSessionCoordinator
         string sessionId,
         ImportOptions? options,
         string? worksheetName,
+        string? headingRange,
         CancellationToken cancellationToken)
     {
         var session = GetSession(sessionId);
         try
         {
-            var response = await ImportSnapshotAsync(session, options, worksheetName, cancellationToken).ConfigureAwait(false);
+            var response = await ImportSnapshotAsync(session, options, worksheetName, headingRange, cancellationToken).ConfigureAwait(false);
             return new ImportSessionResult(session.ImportSource, response);
         }
         catch
@@ -113,13 +114,14 @@ internal sealed class ImportSessionCoordinator
         ImportSessionSnapshot session,
         ImportOptions? options,
         string? worksheetName,
+        string? headingRange,
         CancellationToken cancellationToken)
     {
         var operationToken = session.BeginOperation(cancellationToken);
 
         try
         {
-            return await ImportSnapshotFileAsync(session, options, worksheetName, operationToken).ConfigureAwait(false);
+            return await ImportSnapshotFileAsync(session, options, worksheetName, headingRange, operationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -131,6 +133,7 @@ internal sealed class ImportSessionCoordinator
         ImportSessionSnapshot session,
         ImportOptions? options,
         string? worksheetName,
+        string? headingRange,
         CancellationToken operationToken)
     {
         var response = await WithSnapshotFileAsync(
@@ -141,7 +144,8 @@ internal sealed class ImportSessionCoordinator
                 {
                     FilePath = snapshotPath,
                     Options = options ?? new ImportOptions(),
-                    WorksheetName = worksheetName
+                    WorksheetName = worksheetName,
+                    HeadingRange = headingRange
                 },
                 operationToken)).ConfigureAwait(false);
 
@@ -399,11 +403,12 @@ internal sealed class ImportSessionCoordinator
 
         public async Task<ImportSessionResult> ImportAsync(
             ImportOptions? options,
-            string? worksheetName = null)
+            string? worksheetName = null,
+            string? headingRange = null)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             var response = await _owner
-                .ImportSnapshotFileAsync(_session, options, worksheetName, CancellationToken)
+                .ImportSnapshotFileAsync(_session, options, worksheetName, headingRange, CancellationToken)
                 .ConfigureAwait(false);
             return new ImportSessionResult(_session.ImportSource, response);
         }

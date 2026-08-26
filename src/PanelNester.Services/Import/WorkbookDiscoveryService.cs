@@ -18,11 +18,7 @@ public sealed class WorkbookDiscoveryService
                 worksheet.Visibility == XLWorksheetVisibility.Visible &&
                 worksheet.RangeUsed() is not null)
             .OrderBy(worksheet => worksheet.Position)
-            .Select(worksheet => new ImportWorksheetDescriptor
-            {
-                WorksheetName = worksheet.Name,
-                OriginalPosition = worksheet.Position
-            })
+            .Select(HeadingRangeDetector.Describe)
             .ToArray();
 
         return Task.FromResult(new WorkbookDiscovery

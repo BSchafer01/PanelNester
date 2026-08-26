@@ -128,6 +128,73 @@ public sealed class ImportBridgeSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Excel_session_previews_and_persists_the_explicit_A1_Heading_Range()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "manual-heading-range.xlsx");
+        using (var workbook = new XLWorkbook())
+        {
+            var worksheet = workbook.AddWorksheet("Parts");
+            worksheet.Cell("A1").Value = "Project title";
+            string[] headings = ["Id", "Length", "Width", "Quantity", "Material"];
+            for (var index = 0; index < headings.Length; index++)
+            {
+                worksheet.Cell(3, index + 2).Value = headings[index];
+            }
+            worksheet.Cell("B4").Value = "P-300";
+            worksheet.Cell("C4").Value = 40;
+            worksheet.Cell("D4").Value = 20;
+            worksheet.Cell("E4").Value = 2;
+            worksheet.Cell("F4").Value = "Demo Material";
+            workbook.SaveAs(workbookPath);
+        }
+
+        var dispatcher = CreateDispatcher();
+        const string sessionId = "manual-heading-range-session";
+        var started = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest { SessionId = sessionId, ImportSourcePath = workbookPath });
+        Assert.Equal("B3:F3", Assert.Single(started.Workbook!.Worksheets).HeadingRange);
+
+        var preview = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.PreviewImportSession,
+            new PreviewImportSessionRequest
+            {
+                SessionId = sessionId,
+                WorksheetName = "Parts",
+                HeadingRange = "B3:F3"
+            });
+        Assert.Equal("P-300", Assert.Single(preview.Parts).ImportedId);
+
+        var finalized = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.FinalizeImportSession,
+            new FinalizeImportSessionRequest
+            {
+                SessionId = sessionId,
+                Project = new Project { ProjectId = "manual-heading-project" },
+                Worksheets =
+                [
+                    new ImportWorksheetSelection
+                    {
+                        WorksheetName = "Parts",
+                        OriginalPosition = 1,
+                        HeadingRange = "B3:F3",
+                        OptimizationGroupId = "parts",
+                        OptimizationGroupName = "Parts"
+                    }
+                ]
+            });
+
+        Assert.True(finalized.Success);
+        Assert.Equal(
+            "B3:F3",
+            Assert.Single(finalized.Project!.State.ImportConfiguration!.Worksheets).HeadingRange);
+    }
+
+    [Fact]
     public async Task Excel_session_rejects_finalization_without_a_selected_Worksheet()
     {
         Directory.CreateDirectory(_workspacePath);

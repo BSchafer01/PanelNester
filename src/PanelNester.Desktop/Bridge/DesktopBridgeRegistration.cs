@@ -326,6 +326,7 @@ public static class DesktopBridgeRegistration
                             request.SessionId,
                             request.Options,
                             request.WorksheetName,
+                            request.HeadingRange,
                             cancellationToken)
                         .ConfigureAwait(false);
                     return BuildImportSessionResponse(request.SessionId, result, ImportSessionPhase.Validating);
@@ -440,7 +441,10 @@ public static class DesktopBridgeRegistration
                             };
 
                             var worksheetResult = await finalization
-                                .ImportAsync(worksheetOptions, selection.WorksheetName)
+                                .ImportAsync(
+                                    worksheetOptions,
+                                    selection.WorksheetName,
+                                    selection.HeadingRange)
                                 .ConfigureAwait(false);
                             var importedWorksheet = worksheetResult.Response.Worksheet;
                             var normalizedSelection = importedWorksheet is null

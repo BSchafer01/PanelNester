@@ -97,9 +97,46 @@ public sealed class XlsxImportService : IImportService
                 return PartRowValidator.CreateResponse([], errors, warnings);
             }
 
-            var headerRow = usedRows[0];
-            var lastHeaderColumn = headerRow.LastCellUsed()?.Address.ColumnNumber ?? 0;
-            if (lastHeaderColumn == 0)
+            IXLRange headingRange;
+            try
+            {
+                headingRange = string.IsNullOrWhiteSpace(request.HeadingRange)
+                    ? worksheet.Range(
+                        usedRows[0].RowNumber(),
+                        usedRows[0].FirstCellUsed()!.Address.ColumnNumber,
+                        usedRows[0].RowNumber(),
+                        usedRows[0].LastCellUsed()!.Address.ColumnNumber)
+                    : worksheet.Range(request.HeadingRange.Trim());
+            }
+            catch (ArgumentException)
+            {
+                errors.Add(new ValidationError(
+                    "invalid-heading-range",
+                    $"Heading Range '{request.HeadingRange}' is not a valid A1-style range."));
+                return PartRowValidator.CreateResponse([], errors, warnings);
+            }
+
+            var headingAddress = headingRange.RangeAddress;
+            if (headingAddress.FirstAddress.RowNumber != headingAddress.LastAddress.RowNumber)
+            {
+                errors.Add(new ValidationError(
+                    "invalid-heading-range",
+                    "Heading Range must be one contiguous row."));
+                return PartRowValidator.CreateResponse([], errors, warnings);
+            }
+
+            if (worksheet.MergedRanges.Any(mergedRange => mergedRange.Intersects(headingRange)))
+            {
+                errors.Add(new ValidationError(
+                    "merged-heading-range",
+                    "Heading Range cannot contain merged cells."));
+                return PartRowValidator.CreateResponse([], errors, warnings);
+            }
+
+            var headerRowNumber = headingAddress.FirstAddress.RowNumber;
+            var firstHeaderColumn = headingAddress.FirstAddress.ColumnNumber;
+            var lastHeaderColumn = headingAddress.LastAddress.ColumnNumber;
+            if (headingRange.Cells().All(cell => string.IsNullOrWhiteSpace(GetCellText(cell))))
             {
                 errors.Add(new ValidationError("missing-column", "Worksheet header row is empty."));
                 return PartRowValidator.CreateResponse([], errors, warnings);
@@ -109,14 +146,14 @@ public sealed class XlsxImportService : IImportService
             {
                 WorksheetName = worksheet.Name,
                 OriginalPosition = worksheet.Position,
-                HeadingRange = $"R{headerRow.RowNumber()}C1:R{headerRow.RowNumber()}C{lastHeaderColumn}"
+                HeadingRange = headingRange.RangeAddress.ToStringRelative()
             };
 
-            sourceColumns = Enumerable.Range(1, lastHeaderColumn)
+            sourceColumns = Enumerable.Range(firstHeaderColumn, lastHeaderColumn - firstHeaderColumn + 1)
                 .Select(columnNumber => new ImportSourceColumn
                 {
-                    Address = headerRow.Cell(columnNumber).Address.ColumnLetter,
-                    Heading = GetCellText(headerRow.Cell(columnNumber))
+                    Address = XLHelper.GetColumnLetterFromNumber(columnNumber),
+                    Heading = GetCellText(worksheet.Cell(headerRowNumber, columnNumber))
                 })
                 .ToArray();
             availableColumns = sourceColumns.Select(column => column.Address).ToArray();
@@ -134,7 +171,11 @@ public sealed class XlsxImportService : IImportService
             }
 
             var headerMap = sourceColumns
-                .Select((column, index) => new { column.Address, columnNumber = index + 1 })
+                .Select(column => new
+                {
+                    column.Address,
+                    columnNumber = XLHelper.GetColumnNumberFromLetter(column.Address)
+                })
                 .ToDictionary(item => item.Address, item => item.columnNumber, StringComparer.Ordinal);
 
             var rowIndex = 0;
@@ -143,7 +184,9 @@ public sealed class XlsxImportService : IImportService
             var hasRowNumberColumn = columnPlan.FieldToSource.TryGetValue(ImportFieldNames.RowNumber, out var rowNumberSourceColumn);
             var hasColumnNumberColumn = columnPlan.FieldToSource.TryGetValue(ImportFieldNames.ColumnNumber, out var columnNumberSourceColumn);
 
-            foreach (var row in usedRows.Skip(1))
+            var lastTableRow = worksheet.LastRowUsed()?.RowNumber() ?? headerRowNumber;
+            foreach (var row in Enumerable.Range(headerRowNumber + 1, Math.Max(0, lastTableRow - headerRowNumber))
+                         .Select(worksheet.Row))
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
@@ -173,7 +216,7 @@ public sealed class XlsxImportService : IImportService
                             WorksheetPosition = worksheet.Position,
                             PhysicalRow = row.RowNumber(),
                             SourceFingerprint = Fingerprint(
-                                Enumerable.Range(1, lastHeaderColumn)
+                                Enumerable.Range(firstHeaderColumn, lastHeaderColumn - firstHeaderColumn + 1)
                                     .Select(columnNumber => GetCellText(row.Cell(columnNumber))))
                         }
                     ]
