@@ -16,6 +16,7 @@ import {
   decoratePlacements,
   sheetLookupKey,
 } from './resultsBatchSheetSearch';
+import { getResultsOptimizationGroups, getSheetDisplayId } from './resultsPresentation';
 import type {
   BatchNestResponse,
   Material,
@@ -371,7 +372,7 @@ export function ResultsPage({
   onSelectOptimizationGroup,
 }: ResultsPageProps) {
   const orderedOptimizationGroups = useMemo(
-    () => [...optimizationGroups].sort((left, right) => left.order - right.order),
+    () => getResultsOptimizationGroups(optimizationGroups),
     [optimizationGroups],
   );
   const activeOptimizationGroup =
@@ -757,7 +758,7 @@ export function ResultsPage({
   };
 
   const sheetHeaderLabel = activeSheetView
-    ? `${activeSheetView.sheet.sheetId} | ${activeSheetView.materialName}`
+    ? `${getSheetDisplayId(activeSheetView.sheet)} | ${activeSheetView.materialName}`
     : 'No sheet selected';
   const sheetSummaryLabel = activeSheetView
     ? `${formatDimension(activeSheetView.sheet.sheetLength)} x ${formatDimension(activeSheetView.sheet.sheetWidth)} in`
@@ -871,7 +872,7 @@ export function ResultsPage({
                         >
                           <td>
                             <div className="results-sheet-row">
-                              <strong>{sheet.sheet.sheetId}</strong>
+                              <strong>{getSheetDisplayId(sheet.sheet)}</strong>
                               <span>{sheet.materialName}</span>
                               {hitCount > 0 ? <small>{hitCount} hit(s)</small> : null}
                             </div>

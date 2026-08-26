@@ -56,7 +56,7 @@ internal static class ProjectSchemaMigrator
     {
         state ??= new ProjectState();
         var sourceGroups = state.OptimizationGroups?.Where(group => group is not null).ToArray() ?? [];
-        if (sourceGroups.Length == 0)
+        if (sourceGroups.Length == 0 && HasLegacyOptimizationGroupContent(state))
         {
             sourceGroups = [CreateLegacyGroup(projectId, state)];
         }
@@ -104,6 +104,11 @@ internal static class ProjectSchemaMigrator
             LastNestingResult = state.LastNestingResult,
             LastBatchNestingResult = state.LastBatchNestingResult
         };
+
+    private static bool HasLegacyOptimizationGroupContent(ProjectState state) =>
+        (state.Parts?.Count ?? 0) > 0 ||
+        state.LastNestingResult is not null ||
+        state.LastBatchNestingResult is not null;
 
     private static OptimizationGroup NormalizeGroup(
         OptimizationGroup group,

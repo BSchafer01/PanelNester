@@ -2,6 +2,7 @@ import type {
   ImportColumnMapping,
   ImportFileResponse,
   ImportMaterialMapping,
+  ImportMappingSession,
   ImportNewMaterialRequest,
   ImportOptions,
   ImportPreviewSummary,
@@ -101,6 +102,7 @@ export function createWorkbookWorksheetDrafts(
     headingRange: worksheet.headingRange,
     headingRangeConfirmed: false,
     excludedSourceRows: [],
+    ignoredMaterialNames: [],
     partOverrides: [],
   }));
 }
@@ -172,6 +174,88 @@ export function excludeInvalidSourceRow(
   };
 }
 
+export function excludeInvalidSourceRows(
+  draft: ImportWorksheetDraft,
+  rowIds: string[],
+): ImportWorksheetDraft {
+  return rowIds.reduce(excludeInvalidSourceRow, draft);
+}
+
+export function excludeSourceRows(
+  draft: ImportWorksheetDraft,
+  rowIds: string[],
+): ImportWorksheetDraft {
+  const requestedRowIds = new Set(rowIds);
+  const rows = draft.preview.parts.filter((part) => requestedRowIds.has(part.rowId));
+  if (rows.length === 0) {
+    return draft;
+  }
+
+  const excludedRows = rows.flatMap((sourceRow) => {
+    const sourceReference = sourceRow.sourceReferences?.[0];
+    if (!sourceReference) {
+      return [];
+    }
+    const originalValidationError = draft.preview.errors.find(
+      (error) => error.rowId === sourceRow.rowId,
+    ) ?? {
+      code: 'user-excluded',
+      message: 'Source row was excluded during import review.',
+      rowId: sourceRow.rowId,
+      location: sourceReference,
+    };
+    return [{ rowId: sourceRow.rowId, sourceReference, originalValidationError, sourceRow }];
+  });
+  const excludedRowIds = new Set(excludedRows.map((row) => row.rowId));
+  const errors = draft.preview.errors.filter((error) => !excludedRowIds.has(error.rowId ?? ''));
+  return {
+    ...draft,
+    preview: {
+      ...draft.preview,
+      success: errors.length === 0,
+      parts: draft.preview.parts.filter((part) => !excludedRowIds.has(part.rowId)),
+      errors,
+      warnings: draft.preview.warnings.filter(
+        (warning) => !excludedRowIds.has(warning.rowId ?? ''),
+      ),
+    },
+    excludedSourceRows: [
+      ...draft.excludedSourceRows.filter((row) => !excludedRowIds.has(row.rowId)),
+      ...excludedRows,
+    ],
+    partOverrides: draft.partOverrides.filter((item) => !excludedRowIds.has(item.rowId)),
+  };
+}
+
+export interface SourceRowSelectionResult {
+  selectedRowIds: Set<string>;
+  anchorRowId: string;
+}
+
+export function selectSourceRowRange(
+  selectedRowIds: Set<string>,
+  orderedRowIds: string[],
+  clickedRowId: string,
+  checked: boolean,
+  shiftKey: boolean,
+  anchorRowId?: string,
+): SourceRowSelectionResult {
+  const next = new Set(selectedRowIds);
+  const clickedIndex = orderedRowIds.indexOf(clickedRowId);
+  const anchorIndex = anchorRowId ? orderedRowIds.indexOf(anchorRowId) : -1;
+  const affectedRowIds = shiftKey && clickedIndex >= 0 && anchorIndex >= 0
+    ? orderedRowIds.slice(
+        Math.min(clickedIndex, anchorIndex),
+        Math.max(clickedIndex, anchorIndex) + 1,
+      )
+    : [clickedRowId];
+  for (const rowId of affectedRowIds) {
+    if (checked) next.add(rowId);
+    else next.delete(rowId);
+  }
+  return { selectedRowIds: next, anchorRowId: clickedRowId };
+}
+
 export function restoreExcludedSourceRow(
   draft: ImportWorksheetDraft,
   rowId: string,
@@ -181,13 +265,19 @@ export function restoreExcludedSourceRow(
     return draft;
   }
 
+  const restoresValidationError = excluded.originalValidationError.code !== 'user-excluded' &&
+    excluded.originalValidationError.code !== 'ignored-material';
+  const errors = restoresValidationError
+    ? [...draft.preview.errors, excluded.originalValidationError]
+    : draft.preview.errors;
+
   return {
     ...draft,
     preview: {
       ...draft.preview,
-      success: false,
+      success: errors.length === 0,
       parts: [...draft.preview.parts, excluded.sourceRow],
-      errors: [...draft.preview.errors, excluded.originalValidationError],
+      errors,
     },
     excludedSourceRows: draft.excludedSourceRows.filter((item) => item.rowId !== rowId),
   };
@@ -315,10 +405,11 @@ export function synchronizeWorkbookMaterialResolution(
       return draft;
     }
 
-    const materialMappings = draft.options.materialMappings.filter(
+    const restoredDraft = restoreIgnoredMaterialRows(draft, sourceMaterialName);
+    const materialMappings = restoredDraft.options.materialMappings.filter(
       (mapping) => mapping.sourceMaterialName !== sourceMaterialName,
     );
-    const newMaterials = draft.newMaterials.filter(
+    const newMaterials = restoredDraft.newMaterials.filter(
       (material) => material.sourceMaterialName !== sourceMaterialName,
     );
     if (materialMapping?.targetMaterialId?.trim()) {
@@ -329,12 +420,123 @@ export function synchronizeWorkbookMaterialResolution(
     }
 
     return {
-      ...draft,
-      options: { ...draft.options, materialMappings },
+      ...restoredDraft,
+      options: { ...restoredDraft.options, materialMappings },
       newMaterials,
       hasPendingChanges: true,
     };
   });
+}
+
+export function ignoreWorkbookMaterial(
+  drafts: ImportWorksheetDraft[],
+  sourceMaterialName: string,
+): ImportWorksheetDraft[] {
+  return drafts.map((draft) => {
+    if (!draft.selected) {
+      return draft;
+    }
+
+    const matchingRows = draft.preview.parts.filter(
+      (part) => part.materialName === sourceMaterialName,
+    );
+    const ignoredRows = matchingRows.flatMap((sourceRow) => {
+      const sourceReference = sourceRow.sourceReferences?.[0];
+      if (!sourceReference) {
+        return [];
+      }
+      return [{
+        rowId: sourceRow.rowId,
+        sourceReference,
+        originalValidationError: {
+          code: 'ignored-material',
+          message: `Material "${sourceMaterialName}" was ignored.`,
+          rowId: sourceRow.rowId,
+          location: sourceReference,
+        },
+        sourceRow,
+      }];
+    });
+    const rowIds = new Set(ignoredRows.map((row) => row.rowId));
+    const errors = draft.preview.errors.filter((error) => !rowIds.has(error.rowId ?? ''));
+
+    return {
+      ...draft,
+      preview: {
+        ...draft.preview,
+        success: errors.length === 0,
+        parts: draft.preview.parts.filter((part) => !rowIds.has(part.rowId)),
+        errors,
+        warnings: draft.preview.warnings.filter((warning) => !rowIds.has(warning.rowId ?? '')),
+      },
+      options: {
+        ...draft.options,
+        materialMappings: draft.options.materialMappings.filter(
+          (mapping) => mapping.sourceMaterialName !== sourceMaterialName,
+        ),
+      },
+      newMaterials: draft.newMaterials.filter(
+        (material) => material.sourceMaterialName !== sourceMaterialName,
+      ),
+      ignoredMaterialNames: Array.from(new Set([
+        ...draft.ignoredMaterialNames,
+        sourceMaterialName,
+      ])),
+      excludedSourceRows: [
+        ...draft.excludedSourceRows.filter((row) => !rowIds.has(row.rowId)),
+        ...ignoredRows,
+      ],
+      partOverrides: draft.partOverrides.filter((item) => !rowIds.has(item.rowId)),
+    };
+  });
+}
+
+export function ignoreMaterialInSession(
+  session: ImportMappingSession,
+  sourceMaterialName: string,
+): ImportMappingSession {
+  if (!session.worksheets) {
+    return session;
+  }
+
+  const worksheets = ignoreWorkbookMaterial(session.worksheets, sourceMaterialName);
+  const activeDraft = worksheets.find(
+    (draft) => draft.worksheet.worksheetName === session.activeWorksheetName,
+  ) ?? worksheets.find((draft) => draft.selected);
+  return {
+    ...session,
+    worksheets,
+    activeWorksheetName: activeDraft?.worksheet.worksheetName ?? session.activeWorksheetName,
+    preview: activeDraft?.preview ?? session.preview,
+    options: activeDraft?.options ?? session.options,
+    newMaterials: activeDraft?.newMaterials ?? session.newMaterials,
+    hasPendingChanges: activeDraft?.hasPendingChanges ?? session.hasPendingChanges,
+  };
+}
+
+function restoreIgnoredMaterialRows(
+  draft: ImportWorksheetDraft,
+  sourceMaterialName: string,
+): ImportWorksheetDraft {
+  const restored = draft.excludedSourceRows.filter(
+    (row) => row.originalValidationError.code === 'ignored-material' &&
+      row.sourceRow.materialName === sourceMaterialName,
+  );
+  if (restored.length === 0 && !draft.ignoredMaterialNames.includes(sourceMaterialName)) {
+    return draft;
+  }
+
+  return {
+    ...draft,
+    preview: {
+      ...draft.preview,
+      parts: [...draft.preview.parts, ...restored.map((row) => row.sourceRow)],
+    },
+    excludedSourceRows: draft.excludedSourceRows.filter((row) => !restored.includes(row)),
+    ignoredMaterialNames: draft.ignoredMaterialNames.filter(
+      (name) => name !== sourceMaterialName,
+    ),
+  };
 }
 
 export function collectWorkbookNewMaterials(
@@ -471,6 +673,11 @@ export function setWorkbookWorksheetSelected(
       .flatMap((draft) => draft.newMaterials)
       .map((material) => [material.sourceMaterialName, material]),
   );
+  const workbookIgnoredMaterials = new Set(
+    drafts
+      .filter((draft) => draft.selected)
+      .flatMap((draft) => draft.ignoredMaterialNames),
+  );
 
   return drafts.map((draft) =>
     draft.worksheet.worksheetName === worksheetName
@@ -504,6 +711,9 @@ export function setWorkbookWorksheetSelected(
                 (material) => !workbookMaterialMappings.has(material.sourceMaterialName),
               )
             : draft.newMaterials,
+          ignoredMaterialNames: selected
+            ? Array.from(new Set([...draft.ignoredMaterialNames, ...workbookIgnoredMaterials]))
+            : draft.ignoredMaterialNames,
         }
       : draft,
   );

@@ -16,7 +16,7 @@ public sealed class ProjectPersistenceSpecs : IDisposable
     private readonly string _workspacePath = Path.Combine(Path.GetTempPath(), $"PanelNester.ProjectPersistenceSpecs.{Guid.NewGuid():N}");
 
     [Fact]
-    public async Task New_projects_start_with_one_stable_ordered_optimization_group()
+    public async Task New_projects_start_without_an_empty_optimization_group()
     {
         var service = new ProjectService(
             new FakeMaterialService(),
@@ -25,12 +25,35 @@ public sealed class ProjectPersistenceSpecs : IDisposable
         var result = await service.NewAsync();
 
         Assert.True(result.Success);
-        var group = Assert.Single(result.Project!.State.OptimizationGroups);
-        Assert.Equal("generated-id", group.OptimizationGroupId);
-        Assert.Equal("Parts", group.Name);
-        Assert.Equal(0, group.Order);
-        Assert.Empty(group.Parts);
-        Assert.Equal(OptimizationResultStatus.None, group.ResultStatus);
+        Assert.Empty(result.Project!.State.OptimizationGroups);
+    }
+
+    [Fact]
+    public async Task Empty_current_projects_with_import_source_metadata_do_not_gain_a_legacy_group()
+    {
+        var filePath = Path.Combine(_workspacePath, "empty-import-audit.pnest");
+        var service = new ProjectService(
+            new FakeMaterialService(),
+            idGenerator: () => "generated-id");
+        var created = await service.NewAsync();
+        var project = created.Project! with
+        {
+            State = created.Project!.State with
+            {
+                ImportSource = new ImportSourceMetadata
+                {
+                    ImportSourcePath = "Sheet1.xlsx",
+                    ContentFingerprint = "FINGERPRINT",
+                    ContentLength = 100,
+                    SnapshotCapturedAtUtc = new DateTime(2026, 8, 26, 12, 0, 0, DateTimeKind.Utc)
+                }
+            }
+        };
+
+        var saved = await service.SaveAsync(project, filePath);
+
+        Assert.True(saved.Success);
+        Assert.Empty(saved.Project!.State.OptimizationGroups);
     }
 
     [Fact]

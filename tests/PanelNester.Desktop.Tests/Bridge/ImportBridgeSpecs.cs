@@ -14,6 +14,62 @@ namespace PanelNester.Desktop.Tests.Bridge;
 public sealed class ImportBridgeSpecs : IDisposable
 {
     [Fact]
+    public async Task Workbook_finalization_allows_an_unresolved_Material_when_all_matching_rows_are_ignored()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "ignored-material.xlsx");
+        using (var workbook = new XLWorkbook())
+        {
+            WriteWorkbookWorksheet(workbook.AddWorksheet("Parts"), "FIRST", "Ignore Me");
+            workbook.Worksheet("Parts").Cell("A3").Value = "SECOND";
+            workbook.Worksheet("Parts").Cell("B3").Value = 48;
+            workbook.Worksheet("Parts").Cell("C3").Value = 24;
+            workbook.Worksheet("Parts").Cell("D3").Value = 1;
+            workbook.Worksheet("Parts").Cell("E3").Value = "Ignore Me";
+            workbook.SaveAs(workbookPath);
+        }
+
+        var dispatcher = CreateDispatcher();
+        const string sessionId = "ignored-material-session";
+        await DispatchAsync<ImportSessionResponse>(dispatcher, BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest { SessionId = sessionId, ImportSourcePath = workbookPath });
+        var preview = await DispatchAsync<ImportSessionResponse>(dispatcher, BridgeMessageTypes.PreviewImportSession,
+            new PreviewImportSessionRequest
+            {
+                SessionId = sessionId,
+                WorksheetName = "Parts",
+                HeadingRange = "A1:E1",
+                Options = RequiredWorkbookOptions()
+            });
+        var selection = SelectionFromPreview(preview, "parts", "Parts", RequiredWorkbookOptions()) with
+        {
+            IgnoredMaterialNames = ["Ignore Me"],
+            ExcludedSourceRows = preview.Parts.Select(part => new ExcludedSourceRow
+            {
+                RowId = part.RowId,
+                SourceReference = Assert.Single(part.SourceReferences),
+                OriginalValidationError = new SourceRowValidationError
+                {
+                    Code = "ignored-material",
+                    Message = "Material was ignored."
+                }
+            }).ToArray()
+        };
+
+        var finalized = await DispatchAsync<ImportSessionResponse>(dispatcher, BridgeMessageTypes.FinalizeImportSession,
+            new FinalizeImportSessionRequest
+            {
+                SessionId = sessionId,
+                Project = new Project { ProjectId = "ignored-material-project" },
+                Worksheets = [selection]
+            });
+
+        Assert.True(finalized.Success);
+        Assert.Empty(finalized.Parts);
+        Assert.Equal(2, Assert.Single(finalized.Project!.State.ImportConfiguration!.Worksheets).ExcludedSourceRows.Count);
+    }
+
+    [Fact]
     public async Task Workbook_finalization_revalidates_a_Part_Override_marked_valid_by_the_caller()
     {
         Directory.CreateDirectory(_workspacePath);

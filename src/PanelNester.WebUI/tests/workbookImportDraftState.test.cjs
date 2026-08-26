@@ -37,12 +37,17 @@ const {
   copyHeadingRangeFromPreviousSelectedWorksheet,
   createWorkbookWorksheetDrafts,
   editInvalidSourceRow,
+  excludeSourceRows,
   excludeInvalidSourceRow,
+  excludeInvalidSourceRows,
   getWorksheetNavigationStatus,
   headingRangeFromPreviewCells,
   mergeRecognizedColumnMappings,
   setWorkbookWorksheetSelected,
   restoreExcludedSourceRow,
+  ignoreWorkbookMaterial,
+  ignoreMaterialInSession,
+  selectSourceRowRange,
   summarizeWorkbookPreview,
   summarizeHighConfidenceHeadingRanges,
   synchronizeWorkbookMaterialResolution,
@@ -430,4 +435,146 @@ test('invalid source rows are excluded only explicitly and can be restored with 
   assert.equal(restored.preview.parts.length, 1);
   assert.equal(restored.preview.errors[0].code, 'missing-id');
   assert.equal(restored.excludedSourceRows.length, 0);
+});
+
+test('multiple invalid source rows can be excluded in one operation', () => {
+  const makeInvalid = (rowId, physicalRow) => ({
+    rowId, importedId: '', lengthText: '48', length: 48,
+    widthText: '24', width: 24, quantityText: '1', quantity: 1,
+    materialName: 'ACM', isManual: false, validationStatus: 'error',
+    validationMessages: ['Id is required.'], sourceReferences: [{
+      worksheetName: 'First', worksheetPosition: 1, physicalRow,
+      sourceFingerprint: `ROW-${physicalRow}`,
+    }],
+  });
+  const rows = [makeInvalid('row-9', 9), makeInvalid('row-10', 10), makeInvalid('row-11', 11)];
+  const base = {
+    ...createWorkbookWorksheetDrafts('fixture', workbook, preview, options)[0],
+    preview: {
+      ...preview,
+      success: false,
+      parts: rows,
+      errors: rows.map((row) => ({
+        code: 'missing-id', message: 'Id is required.', rowId: row.rowId,
+        location: row.sourceReferences[0],
+      })),
+    },
+  };
+
+  const excluded = excludeInvalidSourceRows(base, ['row-9', 'row-11']);
+
+  assert.deepEqual(excluded.preview.parts.map((row) => row.rowId), ['row-10']);
+  assert.deepEqual(excluded.excludedSourceRows.map((row) => row.rowId), ['row-9', 'row-11']);
+  assert.deepEqual(excluded.preview.errors.map((error) => error.rowId), ['row-10']);
+});
+
+test('ready and invalid source rows can be excluded together during review', () => {
+  const sourceRow = (rowId, validationStatus, physicalRow) => ({
+    rowId, importedId: rowId, lengthText: '48', length: 48,
+    widthText: '24', width: 24, quantityText: '1', quantity: 1,
+    materialName: 'ACM', isManual: false, validationStatus,
+    validationMessages: validationStatus === 'error' ? ['Id is required.'] : [],
+    sourceReferences: [{
+      worksheetName: 'First', worksheetPosition: 1, physicalRow,
+      sourceFingerprint: `ROW-${physicalRow}`,
+    }],
+  });
+  const rows = [sourceRow('ready-1', 'ready', 4), sourceRow('error-1', 'error', 5)];
+  const base = {
+    ...createWorkbookWorksheetDrafts('fixture', workbook, preview, options)[0],
+    preview: {
+      ...preview,
+      success: false,
+      parts: rows,
+      errors: [{
+        code: 'missing-id', message: 'Id is required.', rowId: 'error-1',
+        location: rows[1].sourceReferences[0],
+      }],
+    },
+  };
+
+  const excluded = excludeSourceRows(base, ['ready-1', 'error-1']);
+
+  assert.deepEqual(excluded.preview.parts, []);
+  assert.deepEqual(excluded.excludedSourceRows.map((row) => row.rowId), ['ready-1', 'error-1']);
+  assert.deepEqual(excluded.preview.errors, []);
+
+  const restoredReady = restoreExcludedSourceRow(excluded, 'ready-1');
+  assert.deepEqual(restoredReady.preview.parts.map((row) => row.rowId), ['ready-1']);
+  assert.deepEqual(restoredReady.preview.errors, []);
+});
+
+test('shift selection includes every visible row between the anchor and clicked row', () => {
+  const orderedRowIds = ['row-1', 'row-2', 'row-3', 'row-4', 'row-5'];
+  const first = selectSourceRowRange(new Set(), orderedRowIds, 'row-2', true, false);
+  const ranged = selectSourceRowRange(first.selectedRowIds, orderedRowIds, 'row-5', true, true, first.anchorRowId);
+
+  assert.deepEqual([...ranged.selectedRowIds], ['row-2', 'row-3', 'row-4', 'row-5']);
+  assert.equal(ranged.anchorRowId, 'row-5');
+});
+
+test('ignoring one import material excludes every matching source row across selected Worksheets', () => {
+  const sourceRow = (rowId, materialName, worksheetName, worksheetPosition, physicalRow) => ({
+    rowId, importedId: rowId, lengthText: '48', length: 48,
+    widthText: '24', width: 24, quantityText: '1', quantity: 1,
+    materialName, isManual: false, validationStatus: 'ready', validationMessages: [],
+    sourceReferences: [{ worksheetName, worksheetPosition, physicalRow, sourceFingerprint: rowId }],
+  });
+  const drafts = createWorkbookWorksheetDrafts('fixture', workbook, preview, options)
+    .map((draft, index) => ({
+      ...draft,
+      selected: index < 2,
+      preview: {
+        ...preview,
+        parts: [
+          sourceRow(`ignored-${index}`, 'Ignore Me', draft.worksheet.worksheetName, index + 1, 4),
+          sourceRow(`kept-${index}`, 'Keep Me', draft.worksheet.worksheetName, index + 1, 5),
+        ],
+      },
+    }));
+
+  const ignored = ignoreWorkbookMaterial(drafts, 'Ignore Me');
+
+  assert.deepEqual(ignored.slice(0, 2).map((draft) => draft.preview.parts.map((row) => row.materialName)), [
+    ['Keep Me'], ['Keep Me'],
+  ]);
+  assert.deepEqual(ignored.slice(0, 2).map((draft) => draft.excludedSourceRows.length), [1, 1]);
+  assert.equal(ignored[2], drafts[2]);
+
+  const resolved = synchronizeWorkbookMaterialResolution(
+    ignored,
+    'Ignore Me',
+    { sourceMaterialName: 'Ignore Me', targetMaterialId: 'material-a' },
+  );
+  assert.deepEqual(resolved.slice(0, 2).map((draft) => draft.preview.parts.length), [2, 2]);
+  assert.deepEqual(resolved.slice(0, 2).map((draft) => draft.ignoredMaterialNames), [[], []]);
+  assert.deepEqual(resolved.slice(0, 2).map((draft) => draft.excludedSourceRows.length), [0, 0]);
+});
+
+test('ignoring a material synchronizes the visible session preview with the active Worksheet draft', () => {
+  const sourceRow = (rowId, materialName) => ({
+    rowId, importedId: rowId, lengthText: '48', length: 48,
+    widthText: '24', width: 24, quantityText: '1', quantity: 1,
+    materialName, isManual: false, validationStatus: 'ready', validationMessages: [],
+    sourceReferences: [{
+      worksheetName: 'First', worksheetPosition: 1, physicalRow: 4,
+      sourceFingerprint: rowId,
+    }],
+  });
+  const rows = [sourceRow('ignored-1', 'Ignore Me'), sourceRow('kept-1', 'Keep Me')];
+  const drafts = createWorkbookWorksheetDrafts('fixture', workbook, preview, options);
+  drafts[0] = { ...drafts[0], preview: { ...preview, parts: rows } };
+  const session = {
+    sessionId: 'fixture', filePath: 'fixture.xlsx', preview: { ...preview, parts: rows },
+    options, newMaterials: [], hasPendingChanges: false, workbook,
+    worksheets: drafts,
+    // A restored session can lack an active Worksheet name; the selected draft is authoritative.
+    activeWorksheetName: undefined,
+  };
+
+  const ignored = ignoreMaterialInSession(session, 'Ignore Me');
+
+  assert.deepEqual(ignored.preview.parts.map((row) => row.rowId), ['kept-1']);
+  assert.equal(ignored.preview, ignored.worksheets[0].preview);
+  assert.equal(ignored.worksheets[0].excludedSourceRows.length, 1);
 });

@@ -586,6 +586,10 @@ internal sealed class ImportSessionCoordinator
                     response.Parts.ToDictionary(
                         part => part.RowId,
                         part => part.SourceReferences,
+                        StringComparer.Ordinal),
+                    response.Parts.ToDictionary(
+                        part => part.RowId,
+                        part => part.MaterialName,
                         StringComparer.Ordinal));
             }
         }
@@ -603,7 +607,7 @@ internal sealed class ImportSessionCoordinator
                     preview.OriginalPosition != selection.OriginalPosition ||
                     !string.Equals(preview.HeadingRange, selection.HeadingRange, StringComparison.OrdinalIgnoreCase) ||
                     !string.Equals(preview.ColumnMappingSignature, mappingSignature, StringComparison.Ordinal) ||
-                    !MaterialResolutionsMatch(preview.MaterialResolutions, selection.Options, newMaterials))
+                    !MaterialResolutionsMatch(preview, selection, newMaterials))
                 {
                     throw new ImportSessionException(
                         "import-worksheet-not-ready",
@@ -757,7 +761,7 @@ internal sealed class ImportSessionCoordinator
                 .GroupBy(material => material.SourceMaterialName.Trim(), StringComparer.Ordinal)
                 .ToDictionary(group => group.Key, group => group.First().Material!, StringComparer.Ordinal);
             var ready = new List<ReadyMaterialResolution>();
-            var hasUnresolvedResolution = false;
+            var hasResolvableMaterialError = false;
             foreach (var resolution in response.MaterialResolutions)
             {
                 var sourceName = resolution.SourceMaterialName.Trim();
@@ -772,7 +776,7 @@ internal sealed class ImportSessionCoordinator
 
                 if (plannedMaterials.TryGetValue(sourceName, out var plannedMaterial))
                 {
-                    hasUnresolvedResolution = true;
+                    hasResolvableMaterialError = true;
                     ready.Add(new ReadyMaterialResolution(
                         sourceName,
                         "new",
@@ -780,10 +784,11 @@ internal sealed class ImportSessionCoordinator
                     continue;
                 }
 
-                return null;
+                hasResolvableMaterialError = true;
+                ready.Add(new ReadyMaterialResolution(sourceName, "unresolved", null));
             }
 
-            if (hasMaterialErrors && !hasUnresolvedResolution)
+            if (hasMaterialErrors && !hasResolvableMaterialError)
             {
                 return null;
             }
@@ -792,11 +797,11 @@ internal sealed class ImportSessionCoordinator
         }
 
         private static bool MaterialResolutionsMatch(
-            IReadOnlyList<ReadyMaterialResolution> previewResolutions,
-            ImportOptions? options,
+            ReadyWorksheetPreview worksheetPreview,
+            ImportWorksheetSelection selection,
             IReadOnlyList<ImportNewMaterialRequest> newMaterials)
         {
-            var explicitMappings = (options?.MaterialMappings ?? Array.Empty<ImportMaterialMapping>())
+            var explicitMappings = (selection.Options?.MaterialMappings ?? Array.Empty<ImportMaterialMapping>())
                 .Where(mapping =>
                     !string.IsNullOrWhiteSpace(mapping.SourceMaterialName) &&
                     !string.IsNullOrWhiteSpace(mapping.TargetMaterialId))
@@ -809,8 +814,25 @@ internal sealed class ImportSessionCoordinator
                 .GroupBy(material => material.SourceMaterialName.Trim(), StringComparer.Ordinal)
                 .ToDictionary(group => group.Key, group => group.First().Material!, StringComparer.Ordinal);
 
-            foreach (var preview in previewResolutions)
+            var ignoredMaterials = selection.IgnoredMaterialNames
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Select(name => name.Trim())
+                .ToHashSet(StringComparer.Ordinal);
+
+            foreach (var preview in worksheetPreview.MaterialResolutions)
             {
+                if (ignoredMaterials.Contains(preview.SourceMaterialName))
+                {
+                    if (!AllMaterialRowsAreExcluded(
+                        preview.SourceMaterialName,
+                        worksheetPreview,
+                        selection))
+                    {
+                        return false;
+                    }
+                    continue;
+                }
+
                 if (explicitMappings.TryGetValue(preview.SourceMaterialName, out var targetMaterialId))
                 {
                     if (preview.Kind != "resolved" ||
@@ -843,6 +865,22 @@ internal sealed class ImportSessionCoordinator
             return true;
         }
 
+        private static bool AllMaterialRowsAreExcluded(
+            string sourceMaterialName,
+            ReadyWorksheetPreview preview,
+            ImportWorksheetSelection selection)
+        {
+            var matchingRowIds = preview.MaterialNamesByRowId
+                .Where(item => string.Equals(item.Value, sourceMaterialName, StringComparison.Ordinal))
+                .Select(item => item.Key)
+                .ToArray();
+            return matchingRowIds.Length > 0 && matchingRowIds.All(rowId =>
+                preview.SourceReferencesByRowId.TryGetValue(rowId, out var references) &&
+                selection.ExcludedSourceRows.Any(excluded =>
+                    string.Equals(excluded.RowId, rowId, StringComparison.Ordinal) &&
+                    references.Any(reference => reference.MatchesIdentity(excluded.SourceReference))));
+        }
+
         private static string SerializeMaterialDefinition(Material material) =>
             System.Text.Json.JsonSerializer.Serialize(material, BridgeJson.SerializerOptions);
 
@@ -853,7 +891,8 @@ internal sealed class ImportSessionCoordinator
             string ColumnMappingSignature,
             IReadOnlyList<ReadyMaterialResolution> MaterialResolutions,
             IReadOnlyList<ValidationError> Errors,
-            IReadOnlyDictionary<string, IReadOnlyList<SourceReference>> SourceReferencesByRowId);
+            IReadOnlyDictionary<string, IReadOnlyList<SourceReference>> SourceReferencesByRowId,
+            IReadOnlyDictionary<string, string> MaterialNamesByRowId);
 
         private sealed record ReadyMaterialResolution(
             string SourceMaterialName,

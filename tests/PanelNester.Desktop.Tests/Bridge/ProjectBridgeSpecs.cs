@@ -249,7 +249,8 @@ public sealed class ProjectBridgeSpecs : IDisposable
         var projectPath = Path.Combine(_workspacePath, "bridge-managed-groups.pnest");
         var repository = new JsonMaterialRepository(Path.Combine(_workspacePath, "materials.json"));
         var materialService = new MaterialService(repository);
-        var generatedIds = new Queue<string>(["project-bridge-001", "group-bridge-002"]);
+        var generatedIds = new Queue<string>(
+            ["project-bridge-001", "group-bridge-001", "group-bridge-002"]);
         var projectService = new ProjectService(materialService, idGenerator: () => generatedIds.Dequeue());
         var dispatcher = DesktopBridgeRegistration.CreateDefault(
             new RecordingFileDialogService(),
@@ -267,6 +268,15 @@ public sealed class ProjectBridgeSpecs : IDisposable
             BridgeMessageTypes.NewProject,
             new NewProjectRequest());
         var project = created.Project!;
+        Assert.Empty(project.State.OptimizationGroups);
+        project = (await ChangeGroupsAsync(
+            dispatcher,
+            project,
+            new OptimizationGroupChange
+            {
+                Type = OptimizationGroupChangeType.Create,
+                Name = "Parts"
+            })).Project!;
         var originalGroup = Assert.Single(project.State.OptimizationGroups);
         var manualPart = new PartRow
         {

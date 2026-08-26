@@ -1201,6 +1201,10 @@ function buildOptimizationGroups(
   lastNestingResult: NestResponse | null,
   lastBatchNestingResult: BatchNestResponse | null,
 ): OptimizationGroup[] {
+  if (state.optimizationGroups.length === 0) {
+    return [];
+  }
+
   if (state.optimizationGroups.length > 1) {
     if (!lastNestingResult && !lastBatchNestingResult) {
       return state.optimizationGroups;
@@ -3688,6 +3692,7 @@ export default function App() {
                 optimizationGroupName: draft.optimizationGroupName,
                 headingRange: draft.headingRange,
                 excludedSourceRows: draft.excludedSourceRows,
+                ignoredMaterialNames: draft.ignoredMaterialNames,
                 partOverrides: draft.partOverrides,
               })),
             })),
@@ -4051,13 +4056,17 @@ export default function App() {
         : activeOptimizationGroup
           ? [activeOptimizationGroup]
           : []
-      ).map((group) => ({
-        optimizationGroupId: group.optimizationGroupId,
-        name: group.name,
-        order: group.order,
-        ownedPartRowIds: group.parts.map((part) => part.rowId),
-        parts: group.parts.filter((part) => part.validationStatus !== 'error'),
-      }));
+      )
+        .filter((group) =>
+          group.parts.some((part) => part.validationStatus !== 'error'),
+        )
+        .map((group) => ({
+          optimizationGroupId: group.optimizationGroupId,
+          name: group.name,
+          order: group.order,
+          ownedPartRowIds: group.parts.map((part) => part.rowId),
+          parts: group.parts.filter((part) => part.validationStatus !== 'error'),
+        }));
       const requestedPartCount = requestedGroups.reduce(
         (total, group) => total + group.parts.length,
         0,
@@ -4704,6 +4713,25 @@ export default function App() {
             dispatch({ type: 'optimization-group-activated', optimizationGroupId })
           }
           onMovePartToOptimizationGroup={movePartToOptimizationGroup}
+          canManageOptimizationGroups={hasCapability(
+            bridgeMessageTypes.updateOptimizationGroups,
+          )}
+          onCreateOptimizationGroup={(name) =>
+            updateOptimizationGroups({ type: 'create', name })
+          }
+          onRenameOptimizationGroup={(optimizationGroupId, name) =>
+            updateOptimizationGroups({ type: 'rename', optimizationGroupId, name })
+          }
+          onReorderOptimizationGroups={(orderedOptimizationGroupIds) =>
+            updateOptimizationGroups({ type: 'reorder', orderedOptimizationGroupIds })
+          }
+          onDeleteOptimizationGroup={(optimizationGroupId, removeOwnedContent) =>
+            updateOptimizationGroups({
+              type: 'delete',
+              optimizationGroupId,
+              removeOwnedContent,
+            })
+          }
         />
       );
       break;
@@ -4890,37 +4918,6 @@ export default function App() {
           }}
           onPickCompanyLogo={pickCompanyLogoPath}
           onSaveDesktopAppSettings={saveDesktopAppSettings}
-          optimizationGroups={state.optimizationGroups}
-          activeOptimizationGroupId={state.activeOptimizationGroupId}
-          canManageOptimizationGroups={hasCapability(
-            bridgeMessageTypes.updateOptimizationGroups,
-          )}
-          onActivateOptimizationGroup={(optimizationGroupId) =>
-            dispatch({ type: 'optimization-group-activated', optimizationGroupId })
-          }
-          onCreateOptimizationGroup={(name) =>
-            updateOptimizationGroups({ type: 'create', name })
-          }
-          onRenameOptimizationGroup={(optimizationGroupId, name) =>
-            updateOptimizationGroups({
-              type: 'rename',
-              optimizationGroupId,
-              name,
-            })
-          }
-          onReorderOptimizationGroups={(orderedOptimizationGroupIds) =>
-            updateOptimizationGroups({
-              type: 'reorder',
-              orderedOptimizationGroupIds,
-            })
-          }
-          onDeleteOptimizationGroup={(optimizationGroupId, removeOwnedContent) =>
-            updateOptimizationGroups({
-              type: 'delete',
-              optimizationGroupId,
-              removeOwnedContent,
-            })
-          }
         />
       );
       break;

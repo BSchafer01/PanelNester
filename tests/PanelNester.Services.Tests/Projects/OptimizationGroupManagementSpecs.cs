@@ -19,10 +19,19 @@ public sealed class OptimizationGroupManagementSpecs : IDisposable
             new FakeMaterialService(),
             idGenerator: () => generatedIds.Dequeue());
         var created = await service.NewAsync();
-        var originalGroup = Assert.Single(created.Project!.State.OptimizationGroups);
+        Assert.Empty(created.Project!.State.OptimizationGroups);
+        var firstGroupCreated = await service.UpdateOptimizationGroupsAsync(
+            created.Project,
+            new OptimizationGroupChange
+            {
+                Type = OptimizationGroupChangeType.Create,
+                Name = "Parts"
+            });
+        Assert.True(firstGroupCreated.Success);
+        var originalGroup = Assert.Single(firstGroupCreated.Project!.State.OptimizationGroups);
         var firstPart = CreatePart("manual-001", "Door", "Casework");
         var secondPart = CreatePart("manual-002", "Drawer", "Casework");
-        var project = created.Project with
+        var project = firstGroupCreated.Project with
         {
             State = created.Project.State with
             {

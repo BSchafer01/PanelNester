@@ -377,6 +377,7 @@ export interface ImportWorksheetSelection {
   optimizationGroupName: string;
   headingRange: string;
   excludedSourceRows?: ExcludedSourceRow[];
+  ignoredMaterialNames?: string[];
   partOverrides?: PartOverride[];
 }
 
@@ -490,6 +491,7 @@ export interface ImportWorksheetDraft {
   headingRangeConfirmed: boolean;
   clearedColumnMappingFields?: string[];
   excludedSourceRows: ExcludedSourceRow[];
+  ignoredMaterialNames: string[];
   partOverrides: PartOverride[];
 }
 

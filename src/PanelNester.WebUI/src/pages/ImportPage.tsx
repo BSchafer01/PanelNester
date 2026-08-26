@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { MaterialCombobox } from '../components/MaterialCombobox';
 import { ImportDetails } from '../components/ImportDetails';
 import { StatusPill } from '../components/StatusPill';
@@ -9,9 +9,11 @@ import {
   copyColumnMappingsFromPreviousSelectedWorksheet,
   copyHeadingRangeFromPreviousSelectedWorksheet,
   editInvalidSourceRow,
+  excludeSourceRows,
   excludeInvalidSourceRow,
-  getWorksheetNavigationStatus,
   headingRangeFromPreviewCells,
+  ignoreMaterialInSession,
+  selectSourceRowRange,
   setWorkbookWorksheetSelected,
   restoreExcludedSourceRow,
   summarizeHighConfidenceHeadingRanges,
@@ -120,6 +122,14 @@ interface ImportPageProps {
   onMovePartToOptimizationGroup: (
     partRowId: string,
     targetOptimizationGroupId: string,
+  ) => Promise<void>;
+  canManageOptimizationGroups: boolean;
+  onCreateOptimizationGroup: (name: string) => Promise<void>;
+  onRenameOptimizationGroup: (optimizationGroupId: string, name: string) => Promise<void>;
+  onReorderOptimizationGroups: (orderedOptimizationGroupIds: string[]) => Promise<void>;
+  onDeleteOptimizationGroup: (
+    optimizationGroupId: string,
+    removeOwnedContent: boolean,
   ) => Promise<void>;
 }
 
@@ -400,17 +410,24 @@ function synchronizeMaterialResolutionInSession(
   materialMapping?: ImportMaterialMapping,
   newMaterial?: ImportNewMaterialRequest,
 ): ImportMappingSession {
-  return session.worksheets
-    ? {
-        ...session,
-        worksheets: synchronizeWorkbookMaterialResolution(
-          session.worksheets,
-          sourceMaterialName,
-          materialMapping,
-          newMaterial,
-        ),
-      }
-    : session;
+  if (!session.worksheets) {
+    return session;
+  }
+
+  const worksheets = synchronizeWorkbookMaterialResolution(
+    session.worksheets,
+    sourceMaterialName,
+    materialMapping,
+    newMaterial,
+  );
+  const activeDraft = worksheets.find(
+    (draft) => draft.worksheet.worksheetName === session.activeWorksheetName,
+  );
+  return {
+    ...session,
+    worksheets,
+    preview: activeDraft?.preview ?? session.preview,
+  };
 }
 
 function updateExistingMaterialMapping(
@@ -702,6 +719,11 @@ export function ImportPage({
   activeOptimizationGroupId,
   onActivateOptimizationGroup,
   onMovePartToOptimizationGroup,
+  canManageOptimizationGroups,
+  onCreateOptimizationGroup,
+  onRenameOptimizationGroup,
+  onReorderOptimizationGroups,
+  onDeleteOptimizationGroup,
 }: ImportPageProps) {
   const [editingRowId, setEditingRowId] = useState<string>();
   const [editingDraft, setEditingDraft] = useState<PartRowUpdate>();
@@ -721,10 +743,18 @@ export function ImportPage({
     useState<BulkHeadingRangeConfirmationSummary>();
   const [headingSelectionStarts, setHeadingSelectionStarts] =
     useState<Record<string, string>>({});
+  const [collapsedWorksheetPreviews, setCollapsedWorksheetPreviews] =
+    useState<Set<string>>(() => new Set());
+  const [selectedSourceRowIds, setSelectedSourceRowIds] =
+    useState<Set<string>>(() => new Set());
+  const [newOptimizationGroupName, setNewOptimizationGroupName] = useState('');
+  const selectionAnchorRowId = useRef<string>();
 
-  const activeImportResponse = mappingSession?.preview ?? importResponse;
-  const displayFilePath = mappingSession?.filePath ?? selectedFilePath;
-  const hasPendingImportReview = Boolean(mappingSession);
+  useEffect(() => {
+    setSelectedSourceRowIds(new Set());
+    selectionAnchorRowId.current = undefined;
+  }, [mappingSession?.activeWorksheetName]);
+
   const worksheetDrafts = mappingSession?.worksheets ?? [];
   const selectedWorksheetDrafts = worksheetDrafts.filter((draft) => draft.selected);
   const workbookPreviewSummary = useMemo(
@@ -733,7 +763,10 @@ export function ImportPage({
   );
   const activeWorksheetDraft = worksheetDrafts.find(
     (draft) => draft.worksheet.worksheetName === mappingSession?.activeWorksheetName,
-  );
+  ) ?? selectedWorksheetDrafts[0];
+  const activeImportResponse = activeWorksheetDraft?.preview ?? mappingSession?.preview ?? importResponse;
+  const displayFilePath = mappingSession?.filePath ?? selectedFilePath;
+  const hasPendingImportReview = Boolean(mappingSession);
   const showRowActions = (hasPendingImportReview && Boolean(activeWorksheetDraft)) ||
     (!hasPendingImportReview && (canEditRows || canDeleteRows));
   const hasParts = activeImportResponse.parts.length > 0;
@@ -757,6 +790,22 @@ export function ImportPage({
     }
     return Array.from(options, ([value, label]) => ({ value, label }));
   }, [optimizationGroups, worksheetDrafts]);
+  const worksheetsByOptimizationGroup = useMemo(() => {
+    const associations = new Map<string, Set<string>>();
+    const add = (optimizationGroupId: string | null | undefined, worksheetName: string) => {
+      if (!optimizationGroupId) return;
+      const names = associations.get(optimizationGroupId) ?? new Set<string>();
+      names.add(worksheetName);
+      associations.set(optimizationGroupId, names);
+    };
+    for (const worksheet of importConfiguration?.worksheets ?? []) {
+      add(worksheet.optimizationGroupId, worksheet.worksheetName);
+    }
+    for (const draft of selectedWorksheetDrafts) {
+      add(draft.optimizationGroupId, draft.worksheet.worksheetName);
+    }
+    return associations;
+  }, [importConfiguration?.worksheets, selectedWorksheetDrafts]);
   const optimizationGroupByPartRowId = useMemo(() => {
     const ownership = new Map<string, string>();
     for (const group of optimizationGroups) {
@@ -904,6 +953,12 @@ export function ImportPage({
       ),
     [mappingSession],
   );
+  const ignoredImportMaterials = useMemo(
+    () => new Set(
+      selectedWorksheetDrafts.flatMap((draft) => draft.ignoredMaterialNames),
+    ),
+    [selectedWorksheetDrafts],
+  );
   const previewMaterialResolutions = mappingSession?.preview.materialResolutions ?? [];
   const pendingNewMaterials = mappingSession?.newMaterials ?? [];
   const allRequiredFieldsMapped = hasPendingImportReview
@@ -914,6 +969,9 @@ export function ImportPage({
   const unresolvedImportMaterials = hasPendingImportReview
     ? previewMaterialResolutions.filter((resolution) => {
         const hasPlannedCreate = plannedNewMaterials.has(resolution.sourceMaterialName);
+        if (ignoredImportMaterials.has(resolution.sourceMaterialName)) {
+          return false;
+        }
         const selectedExistingMaterialId =
           explicitMaterialMappings.get(resolution.sourceMaterialName) ??
           resolution.resolvedMaterialId ??
@@ -961,6 +1019,7 @@ export function ImportPage({
             ) &&
             draft.preview.materialResolutions.every(
               (resolution) =>
+                draft.ignoredMaterialNames.includes(resolution.sourceMaterialName) ||
                 plannedMaterials.has(resolution.sourceMaterialName) ||
                 (materialMappings.get(resolution.sourceMaterialName) ??
                   resolution.resolvedMaterialId ??
@@ -1387,6 +1446,31 @@ export function ImportPage({
           : draft,
       ),
     });
+    setSelectedSourceRowIds((current) => {
+      const next = new Set(current);
+      next.delete(rowId);
+      return next;
+    });
+  };
+
+  const excludeSelectedSourceRows = () => {
+    if (!mappingSession?.worksheets || !activeWorksheetDraft) {
+      return;
+    }
+    const updatedDraft = excludeSourceRows(
+      activeWorksheetDraft,
+      Array.from(selectedSourceRowIds),
+    );
+    onUpdateImportMappingSession({
+      ...mappingSession,
+      preview: updatedDraft.preview,
+      worksheets: mappingSession.worksheets.map((draft) =>
+        draft.worksheet.worksheetName === updatedDraft.worksheet.worksheetName
+          ? updatedDraft
+          : draft,
+      ),
+    });
+    setSelectedSourceRowIds(new Set());
   };
 
   const undoSourceRowExclusion = (rowId: string) => {
@@ -1501,6 +1585,34 @@ export function ImportPage({
     );
   };
 
+  const handleIgnoreMaterial = (sourceMaterialName: string) => {
+    if (!mappingSession) {
+      return;
+    }
+    applySession(ignoreMaterialInSession(mappingSession, sourceMaterialName));
+  };
+
+  const moveOptimizationGroup = async (index: number, offset: -1 | 1) => {
+    const targetIndex = index + offset;
+    if (targetIndex < 0 || targetIndex >= optimizationGroups.length) return;
+    const orderedIds = optimizationGroups.map((group) => group.optimizationGroupId);
+    [orderedIds[index], orderedIds[targetIndex]] = [
+      orderedIds[targetIndex], orderedIds[index],
+    ];
+    await onReorderOptimizationGroups(orderedIds);
+  };
+
+  const deleteOptimizationGroup = async (group: OptimizationGroup) => {
+    const hasSavedResults = Boolean(group.lastNestingResult || group.lastBatchNestingResult);
+    const removeOwnedContent = group.parts.length > 0 || hasSavedResults;
+    const message = removeOwnedContent
+      ? `Delete ${group.name} and remove its ${group.parts.length} owned part(s)${hasSavedResults ? ' and saved results' : ''}?`
+      : `Delete empty Optimization Group ${group.name}?`;
+    if (window.confirm(message)) {
+      await onDeleteOptimizationGroup(group.optimizationGroupId, removeOwnedContent);
+    }
+  };
+
   const recordCountLabel =
     filteredParts.length === activeImportResponse.parts.length
       ? `Showing ${filteredParts.length} records`
@@ -1608,6 +1720,125 @@ export function ImportPage({
               <span>{nestingBusy ? 'Nesting…' : 'Run All'}</span>
             </button>
           ) : null}
+        </div>
+      </section>
+
+      <section className="module-panel optimization-groups-card">
+        <div className="section-header">
+          <div>
+            <p className="eyebrow">Project structure</p>
+            <h2>Optimization Groups</h2>
+          </div>
+          <span className="section-note">Ordered nesting boundaries</span>
+        </div>
+        <p className="section-note">
+          Create and organize project Optimization Groups here, then assign each imported
+          Worksheet to the appropriate group.
+        </p>
+        <div className="optimization-groups-list">
+          {optimizationGroups.length === 0 ? (
+            <div className="empty-state">
+              <strong>No Optimization Groups yet</strong>
+              <span>Create one below or finalize a selected Worksheet to add its group.</span>
+            </div>
+          ) : optimizationGroups.map((group, index) => {
+            const isActive = group.optimizationGroupId === activeOptimizationGroupId;
+            const associatedWorksheets = Array.from(
+              worksheetsByOptimizationGroup.get(group.optimizationGroupId) ?? [],
+            );
+            return (
+              <div
+                className={isActive
+                  ? 'optimization-group-row optimization-group-row--active'
+                  : 'optimization-group-row'}
+                key={group.optimizationGroupId}
+              >
+                <button
+                  aria-pressed={isActive}
+                  className="secondary-button optimization-group-row__active"
+                  disabled={busy}
+                  onClick={() => onActivateOptimizationGroup(group.optimizationGroupId)}
+                  type="button"
+                >
+                  {isActive ? 'Active' : 'Make active'}
+                </button>
+                <input
+                  aria-label={`Optimization Group ${index + 1} name`}
+                  defaultValue={group.name}
+                  disabled={busy || !canManageOptimizationGroups}
+                  key={`${group.optimizationGroupId}:${group.name}`}
+                  onBlur={(event) => {
+                    const name = event.target.value.trim();
+                    if (name && name !== group.name) {
+                      void onRenameOptimizationGroup(group.optimizationGroupId, name);
+                    }
+                  }}
+                  type="text"
+                />
+                <span>
+                  <strong>Associated Worksheets:</strong>{' '}
+                  {associatedWorksheets.length > 0
+                    ? associatedWorksheets.join(', ')
+                    : 'None'}
+                </span>
+                <div className="table-actions">
+                  <button
+                    className="module-table-action"
+                    disabled={busy || !canManageOptimizationGroups || index === 0}
+                    onClick={() => void moveOptimizationGroup(index, -1)}
+                    type="button"
+                  >
+                    Up
+                  </button>
+                  <button
+                    className="module-table-action"
+                    disabled={
+                      busy || !canManageOptimizationGroups ||
+                      index === optimizationGroups.length - 1
+                    }
+                    onClick={() => void moveOptimizationGroup(index, 1)}
+                    type="button"
+                  >
+                    Down
+                  </button>
+                  <button
+                    className="module-table-action module-table-action--danger"
+                    disabled={
+                      busy || !canManageOptimizationGroups || optimizationGroups.length === 1
+                    }
+                    onClick={() => void deleteOptimizationGroup(group)}
+                    type="button"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="optimization-groups-create">
+          <input
+            aria-label="New Optimization Group name"
+            disabled={busy || !canManageOptimizationGroups}
+            onChange={(event) => setNewOptimizationGroupName(event.target.value)}
+            placeholder="New Optimization Group name"
+            type="text"
+            value={newOptimizationGroupName}
+          />
+          <button
+            className="primary-button"
+            disabled={
+              busy || !canManageOptimizationGroups ||
+              newOptimizationGroupName.trim().length === 0
+            }
+            onClick={() => {
+              const name = newOptimizationGroupName.trim();
+              void onCreateOptimizationGroup(name).then(() => setNewOptimizationGroupName(''));
+            }}
+            type="button"
+          >
+            Add Optimization Group
+          </button>
         </div>
       </section>
 
@@ -1748,18 +1979,6 @@ export function ImportPage({
                           {draft.worksheet.originalPosition}. {draft.worksheet.worksheetName}
                         </span>
                       </label>
-                      {draft.selected ? (
-                        <StatusPill
-                          label={getWorksheetNavigationStatus(draft)}
-                          tone={
-                            getWorksheetNavigationStatus(draft) === 'Ready'
-                              ? 'ok'
-                              : getWorksheetNavigationStatus(draft) === 'Has errors'
-                                ? 'error'
-                                : 'warn'
-                          }
-                        />
-                      ) : null}
                       <button
                         className="secondary-button"
                         disabled={busy || !draft.selected}
@@ -1871,6 +2090,25 @@ export function ImportPage({
                             ))}
                           </div>
                         ) : null}
+                        <button
+                          aria-expanded={!collapsedWorksheetPreviews.has(draft.worksheet.worksheetName)}
+                          className="secondary-button"
+                          onClick={() => setCollapsedWorksheetPreviews((current) => {
+                            const next = new Set(current);
+                            if (next.has(draft.worksheet.worksheetName)) {
+                              next.delete(draft.worksheet.worksheetName);
+                            } else {
+                              next.add(draft.worksheet.worksheetName);
+                            }
+                            return next;
+                          })}
+                          type="button"
+                        >
+                          {collapsedWorksheetPreviews.has(draft.worksheet.worksheetName)
+                            ? 'Expand preview'
+                            : 'Collapse preview'}
+                        </button>
+                        {!collapsedWorksheetPreviews.has(draft.worksheet.worksheetName) ? (
                         <div className="worksheet-preview" role="region" aria-label={`${draft.worksheet.worksheetName} cell preview`}>
                           <table>
                             <tbody>
@@ -1913,6 +2151,7 @@ export function ImportPage({
                             </tbody>
                           </table>
                         </div>
+                        ) : null}
                       </div>
                     ) : null}
                   </div>
@@ -2158,28 +2397,36 @@ export function ImportPage({
               ) : mappingSession.preview.materialResolutions.length > 0 ? (
                 <div className="mapping-resolution-list">
                   {mappingSession.preview.materialResolutions.map((resolution) => {
+                    const isIgnored = ignoredImportMaterials.has(
+                      resolution.sourceMaterialName,
+                    );
                     const plannedDraft = plannedNewMaterials.get(
                       resolution.sourceMaterialName,
                     );
-                    const selectedExistingMaterialId =
-                      explicitMaterialMappings.get(resolution.sourceMaterialName) ??
-                      (plannedDraft ? '' : resolution.resolvedMaterialId ?? '');
+                    const selectedExistingMaterialId = isIgnored
+                      ? ''
+                      : explicitMaterialMappings.get(resolution.sourceMaterialName) ??
+                        (plannedDraft ? '' : resolution.resolvedMaterialId ?? '');
                     const selectedExistingMaterial = materials.find(
                       (material) => material.materialId === selectedExistingMaterialId,
                     );
                     const draftMessage = plannedDraft
                       ? validateMaterialDraft(plannedDraft)
                       : null;
-                    const tone = getResolutionTone(
-                      resolution,
-                      Boolean(plannedDraft),
-                      Boolean(selectedExistingMaterialId),
-                    );
+                    const tone = isIgnored
+                      ? 'warn'
+                      : getResolutionTone(
+                          resolution,
+                          Boolean(plannedDraft),
+                          Boolean(selectedExistingMaterialId),
+                        );
                     const label = plannedDraft
                       ? 'Create on finalize'
-                      : selectedExistingMaterial?.name ??
-                        resolution.resolvedMaterialName ??
-                        'Resolution required';
+                      : isIgnored
+                        ? 'Ignored'
+                        : selectedExistingMaterial?.name ??
+                          resolution.resolvedMaterialName ??
+                          'Resolution required';
 
                     return (
                       <div className="mapping-resolution-card" key={resolution.sourceMaterialName}>
@@ -2187,11 +2434,13 @@ export function ImportPage({
                           <div>
                             <strong>{resolution.sourceMaterialName}</strong>
                             <p>
-                              {plannedDraft
-                                ? 'New library material will be created when you finalize the import.'
-                                : selectedExistingMaterialId
-                                  ? 'This import material will resolve to the selected library entry.'
-                                  : 'Choose a library match or create a new material for this import name.'}
+                              {isIgnored
+                                ? 'Every source row using this material will be excluded.'
+                                : plannedDraft
+                                  ? 'New library material will be created when you finalize the import.'
+                                  : selectedExistingMaterialId
+                                    ? 'This import material will resolve to the selected library entry.'
+                                    : 'Choose a library match or create a new material for this import name.'}
                             </p>
                           </div>
                           <StatusPill label={label} tone={tone} />
@@ -2226,6 +2475,14 @@ export function ImportPage({
                               type="button"
                             >
                               Create new material
+                            </button>
+                            <button
+                              className="secondary-button"
+                              disabled={busy || isIgnored}
+                              onClick={() => handleIgnoreMaterial(resolution.sourceMaterialName)}
+                              type="button"
+                            >
+                              {isIgnored ? 'Material ignored' : 'Ignore material'}
                             </button>
                           </div>
                         ) : (
@@ -2514,6 +2771,16 @@ export function ImportPage({
 
               <div className="module-table-toolbar__summary">
                 <span>{recordCountLabel}</span>
+                {hasPendingImportReview ? (
+                  <button
+                    className="secondary-button module-table-action--danger"
+                    disabled={busy || selectedSourceRowIds.size === 0}
+                    onClick={excludeSelectedSourceRows}
+                    type="button"
+                  >
+                    Exclude selected ({selectedSourceRowIds.size})
+                  </button>
+                ) : null}
               </div>
             </div>
 
@@ -2760,6 +3027,26 @@ export function ImportPage({
               <table className="module-table">
                 <thead>
                   <tr>
+                    {hasPendingImportReview ? (
+                      <th>
+                        <input
+                          aria-label="Select all rows on this page"
+                          checked={
+                            pagedParts.length > 0 &&
+                            pagedParts.every((part) => selectedSourceRowIds.has(part.rowId))
+                          }
+                          onChange={(event) => setSelectedSourceRowIds((current) => {
+                            const next = new Set(current);
+                            for (const part of pagedParts) {
+                              if (event.target.checked) next.add(part.rowId);
+                              else next.delete(part.rowId);
+                            }
+                            return next;
+                          })}
+                          type="checkbox"
+                        />
+                      </th>
+                    ) : null}
                     <th>Row</th>
                     <th>Source</th>
                     <th>Part reference</th>
@@ -2782,6 +3069,28 @@ export function ImportPage({
 
                     return (
                       <tr key={part.rowId}>
+                        {hasPendingImportReview ? (
+                          <td>
+                            <input
+                              aria-label={`Select ${part.rowId} for exclusion`}
+                              checked={selectedSourceRowIds.has(part.rowId)}
+                              disabled={busy || isEditing}
+                              onChange={(event) => {
+                                const result = selectSourceRowRange(
+                                  selectedSourceRowIds,
+                                  pagedParts.map((row) => row.rowId),
+                                  part.rowId,
+                                  event.target.checked,
+                                  (event.nativeEvent as MouseEvent).shiftKey,
+                                  selectionAnchorRowId.current,
+                                );
+                                selectionAnchorRowId.current = result.anchorRowId;
+                                setSelectedSourceRowIds(result.selectedRowIds);
+                              }}
+                              type="checkbox"
+                            />
+                          </td>
+                        ) : null}
                         <td>
                           <div className="module-row-id">
                             <span className="module-row-id__marker">
@@ -3105,6 +3414,7 @@ export function ImportPage({
                     {excluded.sourceReference.physicalRow}
                   </strong>
                   <p>{excluded.originalValidationError.message}</p>
+                  {excluded.originalValidationError.code !== 'ignored-material' ? (
                   <button
                     className="secondary-button"
                     disabled={busy}
@@ -3113,6 +3423,7 @@ export function ImportPage({
                   >
                     Undo
                   </button>
+                  ) : null}
                 </div>
               ))}
             </div>

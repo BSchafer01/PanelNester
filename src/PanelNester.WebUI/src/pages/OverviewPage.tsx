@@ -3,7 +3,6 @@ import { StatusPill } from '../components/StatusPill';
 import type {
   ImportResponse,
   NestResponse,
-  OptimizationGroup,
   ProjectMaterialSnapshot,
   ProjectMetadata,
   ReportSettings,
@@ -32,17 +31,6 @@ interface OverviewPageProps {
     companyLogoPath?: string | null;
     companyName?: string | null;
   }) => Promise<boolean>;
-  optimizationGroups: OptimizationGroup[];
-  activeOptimizationGroupId?: string;
-  canManageOptimizationGroups: boolean;
-  onActivateOptimizationGroup: (optimizationGroupId: string) => void;
-  onCreateOptimizationGroup: (name: string) => Promise<void>;
-  onRenameOptimizationGroup: (optimizationGroupId: string, name: string) => Promise<void>;
-  onReorderOptimizationGroups: (orderedOptimizationGroupIds: string[]) => Promise<void>;
-  onDeleteOptimizationGroup: (
-    optimizationGroupId: string,
-    removeOwnedContent: boolean,
-  ) => Promise<void>;
 }
 
 type ProjectIcon = 'project' | 'team' | 'nesting' | 'stiffener' | 'measure';
@@ -362,18 +350,9 @@ export function OverviewPage({
   companyLogoPath,
   onPickCompanyLogo,
   onSaveDesktopAppSettings,
-  optimizationGroups,
-  activeOptimizationGroupId,
-  canManageOptimizationGroups,
-  onActivateOptimizationGroup,
-  onCreateOptimizationGroup,
-  onRenameOptimizationGroup,
-  onReorderOptimizationGroups,
-  onDeleteOptimizationGroup,
 }: OverviewPageProps) {
   const [algorithmTab, setAlgorithmTab] = useState<AlgorithmTabKey>('general');
   const [reportTab, setReportTab] = useState<ReportTabKey>('general');
-  const [newOptimizationGroupName, setNewOptimizationGroupName] = useState('');
   const hasResults =
     nestResponse.sheets.length > 0 || nestResponse.unplacedItems.length > 0;
   const formattedDate = metadata.date || new Date().toISOString().slice(0, 10);
@@ -419,33 +398,6 @@ export function OverviewPage({
     { key: 'stiffeners', label: 'Stiffeners' },
   ];
 
-  const moveOptimizationGroup = async (index: number, offset: -1 | 1) => {
-    const targetIndex = index + offset;
-    if (targetIndex < 0 || targetIndex >= optimizationGroups.length) {
-      return;
-    }
-
-    const orderedIds = optimizationGroups.map((group) => group.optimizationGroupId);
-    [orderedIds[index], orderedIds[targetIndex]] = [
-      orderedIds[targetIndex],
-      orderedIds[index],
-    ];
-    await onReorderOptimizationGroups(orderedIds);
-  };
-
-  const deleteOptimizationGroup = async (group: OptimizationGroup) => {
-    const hasSavedResults = Boolean(
-      group.lastNestingResult || group.lastBatchNestingResult,
-    );
-    const removeOwnedContent = group.parts.length > 0 || hasSavedResults;
-    const message = removeOwnedContent
-      ? `Delete ${group.name} and explicitly remove its owned content (${group.parts.length} part(s)${hasSavedResults ? ' and saved results' : ''})? Reassign parts first to keep them.`
-      : `Delete empty Optimization Group ${group.name}?`;
-    if (window.confirm(message)) {
-      await onDeleteOptimizationGroup(group.optimizationGroupId, removeOwnedContent);
-    }
-  };
-
   return (
     <div className="project-setup">
       <header className="project-setup__hero">
@@ -475,118 +427,6 @@ export function OverviewPage({
       </header>
 
       <div className="project-setup__dashboard">
-        <section className="project-card project-card--wide optimization-groups-card">
-          <div className="project-card__header project-card__header--split">
-            <div className="project-card__title">
-              <ProjectSectionIcon icon="nesting" />
-              <h2>Optimization Groups</h2>
-            </div>
-            <span className="project-card__hint">Ordered optimization boundaries</span>
-          </div>
-
-          <div className="optimization-groups-list">
-            {optimizationGroups.map((group, index) => {
-              const isActive = group.optimizationGroupId === activeOptimizationGroupId;
-              return (
-                <div
-                  className={
-                    isActive
-                      ? 'optimization-group-row optimization-group-row--active'
-                      : 'optimization-group-row'
-                  }
-                  key={group.optimizationGroupId}
-                >
-                  <button
-                    aria-pressed={isActive}
-                    className="secondary-button optimization-group-row__active"
-                    disabled={projectBusy}
-                    onClick={() => onActivateOptimizationGroup(group.optimizationGroupId)}
-                    type="button"
-                  >
-                    {isActive ? 'Active' : 'Make active'}
-                  </button>
-                  <input
-                    aria-label={`Optimization Group ${index + 1} name`}
-                    defaultValue={group.name}
-                    disabled={projectBusy || !canManageOptimizationGroups}
-                    key={`${group.optimizationGroupId}:${group.name}`}
-                    onBlur={(event) => {
-                      const name = event.target.value.trim();
-                      if (name && name !== group.name) {
-                        void onRenameOptimizationGroup(group.optimizationGroupId, name);
-                      }
-                    }}
-                    type="text"
-                  />
-                  <span>{group.parts.length} part(s)</span>
-                  <div className="table-actions">
-                    <button
-                      className="module-table-action"
-                      disabled={projectBusy || !canManageOptimizationGroups || index === 0}
-                      onClick={() => void moveOptimizationGroup(index, -1)}
-                      type="button"
-                    >
-                      Up
-                    </button>
-                    <button
-                      className="module-table-action"
-                      disabled={
-                        projectBusy ||
-                        !canManageOptimizationGroups ||
-                        index === optimizationGroups.length - 1
-                      }
-                      onClick={() => void moveOptimizationGroup(index, 1)}
-                      type="button"
-                    >
-                      Down
-                    </button>
-                    <button
-                      className="module-table-action module-table-action--danger"
-                      disabled={
-                        projectBusy ||
-                        !canManageOptimizationGroups ||
-                        optimizationGroups.length === 1
-                      }
-                      onClick={() => void deleteOptimizationGroup(group)}
-                      type="button"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="optimization-groups-create">
-            <input
-              aria-label="New Optimization Group name"
-              disabled={projectBusy || !canManageOptimizationGroups}
-              onChange={(event) => setNewOptimizationGroupName(event.target.value)}
-              placeholder="New Optimization Group name"
-              type="text"
-              value={newOptimizationGroupName}
-            />
-            <button
-              className="primary-button"
-              disabled={
-                projectBusy ||
-                !canManageOptimizationGroups ||
-                newOptimizationGroupName.trim().length === 0
-              }
-              onClick={() => {
-                const name = newOptimizationGroupName.trim();
-                void onCreateOptimizationGroup(name).then(() =>
-                  setNewOptimizationGroupName(''),
-                );
-              }}
-              type="button"
-            >
-              Add Optimization Group
-            </button>
-          </div>
-        </section>
-
         <section className="project-card project-card--identity">
           <div className="project-card__header">
             <div className="project-card__title">

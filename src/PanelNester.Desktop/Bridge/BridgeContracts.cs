@@ -367,6 +367,9 @@ public sealed record ImportWorksheetSelection
     public IReadOnlyList<ExcludedSourceRow> ExcludedSourceRows { get; init; } =
         Array.Empty<ExcludedSourceRow>();
 
+    public IReadOnlyList<string> IgnoredMaterialNames { get; init; } =
+        Array.Empty<string>();
+
     public IReadOnlyList<PartOverride> PartOverrides { get; init; } =
         Array.Empty<PartOverride>();
 }
