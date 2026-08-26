@@ -7,6 +7,7 @@ import {
   useState,
 } from 'react';
 import { StatusPill } from '../components/StatusPill';
+import { StockItemViewer } from '../components/StockItemViewer';
 import { ThemedSelect } from '../components/ThemedSelect';
 import {
   buildBatchSheets,
@@ -100,6 +101,34 @@ export function StockLengthResults({
     .sort((left, right) => left.stockItemNumber - right.stockItemNumber)
     .map((item) => ({ plan, item }))) ?? [];
   const unplaced = result?.cutPlans.flatMap((plan) => plan.unplacedPieceInstances) ?? [];
+  const [selectedStockItemKey, setSelectedStockItemKey] = useState<string>();
+  const [selectedPieceInstanceId, setSelectedPieceInstanceId] = useState<string>();
+  const stockItemEntries = stockItems.map(({ plan, item }) => ({
+    plan,
+    item,
+    key: `${plan.cutPlanId}\u0000${item.stockItemId}`,
+  }));
+  const selectedStockItem = stockItemEntries.find(
+    ({ key }) => key === selectedStockItemKey,
+  ) ?? stockItemEntries[0];
+
+  useEffect(() => {
+    setSelectedStockItemKey((current) => (
+      stockItemEntries.some(({ key }) => key === current)
+        ? current
+        : stockItemEntries[0]?.key
+    ));
+  }, [result]);
+
+  useEffect(() => {
+    setSelectedPieceInstanceId((current) => (
+      selectedStockItem?.item.cutSequence.some(
+        (piece) => piece.pieceInstanceId === current,
+      )
+        ? current
+        : undefined
+    ));
+  }, [selectedStockItem?.key]);
 
   return (
     <div className="results-explorer stock-length-results">
@@ -121,9 +150,19 @@ export function StockLengthResults({
           <section className="project-card">
             <div className="project-card__header"><h2>Stock Items</h2><StatusPill label={formatCutPlanStatus(result.status)} tone={result.status === 'complete' ? 'ok' : result.status === 'partial' ? 'warn' : 'error'} /></div>
             <div className="table-wrap"><table><thead><tr><th>Stock Item</th><th>Profile Number</th><th>Finish</th><th>Stock Length</th><th>Piece Length</th><th>Saw Loss</th><th>Remainder</th><th>Utilization</th><th>Status</th></tr></thead><tbody>
-              {stockItems.map(({ plan, item }) => <tr key={item.stockItemId}><td>{item.stockItemNumber}</td><td>{plan.stockGroup.profileNumber}</td><td>{plan.stockGroup.finish || 'No finish specified'}</td><td>{item.stockLength} in</td><td>{item.pieceLength} in</td><td>{item.sawLoss} in</td><td>{item.remainder} in</td><td>{item.utilizationPercent.toFixed(1)}%</td><td>{formatCutPlanStatus(plan.status)}</td></tr>)}
+              {stockItemEntries.map(({ plan, item, key }) => <tr aria-label={`Stock Item ${item.stockItemNumber}`} aria-selected={selectedStockItem?.key === key} key={key} onClick={() => setSelectedStockItemKey(key)} tabIndex={0}><td>{item.stockItemNumber}</td><td>{plan.stockGroup.profileNumber}</td><td>{plan.stockGroup.finish || 'No finish specified'}</td><td>{item.stockLength} in</td><td>{item.pieceLength} in</td><td>{item.sawLoss} in</td><td>{item.remainder} in</td><td>{item.utilizationPercent.toFixed(1)}%</td><td>{formatCutPlanStatus(plan.status)}</td></tr>)}
             </tbody></table></div>
           </section>
+          {selectedStockItem ? (
+            <StockItemViewer
+              finish={selectedStockItem.plan.stockGroup.finish}
+              onSelectPieceInstance={setSelectedPieceInstanceId}
+              pieceInstances={selectedStockItem.item.cutSequence}
+              profileNumber={selectedStockItem.plan.stockGroup.profileNumber}
+              selectedPieceInstanceId={selectedPieceInstanceId}
+              stockItem={selectedStockItem.item}
+            />
+          ) : null}
           <section className="project-card"><div className="project-card__header"><h2>Unplaced</h2></div>
             {unplaced.length > 0 ? <div className="table-wrap"><table><thead><tr><th>Piece Instance</th><th>Length</th><th>Reason</th></tr></thead><tbody>{unplaced.map((item) => <tr key={item.pieceInstance.pieceInstanceId}><td>{item.pieceInstance.pieceInstanceId}</td><td>{item.pieceInstance.length} in</td><td>{item.reasonDescription}</td></tr>)}</tbody></table></div> : <p className="section-note">Every Piece Instance was placed.</p>}
           </section>
