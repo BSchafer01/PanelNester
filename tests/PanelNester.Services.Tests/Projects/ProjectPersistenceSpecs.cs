@@ -16,6 +16,109 @@ public sealed class ProjectPersistenceSpecs : IDisposable
     private readonly string _workspacePath = Path.Combine(Path.GetTempPath(), $"PanelNester.ProjectPersistenceSpecs.{Guid.NewGuid():N}");
 
     [Fact]
+    public async Task Project_kind_survives_a_real_save_and_load_round_trip()
+    {
+        var filePath = Path.Combine(_workspacePath, "stock-length-project.pnest");
+        var service = new ProjectService(
+            new FakeMaterialService(),
+            idGenerator: () => "stock-project-001");
+
+        var created = await service.NewAsync(projectKind: ProjectKind.StockLength);
+        var saved = await service.SaveAsync(created.Project!, filePath);
+        var reopened = await service.LoadAsync(filePath);
+
+        Assert.True(created.Success);
+        Assert.Equal(ProjectKind.StockLength, created.Project!.ProjectKind);
+        Assert.True(saved.Success);
+        Assert.True(reopened.Success);
+        Assert.Equal(Project.CurrentVersion, reopened.Project!.Version);
+        Assert.Equal(ProjectKind.StockLength, reopened.Project.ProjectKind);
+        Assert.Equal("stock-project-001", reopened.Project.ProjectId);
+    }
+
+    [Fact]
+    public async Task Empty_project_can_change_kind_while_retaining_identity_and_general_metadata()
+    {
+        var service = new ProjectService(
+            new FakeMaterialService(),
+            idGenerator: () => "stable-project-id");
+        var created = await service.NewAsync(
+            metadata: new ProjectMetadata
+            {
+                ProjectName = "Mesa Canopy",
+                ProjectNumber = "MC-2407",
+                CustomerName = "Desert Builders"
+            });
+        var project = created.Project! with
+        {
+            Settings = created.Project.Settings with
+            {
+                ReportSettings = new ReportSettings
+                {
+                    CompanyName = "Configured Company",
+                    ReportTitle = "Fabrication Report",
+                    ProjectJobName = "Custom Job Name",
+                    ProjectJobNumber = "Custom Job Number",
+                    ReleaseId = "Release 7",
+                    Status = "Issued",
+                    ReportDate = new DateTime(2026, 8, 26),
+                    Notes = "Keep these report notes"
+                },
+                StiffenerTakeoff = created.Project.Settings.StiffenerTakeoff with
+                {
+                    Enabled = true,
+                    ReportTitle = "Kind-specific stiffener report"
+                }
+            },
+            MaterialSnapshots = [BuildMaterial("mat-1", "Aluminum")],
+            State = created.Project.State with
+            {
+                SourceFilePath = @"C:\imports\panels.csv",
+                SelectedMaterialId = "mat-1",
+                ExtrusionLayout = new ExtrusionLayoutState
+                {
+                    GroupingMode = ExtrusionGroupingModes.SheetNumber,
+                    AdditionalLineItems =
+                    [
+                        new ExtrusionAdditionalLineItem { Id = "ext-1", Name = "Angle" }
+                    ]
+                }
+            }
+        };
+
+        var changed = await service.ChangeKindAsync(project, ProjectKind.StockLength);
+
+        Assert.True(changed.Success);
+        Assert.Equal(ProjectKind.StockLength, changed.Project!.ProjectKind);
+        Assert.Equal("stable-project-id", changed.Project.ProjectId);
+        Assert.Equal("Mesa Canopy", changed.Project.Metadata.ProjectName);
+        Assert.Equal("MC-2407", changed.Project.Metadata.ProjectNumber);
+        Assert.Equal("Desert Builders", changed.Project.Metadata.CustomerName);
+        Assert.Equal(0m, changed.Project.Settings.KerfWidth);
+        Assert.Equal(project.Settings.ReportSettings, changed.Project.Settings.ReportSettings);
+        Assert.Equal(new StiffenerTakeoffSettings(), changed.Project.Settings.StiffenerTakeoff);
+        Assert.Empty(changed.Project.MaterialSnapshots);
+        Assert.Null(changed.Project.State.SourceFilePath);
+        Assert.Null(changed.Project.State.SelectedMaterialId);
+        Assert.Equal(string.Empty, changed.Project.State.ExtrusionLayout.GroupingMode);
+        Assert.Empty(changed.Project.State.ExtrusionLayout.AdditionalLineItems);
+    }
+
+    [Fact]
+    public async Task Project_kind_cannot_change_while_sheet_parts_exist()
+    {
+        var service = new ProjectService(new FakeMaterialService());
+        var project = Phase03ProjectPersistenceSpec.CreateSampleProject();
+
+        var changed = await service.ChangeKindAsync(project, ProjectKind.StockLength);
+
+        Assert.False(changed.Success);
+        var error = Assert.Single(changed.Errors);
+        Assert.Equal("project-kind-change-not-empty", error.Code);
+        Assert.Contains("no sheet parts or Required Pieces", error.Message);
+    }
+
+    [Fact]
     public async Task New_projects_start_without_an_empty_optimization_group()
     {
         var service = new ProjectService(
@@ -149,6 +252,7 @@ public sealed class ProjectPersistenceSpecs : IDisposable
         var restored = await serializer.LoadAsync(filePath);
 
         Assert.Equal(Project.CurrentVersion, restored.Version);
+        Assert.Equal(ProjectKind.Sheet, restored.ProjectKind);
         var restoredGroup = Assert.Single(restored.State.OptimizationGroups);
         Assert.Equal("group-stable-001", restoredGroup.OptimizationGroupId);
         Assert.Equal("Lobby Panels", restoredGroup.Name);
@@ -303,7 +407,7 @@ public sealed class ProjectPersistenceSpecs : IDisposable
 
         var restored = await serializer.LoadAsync(filePath);
 
-        Assert.Equal(4, Project.CurrentVersion);
+        Assert.Equal(5, Project.CurrentVersion);
         Assert.Equal(Project.CurrentVersion, restored.Version);
         var group = Assert.Single(restored.State.OptimizationGroups);
         Assert.Equal("project-phase3-001", group.OptimizationGroupId);
@@ -656,7 +760,8 @@ public sealed class ProjectPersistenceSpecs : IDisposable
     [Theory]
     [InlineData(false, true, 1, "project-not-found")]
     [InlineData(true, false, 1, "project-corrupt")]
-    [InlineData(true, true, 5, "project-unsupported-version")]
+    [InlineData(true, true, 6, "project-unsupported-version")]
+    [InlineData(true, true, 5, null)]
     [InlineData(true, true, 4, null)]
     [InlineData(true, true, 3, null)]
     [InlineData(true, true, 2, null)]

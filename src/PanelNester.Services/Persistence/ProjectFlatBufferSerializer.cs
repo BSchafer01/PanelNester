@@ -118,6 +118,7 @@ internal sealed class ProjectFlatBufferSerializer
         Fb.ProjectDocument.AddSettings(builder, settings);
         Fb.ProjectDocument.AddMaterialSnapshots(builder, snapshots);
         Fb.ProjectDocument.AddState(builder, state);
+        Fb.ProjectDocument.AddProjectKind(builder, (Fb.ProjectKind)project.ProjectKind);
         return Fb.ProjectDocument.EndProjectDocument(builder);
     }
 
@@ -542,13 +543,15 @@ internal sealed class ProjectFlatBufferSerializer
         var metadata = document.Metadata;
         var settings = document.Settings;
         var state = document.State;
+        var projectKind = (ProjectKind)document.ProjectKind;
 
         return new Project
         {
             Version = document.Version,
+            ProjectKind = projectKind,
             ProjectId = document.ProjectId ?? string.Empty,
             Metadata = ReadMetadata(metadata),
-            Settings = ReadSettings(settings),
+            Settings = ReadSettings(settings, projectKind),
             MaterialSnapshots = ReadMaterials(document),
             State = ReadState(state)
         };
@@ -582,13 +585,14 @@ internal sealed class ProjectFlatBufferSerializer
         };
     }
 
-    private static ProjectSettings ReadSettings(Fb.ProjectSettings? settings)
+    private static ProjectSettings ReadSettings(Fb.ProjectSettings? settings, ProjectKind projectKind)
     {
         const decimal DefaultKerfWidth = 0.0625m;
+        var defaultKerfWidth = projectKind == ProjectKind.StockLength ? 0m : DefaultKerfWidth;
 
         if (settings is null)
         {
-            return new ProjectSettings { KerfWidth = DefaultKerfWidth };
+            return new ProjectSettings { KerfWidth = defaultKerfWidth };
         }
 
         var value = settings.Value;
@@ -598,7 +602,7 @@ internal sealed class ProjectFlatBufferSerializer
 
         return new ProjectSettings
         {
-            KerfWidth = kerfWidth > 0 ? (decimal)kerfWidth : DefaultKerfWidth,
+            KerfWidth = kerfWidth > 0 ? (decimal)kerfWidth : defaultKerfWidth,
             ReportSettings = reportSettings,
             StiffenerTakeoff = stiffenerTakeoff
         };

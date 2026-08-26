@@ -1,5 +1,10 @@
 namespace PanelNester.Services.Persistence.FlatBuffers;
 
+enum ProjectKind : byte {
+  Sheet = 0,
+  StockLength = 1
+}
+
 table ProjectDocument {
   version:int;
   project_id:string;
@@ -7,6 +12,7 @@ table ProjectDocument {
   settings:ProjectSettings;
   material_snapshots:[Material];
   state:ProjectState;
+  project_kind:ProjectKind = Sheet;
 }
 
 table ProjectMetadata {

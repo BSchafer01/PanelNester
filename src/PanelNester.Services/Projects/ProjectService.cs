@@ -24,6 +24,7 @@ public sealed class ProjectService : IProjectService
     public Task<ProjectOperationResult> NewAsync(
         ProjectMetadata? metadata = null,
         ProjectSettings? settings = null,
+        ProjectKind projectKind = ProjectKind.Sheet,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -32,8 +33,9 @@ public sealed class ProjectService : IProjectService
             new Project
             {
                 ProjectId = CreateProjectId(),
+                ProjectKind = projectKind,
                 Metadata = metadata ?? new ProjectMetadata(),
-                Settings = settings ?? new ProjectSettings { KerfWidth = DefaultKerfWidth }
+                Settings = settings ?? CreateDefaultSettings(projectKind)
             });
 
         return Task.FromResult(Success(project));
@@ -107,6 +109,49 @@ public sealed class ProjectService : IProjectService
             });
 
         return Task.FromResult(Success(updatedProject));
+    }
+
+    public Task<ProjectOperationResult> ChangeKindAsync(
+        Project project,
+        ProjectKind projectKind,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (!Enum.IsDefined(projectKind))
+        {
+            return Task.FromResult(Failure(
+                "project-kind-invalid",
+                "Choose either Sheet Project or Stock-Length Project."));
+        }
+
+        var normalized = NormalizeProject(project);
+        if (normalized.ProjectKind == projectKind)
+        {
+            return Task.FromResult(Success(normalized));
+        }
+
+        if (normalized.State.Parts.Count > 0 ||
+            normalized.State.OptimizationGroups.Any(group => group.Parts.Count > 0))
+        {
+            return Task.FromResult(Failure(
+                "project-kind-change-not-empty",
+                "Project Kind can change only when the project has no sheet parts or Required Pieces."));
+        }
+
+        var changed = normalized with
+        {
+            ProjectKind = projectKind,
+            Settings = CreateDefaultSettings(projectKind) with
+            {
+                ReportSettings = normalized.Settings.ReportSettings
+            },
+            MaterialSnapshots = Array.Empty<Material>(),
+            State = new ProjectState()
+        };
+
+        return Task.FromResult(Success(NormalizeProject(changed)));
     }
 
     public Task<ProjectOperationResult> UpdateOptimizationGroupsAsync(
@@ -455,7 +500,7 @@ public sealed class ProjectService : IProjectService
             Version = Project.CurrentVersion,
             ProjectId = projectId,
             Metadata = NormalizeMetadata(project.Metadata),
-            Settings = NormalizeSettings(project.Settings, project.Metadata),
+            Settings = NormalizeSettings(project.Settings, project.Metadata, project.ProjectKind),
             MaterialSnapshots = NormalizeSnapshots(project.MaterialSnapshots),
             State = NormalizeState(project.State, projectId)
         };
@@ -487,19 +532,30 @@ public sealed class ProjectService : IProjectService
         };
     }
 
-    private static ProjectSettings NormalizeSettings(ProjectSettings? settings, ProjectMetadata? metadata)
+    private static ProjectSettings NormalizeSettings(
+        ProjectSettings? settings,
+        ProjectMetadata? metadata,
+        ProjectKind projectKind)
     {
-        settings ??= new ProjectSettings { KerfWidth = DefaultKerfWidth };
+        settings ??= CreateDefaultSettings(projectKind);
         var reportSettings = NormalizeReportSettings(metadata, settings.ReportSettings);
         var stiffenerTakeoff = NormalizeStiffenerTakeoffSettings(settings.StiffenerTakeoff);
 
         return settings with
         {
-            KerfWidth = settings.KerfWidth < 0 ? DefaultKerfWidth : settings.KerfWidth,
+            KerfWidth = settings.KerfWidth < 0
+                ? CreateDefaultSettings(projectKind).KerfWidth
+                : settings.KerfWidth,
             ReportSettings = reportSettings,
             StiffenerTakeoff = stiffenerTakeoff
         };
     }
+
+    private static ProjectSettings CreateDefaultSettings(ProjectKind projectKind) =>
+        new()
+        {
+            KerfWidth = projectKind == ProjectKind.StockLength ? 0m : DefaultKerfWidth
+        };
 
     private static ReportSettings NormalizeReportSettings(ProjectMetadata? metadata, ReportSettings? settings)
     {

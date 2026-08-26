@@ -38,6 +38,7 @@ export const bridgeMessageTypes = {
   saveProjectAs: 'save-project-as',
   getProjectMetadata: 'get-project-metadata',
   updateProjectMetadata: 'update-project-metadata',
+  changeProjectKind: 'change-project-kind',
   updateOptimizationGroups: 'update-optimization-groups',
   getDesktopAppSettings: 'get-desktop-app-settings',
   updateDesktopAppSettings: 'update-desktop-app-settings',
@@ -47,6 +48,8 @@ export const toBridgeResponseType = (type: string) => `${type}-response`;
 
 export type BridgeCapability =
   (typeof bridgeMessageTypes)[keyof typeof bridgeMessageTypes];
+
+export type ProjectKind = 'sheet' | 'stockLength';
 
 export interface BridgeMessage<TPayload = unknown> {
   type: string;
@@ -660,6 +663,7 @@ export interface ImportSourceMetadata {
 
 export interface ProjectRecord {
   version: number;
+  projectKind: ProjectKind;
   projectId: string;
   metadata: ProjectFileMetadata;
   settings: ProjectSettings;
@@ -724,6 +728,19 @@ export interface DeleteMaterialResponse {
 export interface NewProjectRequest {
   metadata?: ProjectFileMetadata | null;
   settings?: ProjectSettings | null;
+  projectKind?: ProjectKind;
+}
+
+export interface ChangeProjectKindRequest {
+  project: ProjectRecord;
+  projectKind: ProjectKind;
+}
+
+export interface ChangeProjectKindResponse {
+  success: boolean;
+  project: ProjectRecord | null;
+  error?: BridgeError | null;
+  message?: string;
 }
 
 export interface OpenProjectRequest {

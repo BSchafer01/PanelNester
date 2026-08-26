@@ -1,12 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
+import {
+  guardProjectRoute,
+  isProjectRouteAllowed,
+  type AppRoute,
+} from '../projectKind';
+import type { ProjectKind } from '../types/contracts';
 
-type AppRoute = 'overview' | 'import' | 'materials' | 'extrusions' | 'results';
 type UiDensity = 'relaxed' | 'condensed';
 
 const uiDensityStorageKey = 'panelNester.uiDensity';
 
 interface AppShellProps {
   activeRoute: AppRoute;
+  projectKind: ProjectKind;
   onRouteChange: (route: AppRoute) => void;
   projectBusy: boolean;
   bridgeConnected: boolean;
@@ -146,6 +152,7 @@ function MenuItemLabel({
 
 export function AppShell({
   activeRoute,
+  projectKind,
   onRouteChange,
   projectBusy,
   bridgeConnected,
@@ -171,6 +178,16 @@ export function AppShell({
     }
   });
   const settingsMenuRef = useRef<HTMLDivElement | null>(null);
+  const visibleNavigationItems = navigationItems.filter((item) =>
+    isProjectRouteAllowed(projectKind, item.route),
+  );
+
+  useEffect(() => {
+    const guardedRoute = guardProjectRoute(projectKind, activeRoute);
+    if (guardedRoute !== activeRoute) {
+      onRouteChange(guardedRoute);
+    }
+  }, [activeRoute, onRouteChange, projectKind]);
 
   useEffect(() => {
     try {
@@ -462,7 +479,7 @@ export function AppShell({
 
       <div className="app-shell__body">
         <nav className="app-shell__nav" aria-label="Primary">
-          {navigationItems.map((item) => (
+          {visibleNavigationItems.map((item) => (
             <button
               key={item.route}
               className={

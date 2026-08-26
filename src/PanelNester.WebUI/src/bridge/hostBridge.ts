@@ -9,6 +9,8 @@ import {
   type CreateMaterialRequest,
   type ChooseMaterialLibraryLocationRequest,
   type ChooseMaterialLibraryLocationResponse,
+  type ChangeProjectKindRequest,
+  type ChangeProjectKindResponse,
   type DeletePartRowRequest,
   type DeleteMaterialRequest,
   type DeleteMaterialResponse,
@@ -483,6 +485,15 @@ class HostBridgeClient {
       bridgeMessageTypes.exportPdfReport,
       request,
       15000,
+    );
+  }
+
+  changeProjectKind(
+    request: ChangeProjectKindRequest,
+  ): Promise<ChangeProjectKindResponse> {
+    return this.invoke<ChangeProjectKindResponse>(
+      bridgeMessageTypes.changeProjectKind,
+      request,
     );
   }
 

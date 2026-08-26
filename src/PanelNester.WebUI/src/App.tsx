@@ -1,6 +1,13 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { AppShell } from './components/AppShell';
+import { NewProjectDialog } from './components/ProjectKindControls';
 import { hostBridge } from './bridge/hostBridge';
+import {
+  guardProjectRoute,
+  projectKindLabels,
+  projectKindSupportsStiffeners,
+  type AppRoute,
+} from './projectKind';
 import { ImportPage } from './pages/ImportPage';
 import {
   collectWorkbookNewMaterials,
@@ -55,6 +62,8 @@ import {
   type ProjectFileMetadata,
   type ProjectMaterialSnapshot,
   type ProjectMetadata,
+  type ChangeProjectKindResponse,
+  type ProjectKind,
   type ProjectRecord,
   type ProjectSettings,
   type ReportSettings,
@@ -63,7 +72,6 @@ import {
   type WorkbookImportProgress,
 } from './types/contracts';
 
-type AppRoute = 'overview' | 'import' | 'materials' | 'extrusions' | 'results';
 type ProjectSaveStatus = 'saved' | 'cancelled' | 'failed';
 
 interface DesktopCloseSaveResult {
@@ -97,10 +105,11 @@ declare global {
 const importFileDialogTimeoutMs = 300000;
 const importBridgeTimeoutMs = 120000;
 const nestingBridgeTimeoutMs = 300000;
-const currentProjectVersion = 4;
+const currentProjectVersion = 5;
 
 interface AppState {
   activeRoute: AppRoute;
+  projectKind: ProjectKind;
   bridge: HostBridgeSnapshot;
   importResponse: ImportResponse;
   nestResponse: NestResponse;
@@ -220,6 +229,7 @@ type AppAction =
       type: 'project-created';
       metadata: ProjectMetadata;
       settings: ProjectSettings;
+      projectKind: ProjectKind;
       projectId?: string;
       optimizationGroups?: OptimizationGroup[];
       message: string;
@@ -243,6 +253,7 @@ type AppAction =
   | { type: 'project-operation-started'; message: string }
   | { type: 'project-operation-finished'; message: string }
   | { type: 'project-operation-failed'; message: string }
+  | { type: 'project-kind-changed'; project: ProjectRecord; message: string }
   | { type: 'optimization-group-activated'; optimizationGroupId: string }
   | {
       type: 'optimization-groups-updated';
@@ -399,9 +410,10 @@ function normalizeReportSettings(
 function createProjectSettings(
   metadata: ProjectMetadata,
   companyNameDefault?: string | null,
+  projectKind: ProjectKind = 'sheet',
 ): ProjectSettings {
   return {
-    kerfWidth: demoKerfWidth,
+    kerfWidth: projectKind === 'stockLength' ? 0 : demoKerfWidth,
     reportSettings: createDefaultReportSettings(metadata, companyNameDefault),
     stiffenerTakeoff: { ...defaultStiffenerTakeoffSettings },
   };
@@ -452,12 +464,13 @@ function normalizeProjectSettings(
   settings: ProjectSettings | null | undefined,
   metadata: ProjectMetadata,
   companyNameDefault?: string | null,
+  projectKind: ProjectKind = 'sheet',
 ): ProjectSettings {
   return {
     kerfWidth:
       typeof settings?.kerfWidth === 'number' && settings.kerfWidth >= 0
         ? settings.kerfWidth
-        : demoKerfWidth,
+        : projectKind === 'stockLength' ? 0 : demoKerfWidth,
     reportSettings: normalizeReportSettings(
       settings?.reportSettings,
       metadata,
@@ -502,6 +515,7 @@ function syncReportSettingsWithMetadata(
 
 const initialState: AppState = {
   activeRoute: 'overview',
+  projectKind: 'sheet',
   bridge: hostBridge.getSnapshot(),
   importResponse: emptyImportResponse,
   nestResponse: emptyNestResponse,
@@ -1412,6 +1426,7 @@ function buildProjectRecord(
 
   return {
     version: currentProjectVersion,
+    projectKind: state.projectKind,
     projectId: state.projectId,
     metadata: mapMetadataToBridge(state.projectMetadata),
     settings: projectSettings,
@@ -1456,6 +1471,7 @@ function buildStiffenerProjectRecord(
 
   return {
     version: currentProjectVersion,
+    projectKind: state.projectKind,
     projectId: state.projectId,
     metadata: mapMetadataToBridge(state.projectMetadata),
     settings: settingsOverride ?? state.projectSettings,
@@ -1514,7 +1530,7 @@ function reducer(state: AppState, action: AppAction): AppState {
     case 'route-changed':
       return {
         ...state,
-        activeRoute: action.route,
+        activeRoute: guardProjectRoute(state.projectKind, action.route),
       };
     case 'bridge-updated': {
       return {
@@ -1840,6 +1856,7 @@ function reducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         activeRoute: 'overview',
+        projectKind: action.projectKind,
         importResponse: emptyImportResponse,
         nestResponse: emptyNestResponse,
         batchNestResponse: emptyBatchNestResponse,
@@ -1892,6 +1909,8 @@ function reducer(state: AppState, action: AppAction): AppState {
         normalizeProjectSettings(
           action.project.settings,
           projectMetadata,
+          undefined,
+          action.project.projectKind,
         );
       const batchNestResponse = openedGroupCanDisplay
         ? openedGroup?.lastBatchNestingResult ??
@@ -1901,6 +1920,7 @@ function reducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         activeRoute: 'overview',
+        projectKind: action.project.projectKind ?? 'sheet',
         projectBusy: false,
         projectDirty: false,
         projectMetadata,
@@ -1959,12 +1979,15 @@ function reducer(state: AppState, action: AppAction): AppState {
         projectBusy: false,
         projectDirty: false,
         projectId: action.project.projectId,
+        projectKind: action.project.projectKind ?? 'sheet',
         projectFilePath: action.filePath,
         projectSettings:
           action.settings ??
           normalizeProjectSettings(
             action.project.settings,
             mapMetadataFromBridge(action.project.metadata),
+            undefined,
+            action.project.projectKind,
           ),
         stiffenerTakeoffReport: null,
         extrusionLayout:
@@ -1998,6 +2021,45 @@ function reducer(state: AppState, action: AppAction): AppState {
         ...state,
         projectBusy: false,
         projectMessage: action.message,
+      };
+    case 'project-kind-changed':
+      return {
+        ...state,
+        activeRoute: 'overview',
+        projectKind: action.project.projectKind,
+        importResponse: emptyImportResponse,
+        nestResponse: emptyNestResponse,
+        batchNestResponse: emptyBatchNestResponse,
+        selectedMaterialId: undefined,
+        lastNestMaterial: undefined,
+        selectedFilePath: undefined,
+        importSource: undefined,
+        importConfiguration: undefined,
+        importMappingSession: undefined,
+        importBusy: false,
+        importPhase: undefined,
+        importProgress: undefined,
+        importMessage: defaultImportMessage,
+        nestingMessage: defaultNestingMessage,
+        reportMessage: defaultReportMessage,
+        stiffenerMessage: defaultStiffenerMessage,
+        extrusionMessage: defaultExtrusionMessage,
+        projectSettings: normalizeProjectSettings(
+          action.project.settings,
+          state.projectMetadata,
+          undefined,
+          action.project.projectKind,
+        ),
+        projectMaterialSnapshots: [],
+        optimizationGroups: [],
+        activeOptimizationGroupId: undefined,
+        stiffenerTakeoffReport: null,
+        extrusionLayout: defaultExtrusionLayoutState,
+        extrusionReport: null,
+        projectMessage: action.message,
+        projectBusy: false,
+        projectDirty: true,
+        partMutationBusy: false,
       };
     case 'optimization-group-activated': {
       const activeGroup = state.optimizationGroups.find(
@@ -2164,6 +2226,7 @@ export default function App() {
   const [desktopAppSettings, setDesktopAppSettings] =
     useState<DesktopAppSettings>(emptyDesktopAppSettings);
   const [desktopAppSettingsLoaded, setDesktopAppSettingsLoaded] = useState(false);
+  const [newProjectDialogOpen, setNewProjectDialogOpen] = useState(false);
   const [unsavedPromptActionLabel, setUnsavedPromptActionLabel] = useState<string | null>(
     null,
   );
@@ -2964,11 +3027,16 @@ export default function App() {
     await action();
   };
 
-  const createNewProject = async () => {
+  const createNewProject = async (projectKind: ProjectKind) => {
+    setNewProjectDialogOpen(false);
     await runProjectTransition('starting a new project', async () => {
       await releaseActiveImportSession();
       const metadata = createDefaultProjectMetadata();
-      const settings = createProjectSettings(metadata, desktopAppSettings.companyName);
+      const settings = createProjectSettings(
+        metadata,
+        desktopAppSettings.companyName,
+        projectKind,
+      );
 
       if (hasCapability(bridgeMessageTypes.newProject)) {
         dispatch({
@@ -2980,6 +3048,7 @@ export default function App() {
           const response = await hostBridge.newProject({
             metadata: mapMetadataToBridge(metadata),
             settings,
+            projectKind,
           });
           if (!response.success) {
             throw new Error(
@@ -3000,8 +3069,10 @@ export default function App() {
                   response.project.settings,
                   mapMetadataFromBridge(response.project.metadata),
                   desktopAppSettings.companyName,
+                  response.project.projectKind,
                 )
               : settings,
+            projectKind: response.project?.projectKind ?? projectKind,
             projectId: response.project?.projectId,
             optimizationGroups: response.project?.state.optimizationGroups,
             message:
@@ -3025,10 +3096,82 @@ export default function App() {
         type: 'project-created',
         metadata,
         settings,
+        projectKind,
         message:
           'Started a new project in the UI. Save and Open stay ready to light up when the desktop host exposes the Phase 3 file commands.',
       });
     });
+  };
+  const requestNewProject = async () => setNewProjectDialogOpen(true);
+
+  const changeProjectKind = async (projectKind: ProjectKind) => {
+    if (projectKind === state.projectKind) {
+      return;
+    }
+
+    await releaseActiveImportSession();
+    dispatch({
+      type: 'project-operation-started',
+      message: 'Changing Project Kind…',
+    });
+
+    try {
+      const currentProject = buildProjectRecord(state);
+      const response: ChangeProjectKindResponse = hasCapability(
+        bridgeMessageTypes.changeProjectKind,
+      )
+        ? await hostBridge.changeProjectKind({ project: currentProject, projectKind })
+        : {
+            success: true,
+            project: {
+              ...currentProject,
+              projectKind,
+              settings: {
+                ...createProjectSettings(
+                  state.projectMetadata,
+                  desktopAppSettings.companyName,
+                  projectKind,
+                ),
+                reportSettings: state.projectSettings.reportSettings,
+              },
+              materialSnapshots: [],
+              state: {
+                sourceFilePath: null,
+                importSource: null,
+                importConfiguration: null,
+                optimizationGroups: [],
+                parts: [],
+                selectedMaterialId: null,
+                lastNestingResult: null,
+                lastBatchNestingResult: null,
+                extrusionLayout: defaultExtrusionLayoutState,
+              },
+            },
+            message: `Changed Project Kind to ${projectKindLabels[projectKind]}.`,
+          };
+
+      if (!response.success || !response.project) {
+        throw new Error(
+          getBridgeErrorMessage(
+            response.error,
+            response.message ?? 'Project Kind could not be changed.',
+          ),
+        );
+      }
+
+      dispatch({
+        type: 'project-kind-changed',
+        project: response.project,
+        message:
+          response.message ??
+          `Changed Project Kind to ${projectKindLabels[projectKind]}. Save the project to persist this change.`,
+      });
+    } catch (error) {
+      dispatch({
+        type: 'project-operation-failed',
+        message: getErrorMessage(error, 'Project Kind could not be changed.'),
+      });
+    }
   };
 
   const openProject = async (request: OpenProjectRequest = {}) => {
@@ -3130,7 +3273,7 @@ export default function App() {
       }
     });
   };
-  createNewProjectRef.current = createNewProject;
+  createNewProjectRef.current = requestNewProject;
   saveProjectBeforeCloseRef.current = async () => saveProject();
   prepareProjectSaveBeforeCloseRef.current = async () => ({
     status: 'ready',
@@ -4816,6 +4959,7 @@ export default function App() {
           reportSettings={state.projectSettings.reportSettings}
           reportMessage={state.reportMessage}
           reportBusy={state.reportBusy}
+          showStiffenerControls={projectKindSupportsStiffeners(state.projectKind)}
           stiffenerTakeoffEnabled={state.projectSettings.stiffenerTakeoff.enabled}
           stiffenerTakeoffReport={state.stiffenerTakeoffReport}
           stiffenerMessage={state.stiffenerMessage}
@@ -4857,6 +5001,11 @@ export default function App() {
     default:
       content = (
         <OverviewPage
+          projectKind={state.projectKind}
+          canChangeProjectKind={
+            state.importResponse.parts.length === 0 &&
+            state.optimizationGroups.every((group) => group.parts.length === 0)
+          }
           metadata={state.projectMetadata}
           projectBusy={state.projectBusy}
           projectDirty={state.projectDirty}
@@ -4893,6 +5042,7 @@ export default function App() {
               });
             }
           }
+          onProjectKindChange={changeProjectKind}
           onKerfWidthChange={(value) => {
             dispatch({
               type: 'project-settings-changed',
@@ -4934,9 +5084,10 @@ export default function App() {
     <>
       <AppShell
         activeRoute={state.activeRoute}
+        projectKind={state.projectKind}
         onRouteChange={(route) => dispatch({ type: 'route-changed', route })}
         projectBusy={state.projectBusy}
-        onCreateProject={createNewProject}
+        onCreateProject={requestNewProject}
         onOpenProject={openProject}
         onSaveProject={() => saveProject().then(() => undefined)}
         onSaveProjectAs={() => saveProject({ saveAs: true }).then(() => undefined)}
@@ -4956,6 +5107,12 @@ export default function App() {
       >
         <div className={contentClassName}>{content}</div>
       </AppShell>
+      {newProjectDialogOpen ? (
+        <NewProjectDialog
+          onCancel={() => setNewProjectDialogOpen(false)}
+          onCreate={createNewProject}
+        />
+      ) : null}
       {unsavedPromptActionLabel ? (
         <div
           className="results-dialog-backdrop"

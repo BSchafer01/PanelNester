@@ -1,15 +1,20 @@
 import { useState, type ReactNode } from 'react';
 import { StatusPill } from '../components/StatusPill';
+import { ProjectKindControl } from '../components/ProjectKindControls';
+import { projectKindSupportsStiffeners } from '../projectKind';
 import type {
   ImportResponse,
   NestResponse,
   ProjectMaterialSnapshot,
   ProjectMetadata,
+  ProjectKind,
   ReportSettings,
   StiffenerTakeoffSettings,
 } from '../types/contracts';
 
 interface OverviewPageProps {
+  projectKind: ProjectKind;
+  canChangeProjectKind: boolean;
   metadata: ProjectMetadata;
   projectBusy: boolean;
   projectDirty: boolean;
@@ -22,6 +27,7 @@ interface OverviewPageProps {
   reportSettings: ReportSettings;
   stiffenerTakeoff: StiffenerTakeoffSettings;
   onMetadataChange: (field: keyof ProjectMetadata, value: string) => void;
+  onProjectKindChange: (projectKind: ProjectKind) => void | Promise<void>;
   onKerfWidthChange: (value: number) => void;
   onReportSettingsChange: (field: keyof ReportSettings, value: string) => void;
   onStiffenerTakeoffChange: (settings: StiffenerTakeoffSettings) => void;
@@ -332,6 +338,8 @@ function EmptyTabState({ title, description }: { title: string; description: str
 }
 
 export function OverviewPage({
+  projectKind,
+  canChangeProjectKind,
   metadata,
   projectBusy,
   projectDirty,
@@ -344,6 +352,7 @@ export function OverviewPage({
   reportSettings,
   stiffenerTakeoff,
   onMetadataChange,
+  onProjectKindChange,
   onKerfWidthChange,
   onReportSettingsChange,
   onStiffenerTakeoffChange,
@@ -389,13 +398,17 @@ export function OverviewPage({
   const algorithmButtons: TabButton[] = [
     { key: 'general', label: 'General' },
     { key: 'nesting', label: 'Nesting' },
-    { key: 'stiffeners', label: 'Stiffeners' },
+    ...(projectKindSupportsStiffeners(projectKind)
+      ? [{ key: 'stiffeners', label: 'Stiffeners' }]
+      : []),
   ];
 
   const reportButtons: TabButton[] = [
     { key: 'general', label: 'General' },
     { key: 'nesting', label: 'Nesting' },
-    { key: 'stiffeners', label: 'Stiffeners' },
+    ...(projectKindSupportsStiffeners(projectKind)
+      ? [{ key: 'stiffeners', label: 'Stiffeners' }]
+      : []),
   ];
 
   return (
@@ -436,6 +449,12 @@ export function OverviewPage({
           </div>
 
           <div className="project-form-grid project-form-grid--identity">
+            <ProjectKindControl
+              canChange={canChangeProjectKind}
+              disabled={projectBusy}
+              onChange={onProjectKindChange}
+              projectKind={projectKind}
+            />
             <label className="project-field project-field--wide">
               <span>Project Name</span>
               <input
@@ -576,7 +595,7 @@ export function OverviewPage({
               />
             ) : null}
 
-            {algorithmTab === 'stiffeners' ? (
+            {projectKindSupportsStiffeners(projectKind) && algorithmTab === 'stiffeners' ? (
               <div className="project-tab-form">
                 <ToggleField
                   checked={stiffenerTakeoff.enabled}
@@ -724,7 +743,7 @@ export function OverviewPage({
               </div>
             ) : null}
 
-            {reportTab === 'stiffeners' ? (
+            {projectKindSupportsStiffeners(projectKind) && reportTab === 'stiffeners' ? (
               <div className="project-tab-form">
                 <TextField
                   description="Title shown at the top of the stiffener PDF"

@@ -45,6 +45,7 @@ interface ResultsPageProps {
   reportSettings: ReportSettings;
   reportMessage: string;
   reportBusy: boolean;
+  showStiffenerControls: boolean;
   stiffenerTakeoffEnabled: boolean;
   stiffenerTakeoffSettings: StiffenerTakeoffSettings;
   stiffenerTakeoffReport: StiffenerTakeoffReportData | null;
@@ -352,6 +353,7 @@ export function ResultsPage({
   reportSettings,
   reportMessage,
   reportBusy,
+  showStiffenerControls,
   stiffenerTakeoffEnabled,
   stiffenerTakeoffSettings,
   stiffenerTakeoffReport,
@@ -414,6 +416,14 @@ export function ResultsPage({
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
   const [stiffenerDialogOpen, setStiffenerDialogOpen] = useState(false);
   const [openMenu, setOpenMenu] = useState<'report' | 'stiffener' | null>(null);
+
+  useEffect(() => {
+    if (!showStiffenerControls) {
+      setDrawerTab((current) => (current === 'stiffeners' ? null : current));
+      setStiffenerDialogOpen(false);
+      setOpenMenu((current) => (current === 'stiffener' ? null : current));
+    }
+  }, [showStiffenerControls]);
   const [reportDraft, setReportDraft] = useState<ReportDraft>(() =>
     {
       const draft = createReportDraft(reportSettings);
@@ -927,24 +937,26 @@ export function ResultsPage({
                   <span className="results-drawer-tab__badge">{unplacedRows.length}</span>
                 ) : null}
               </button>
-              <button
-                aria-expanded={drawerTab === 'stiffeners'}
-                aria-selected={drawerTab === 'stiffeners'}
-                className={
-                  drawerTab === 'stiffeners'
-                    ? 'results-drawer-tab results-drawer-tab--active'
-                    : 'results-drawer-tab'
-                }
-                onClick={() =>
-                  setDrawerTab((current) =>
-                    current === 'stiffeners' ? null : 'stiffeners',
-                  )
-                }
-                role="tab"
-                type="button"
-              >
-                Stiffeners
-              </button>
+              {showStiffenerControls ? (
+                <button
+                  aria-expanded={drawerTab === 'stiffeners'}
+                  aria-selected={drawerTab === 'stiffeners'}
+                  className={
+                    drawerTab === 'stiffeners'
+                      ? 'results-drawer-tab results-drawer-tab--active'
+                      : 'results-drawer-tab'
+                  }
+                  onClick={() =>
+                    setDrawerTab((current) =>
+                      current === 'stiffeners' ? null : 'stiffeners',
+                    )
+                  }
+                  role="tab"
+                  type="button"
+                >
+                  Stiffeners
+                </button>
+              ) : null}
             </div>
 
             {drawerTab ? (
@@ -1447,7 +1459,7 @@ export function ResultsPage({
         </div>
       ) : null}
 
-      {stiffenerDialogOpen ? (
+      {showStiffenerControls && stiffenerDialogOpen ? (
         <div
           className="results-dialog-backdrop"
           onClick={() => setStiffenerDialogOpen(false)}

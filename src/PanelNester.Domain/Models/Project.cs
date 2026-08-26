@@ -2,9 +2,11 @@ namespace PanelNester.Domain.Models;
 
 public sealed record Project
 {
-    public const int CurrentVersion = 4;
+    public const int CurrentVersion = 5;
 
     public int Version { get; init; } = CurrentVersion;
+
+    public ProjectKind ProjectKind { get; init; } = ProjectKind.Sheet;
 
     public string ProjectId { get; init; } = string.Empty;
 

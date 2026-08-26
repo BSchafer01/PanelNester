@@ -687,7 +687,7 @@ public static class DesktopBridgeRegistration
             async (request, cancellationToken) =>
             {
                 var result = await projectService
-                    .NewAsync(request.Metadata, request.Settings, cancellationToken)
+                    .NewAsync(request.Metadata, request.Settings, request.ProjectKind, cancellationToken)
                     .ConfigureAwait(false);
 
                 return result.Success && result.Project is not null
@@ -928,6 +928,25 @@ public static class DesktopBridgeRegistration
                     : UpdateProjectMetadataResponse.Failure(
                         GetFirstErrorCode(result.Errors, "project-update-failed"),
                         GetFirstErrorMessage(result.Errors, "Project metadata could not be updated."));
+            });
+
+        dispatcher.Register<ChangeProjectKindRequest>(
+            BridgeMessageTypes.ChangeProjectKind,
+            async (request, cancellationToken) =>
+            {
+                var result = await projectService
+                    .ChangeKindAsync(request.Project, request.ProjectKind, cancellationToken)
+                    .ConfigureAwait(false);
+
+                return result.Success && result.Project is not null
+                    ? new ChangeProjectKindResponse(
+                        true,
+                        result.Project,
+                        null,
+                        $"Changed Project Kind to {(result.Project.ProjectKind == ProjectKind.Sheet ? "Sheet Project" : "Stock-Length Project")}.")
+                    : ChangeProjectKindResponse.Failure(
+                        GetFirstErrorCode(result.Errors, "project-kind-change-failed"),
+                        GetFirstErrorMessage(result.Errors, "Project Kind could not be changed."));
             });
 
         dispatcher.Register<UpdateOptimizationGroupsRequest>(

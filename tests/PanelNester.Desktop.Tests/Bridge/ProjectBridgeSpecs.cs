@@ -18,6 +18,38 @@ public sealed class ProjectBridgeSpecs : IDisposable
     private readonly string _workspacePath = Path.Combine(Path.GetTempPath(), $"PanelNester.ProjectBridgeSpecs.{Guid.NewGuid():N}");
 
     [Fact]
+    public async Task Project_kind_creation_and_change_flow_through_the_desktop_bridge()
+    {
+        var repository = new JsonMaterialRepository(Path.Combine(_workspacePath, "materials.json"));
+        var materialService = new MaterialService(repository);
+        var dispatcher = DesktopBridgeRegistration.CreateDefault(
+            new RecordingFileDialogService(),
+            materialService,
+            new ProjectService(materialService, idGenerator: () => "project-kind-001"),
+            new CsvImportService(repository),
+            new PartEditorService(repository),
+            new ShelfNestingService(),
+            () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true));
+
+        var created = await DispatchAsync<NewProjectResponse>(
+            dispatcher,
+            BridgeMessageTypes.NewProject,
+            new NewProjectRequest(ProjectKind: ProjectKind.StockLength));
+        var stockProject = Assert.IsType<Project>(created.Project);
+
+        var changed = await DispatchAsync<ChangeProjectKindResponse>(
+            dispatcher,
+            BridgeMessageTypes.ChangeProjectKind,
+            new ChangeProjectKindRequest(stockProject, ProjectKind.Sheet));
+
+        Assert.True(created.Success);
+        Assert.Equal(ProjectKind.StockLength, stockProject.ProjectKind);
+        Assert.True(changed.Success);
+        Assert.Equal(ProjectKind.Sheet, changed.Project!.ProjectKind);
+        Assert.Equal("project-kind-001", changed.Project.ProjectId);
+    }
+
+    [Fact]
     public void Phase_three_project_bridge_message_names_follow_the_existing_request_response_pattern()
     {
         var responseTypes = Phase03ProjectBridgeExpectations.ProjectMessageTypes

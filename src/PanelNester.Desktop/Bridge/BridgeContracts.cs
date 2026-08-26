@@ -41,6 +41,7 @@ public static class BridgeMessageTypes
     public const string SaveProjectAs = "save-project-as";
     public const string GetProjectMetadata = "get-project-metadata";
     public const string UpdateProjectMetadata = "update-project-metadata";
+    public const string ChangeProjectKind = "change-project-kind";
     public const string UpdateOptimizationGroups = "update-optimization-groups";
     public const string GetDesktopAppSettings = "get-desktop-app-settings";
     public const string UpdateDesktopAppSettings = "update-desktop-app-settings";
@@ -100,6 +101,10 @@ public sealed record BridgeError(string Code, string Message, string? UserMessag
                 "The project could not be saved. Please try again.",
             "project-update-failed" =>
                 "The project details could not be updated.",
+            "project-kind-change-not-empty" =>
+                "Remove all sheet parts or Required Pieces before changing Project Kind.",
+            "project-kind-invalid" =>
+                "Choose either Sheet Project or Stock-Length Project.",
             "optimization-group-name-required" =>
                 "Enter an Optimization Group name.",
             "optimization-group-name-duplicate" =>
@@ -568,7 +573,10 @@ public sealed record RestoreDefaultMaterialLibraryLocationResponse(
     }
 }
 
-public sealed record NewProjectRequest(ProjectMetadata? Metadata = null, ProjectSettings? Settings = null);
+public sealed record NewProjectRequest(
+    ProjectMetadata? Metadata = null,
+    ProjectSettings? Settings = null,
+    ProjectKind ProjectKind = ProjectKind.Sheet);
 
 public sealed record NewProjectResponse(bool Success, Project? Project, BridgeError? Error, string? Message)
 {
@@ -744,6 +752,21 @@ public sealed record UpdateProjectMetadataResponse(
     {
         var failure = BridgeFailure.Create(code, message, userMessage);
         return new(false, null, null, null, failure.Error, failure.ResponseMessage);
+    }
+}
+
+public sealed record ChangeProjectKindRequest(Project Project, ProjectKind ProjectKind);
+
+public sealed record ChangeProjectKindResponse(
+    bool Success,
+    Project? Project,
+    BridgeError? Error,
+    string? Message)
+{
+    public static ChangeProjectKindResponse Failure(string code, string message, string? userMessage = null)
+    {
+        var failure = BridgeFailure.Create(code, message, userMessage);
+        return new(false, null, failure.Error, failure.ResponseMessage);
     }
 }
 

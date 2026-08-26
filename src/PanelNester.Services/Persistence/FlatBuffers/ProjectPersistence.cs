@@ -6,6 +6,12 @@ using Google.FlatBuffers;
 
 namespace PanelNester.Services.Persistence.FlatBuffers;
 
+public enum ProjectKind : byte
+{
+    Sheet = 0,
+    StockLength = 1
+}
+
 public struct ProjectDocument : IFlatbufferObject
 {
     private Table __p;
@@ -85,13 +91,23 @@ public struct ProjectDocument : IFlatbufferObject
         }
     }
 
-    public static void StartProjectDocument(FlatBufferBuilder builder) => builder.StartTable(6);
+    public ProjectKind ProjectKind
+    {
+        get
+        {
+            var o = __p.__offset(16);
+            return o != 0 ? (ProjectKind)__p.bb.Get(o + __p.bb_pos) : ProjectKind.Sheet;
+        }
+    }
+
+    public static void StartProjectDocument(FlatBufferBuilder builder) => builder.StartTable(7);
     public static void AddVersion(FlatBufferBuilder builder, int version) => builder.AddInt(0, version, 0);
     public static void AddProjectId(FlatBufferBuilder builder, StringOffset projectIdOffset) => builder.AddOffset(1, projectIdOffset.Value, 0);
     public static void AddMetadata(FlatBufferBuilder builder, Offset<ProjectMetadata> metadataOffset) => builder.AddOffset(2, metadataOffset.Value, 0);
     public static void AddSettings(FlatBufferBuilder builder, Offset<ProjectSettings> settingsOffset) => builder.AddOffset(3, settingsOffset.Value, 0);
     public static void AddMaterialSnapshots(FlatBufferBuilder builder, VectorOffset materialSnapshotsOffset) => builder.AddOffset(4, materialSnapshotsOffset.Value, 0);
     public static void AddState(FlatBufferBuilder builder, Offset<ProjectState> stateOffset) => builder.AddOffset(5, stateOffset.Value, 0);
+    public static void AddProjectKind(FlatBufferBuilder builder, ProjectKind projectKind) => builder.AddByte(6, (byte)projectKind, 0);
 
     public static VectorOffset CreateMaterialSnapshotsVector(FlatBufferBuilder builder, Offset<Material>[] data)
     {
