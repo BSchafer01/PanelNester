@@ -78,6 +78,66 @@ public sealed class WorkbookSafetyPreflightSpecs : IDisposable
             progress.Items.Select(item => item.Phase));
     }
 
+    [Fact]
+    public async Task Discovery_honors_cancellation_and_releases_the_Workbook_file()
+    {
+        var workbookPath = CreateWorkbook(worksheetCount: 30);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.CancelAfter(TimeSpan.FromMilliseconds(1));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            new WorkbookDiscoveryService().DiscoverAsync(workbookPath, cancellation.Token));
+
+        AssertWorkbookFileReleased(workbookPath);
+    }
+
+    [Fact]
+    public async Task Import_honors_cancellation_at_the_Worksheet_checkpoint()
+    {
+        var workbookPath = CreateWorkbook();
+        using var cancellation = new CancellationTokenSource();
+        var progress = new RecordingProgress(item =>
+        {
+            if (item.Phase == WorkbookImportPhase.ReadingWorksheet)
+            {
+                cancellation.Cancel();
+            }
+        });
+        var service = new XlsxImportService(DemoMaterialCatalog.All, progress: progress);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            service.ImportAsync(
+                new ImportRequest { FilePath = workbookPath, WorksheetName = "Parts" },
+                cancellation.Token));
+
+        Assert.DoesNotContain(progress.Items, item => item.Phase == WorkbookImportPhase.Validating);
+        AssertWorkbookFileReleased(workbookPath);
+    }
+
+    [Fact]
+    public async Task Import_honors_cancellation_while_reading_rows_and_releases_the_Workbook_file()
+    {
+        var workbookPath = CreateWorkbook(rowCount: 20_000);
+        using var cancellation = new CancellationTokenSource();
+        var progress = new RecordingProgress(item =>
+        {
+            if (item.Phase == WorkbookImportPhase.ReadingWorksheet)
+            {
+                cancellation.CancelAfter(TimeSpan.FromMilliseconds(1));
+            }
+        });
+        var service = new XlsxImportService(DemoMaterialCatalog.All, progress: progress);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            service.ImportAsync(
+                new ImportRequest { FilePath = workbookPath, WorksheetName = "Parts" },
+                cancellation.Token));
+
+        Assert.Contains(progress.Items, item => item.Phase == WorkbookImportPhase.ReadingWorksheet);
+        Assert.DoesNotContain(progress.Items, item => item.Phase == WorkbookImportPhase.Validating);
+        AssertWorkbookFileReleased(workbookPath);
+    }
+
     [Theory]
     [InlineData("expanded-size")]
     [InlineData("largest-entry")]
@@ -133,24 +193,41 @@ public sealed class WorkbookSafetyPreflightSpecs : IDisposable
             warning.Message.Contains("memory-intensive", StringComparison.OrdinalIgnoreCase));
     }
 
-    private string CreateWorkbook()
+    private string CreateWorkbook(int rowCount = 1, int worksheetCount = 1)
     {
         Directory.CreateDirectory(_workspacePath);
         var path = Path.Combine(_workspacePath, "parts.xlsx");
         using var workbook = new XLWorkbook();
-        var worksheet = workbook.AddWorksheet("Parts");
-        worksheet.Cell("A1").Value = "Id";
-        worksheet.Cell("B1").Value = "Length";
-        worksheet.Cell("C1").Value = "Width";
-        worksheet.Cell("D1").Value = "Quantity";
-        worksheet.Cell("E1").Value = "Material";
-        worksheet.Cell("A2").Value = "P-001";
-        worksheet.Cell("B2").Value = 24;
-        worksheet.Cell("C2").Value = 12;
-        worksheet.Cell("D2").Value = 1;
-        worksheet.Cell("E2").Value = "Demo Material";
+        for (var worksheetIndex = 1; worksheetIndex <= worksheetCount; worksheetIndex++)
+        {
+            var worksheet = workbook.AddWorksheet(worksheetIndex == 1 ? "Parts" : $"Parts {worksheetIndex}");
+            worksheet.Cell("A1").Value = "Id";
+            worksheet.Cell("B1").Value = "Length";
+            worksheet.Cell("C1").Value = "Width";
+            worksheet.Cell("D1").Value = "Quantity";
+            worksheet.Cell("E1").Value = "Material";
+            for (var rowIndex = 0; rowIndex < rowCount; rowIndex++)
+            {
+                var rowNumber = rowIndex + 2;
+                worksheet.Cell(rowNumber, 1).Value = $"P-{rowIndex + 1:00000}";
+                worksheet.Cell(rowNumber, 2).Value = 24;
+                worksheet.Cell(rowNumber, 3).Value = 12;
+                worksheet.Cell(rowNumber, 4).Value = 1;
+                worksheet.Cell(rowNumber, 5).Value = "Demo Material";
+            }
+        }
         workbook.SaveAs(path);
         return path;
+    }
+
+    private static void AssertWorkbookFileReleased(string workbookPath)
+    {
+        using var stream = new FileStream(
+            workbookPath,
+            FileMode.Open,
+            FileAccess.ReadWrite,
+            FileShare.None);
+        Assert.True(stream.CanRead);
     }
 
     public void Dispose()

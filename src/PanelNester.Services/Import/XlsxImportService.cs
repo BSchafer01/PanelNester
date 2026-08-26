@@ -162,12 +162,15 @@ public sealed class XlsxImportService : IImportService, IWorkbookImportProgressS
                 return PartRowValidator.CreateResponse([], errors, warnings);
             }
 
-            var visibleWorksheets = workbook.Worksheets.Count(sheet =>
-                sheet.Visibility == XLWorksheetVisibility.Visible && sheet.RangeUsed() is not null);
+            var visibleWorksheets = workbook.Worksheets.Count(candidateWorksheet =>
+                candidateWorksheet.Visibility == XLWorksheetVisibility.Visible &&
+                candidateWorksheet.RangeUsed() is not null);
             var visibleWorksheetNumber = workbook.Worksheets
-                .Where(sheet => sheet.Visibility == XLWorksheetVisibility.Visible && sheet.RangeUsed() is not null)
-                .OrderBy(sheet => sheet.Position)
-                .TakeWhile(sheet => sheet.Position != worksheet.Position)
+                .Where(candidateWorksheet =>
+                    candidateWorksheet.Visibility == XLWorksheetVisibility.Visible &&
+                    candidateWorksheet.RangeUsed() is not null)
+                .OrderBy(candidateWorksheet => candidateWorksheet.Position)
+                .TakeWhile(candidateWorksheet => candidateWorksheet.Position != worksheet.Position)
                 .Count() + 1;
             progress?.Report(new WorkbookImportProgress
             {

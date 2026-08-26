@@ -1067,6 +1067,66 @@ public sealed class ImportBridgeSpecs : IDisposable
         Assert.Equal(OptimizationResultStatus.Valid, manualGroup.ResultStatus);
     }
 
+    [Theory]
+    [InlineData(WorkbookImportPhase.CombiningParts)]
+    [InlineData(WorkbookImportPhase.Finalizing)]
+    public void Workbook_finalization_honors_phase_cancellation_without_mutating_the_project(
+        WorkbookImportPhase cancellationPhase)
+    {
+        var originalPart = new PartRow { RowId = "original", ImportedId = "ORIGINAL", IsManual = true };
+        var project = new Project
+        {
+            ProjectId = "phase-cancellation-project",
+            State = new ProjectState
+            {
+                Parts = [originalPart],
+                OptimizationGroups =
+                [
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "manual-group",
+                        Name = "Manual",
+                        Parts = [originalPart]
+                    }
+                ]
+            }
+        };
+        using var cancellation = new CancellationTokenSource();
+
+        Assert.ThrowsAny<OperationCanceledException>(() =>
+            ProjectImportFinalizer.FinalizeWorkbook(
+                project,
+                new ImportSourceMetadata { ImportSourcePath = "fixture.xlsx" },
+                [
+                    new FinalizedWorksheetImport(
+                        new ImportWorksheetSelection
+                        {
+                            WorksheetName = "Parts",
+                            OriginalPosition = 1,
+                            OptimizationGroupId = "import-group",
+                            OptimizationGroupName = "Imported"
+                        },
+                        new ImportOptions(),
+                        new ImportResponse
+                        {
+                            Success = true,
+                            Parts = [new PartRow { RowId = "imported", ImportedId = "IMPORTED" }]
+                        })
+                ],
+                reportProgress: (phase, _) =>
+                {
+                    if (phase == cancellationPhase)
+                    {
+                        cancellation.Cancel();
+                    }
+                },
+                cancellationToken: cancellation.Token));
+
+        Assert.Same(originalPart, Assert.Single(project.State.Parts));
+        Assert.Same(originalPart, Assert.Single(project.State.OptimizationGroups).Parts.Single());
+        Assert.Null(project.State.ImportSource);
+    }
+
     [Fact]
     public void Workbook_finalization_requires_explicit_confirmation_before_replacing_an_Import_Source()
     {
