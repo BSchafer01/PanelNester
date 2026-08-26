@@ -407,7 +407,7 @@ public sealed class ProjectPersistenceSpecs : IDisposable
 
         var restored = await serializer.LoadAsync(filePath);
 
-        Assert.Equal(5, Project.CurrentVersion);
+        Assert.Equal(6, Project.CurrentVersion);
         Assert.Equal(Project.CurrentVersion, restored.Version);
         var group = Assert.Single(restored.State.OptimizationGroups);
         Assert.Equal("project-phase3-001", group.OptimizationGroupId);
@@ -760,7 +760,8 @@ public sealed class ProjectPersistenceSpecs : IDisposable
     [Theory]
     [InlineData(false, true, 1, "project-not-found")]
     [InlineData(true, false, 1, "project-corrupt")]
-    [InlineData(true, true, 6, "project-unsupported-version")]
+    [InlineData(true, true, 7, "project-unsupported-version")]
+    [InlineData(true, true, 6, null)]
     [InlineData(true, true, 5, null)]
     [InlineData(true, true, 4, null)]
     [InlineData(true, true, 3, null)]

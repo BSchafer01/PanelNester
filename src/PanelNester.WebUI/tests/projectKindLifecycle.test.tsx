@@ -67,7 +67,16 @@ describe('Project Kind lifecycle', () => {
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Materials' })).not.toBeInTheDocument();
     });
-    expect(screen.getByRole('spinbutton', { name: /Kerf Allowance/ })).toHaveValue(0);
+    const sawKerf = screen.getByRole('textbox', { name: /Saw Kerf/ });
+    expect(sawKerf).toHaveValue('0');
+    await user.clear(sawKerf);
+    await user.type(sawKerf, '1/16');
+    await user.tab();
+    expect(sawKerf).toHaveValue('0.0625');
+    await user.click(screen.getByRole('button', { name: 'Import' }));
+    expect(screen.getByRole('heading', { name: 'Required Pieces' })).toBeInTheDocument();
+    expect(screen.queryByText(/Material Resolution/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Project' }));
 
     const companyName = screen.getByRole('textbox', { name: /^Company Name/ });
     await user.clear(companyName);
@@ -196,6 +205,9 @@ describe('Project Kind lifecycle', () => {
     );
 
     expect(screen.queryByRole('tab', { name: 'Stiffeners' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Nesting' })).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /Saw Kerf/ })).toHaveValue('0');
+    expect(screen.queryByRole('spinbutton', { name: /Kerf Allowance/ })).not.toBeInTheDocument();
 
     rerender(
       <ResultsPage

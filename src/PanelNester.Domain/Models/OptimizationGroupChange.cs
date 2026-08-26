@@ -8,6 +8,8 @@ public sealed record OptimizationGroupChange
 
     public string? Name { get; init; }
 
+    public string? StockLength { get; init; }
+
     public IReadOnlyList<string> OrderedOptimizationGroupIds { get; init; } = Array.Empty<string>();
 
     public string? PartRowId { get; init; }
@@ -23,5 +25,6 @@ public enum OptimizationGroupChangeType
     Rename,
     Reorder,
     MovePart,
+    UpdateStockLength,
     Delete
 }

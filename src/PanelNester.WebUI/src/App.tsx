@@ -9,6 +9,7 @@ import {
   type AppRoute,
 } from './projectKind';
 import { ImportPage } from './pages/ImportPage';
+import { RequiredPiecesPage } from './pages/RequiredPiecesPage';
 import {
   collectWorkbookNewMaterials,
   createWorkbookWorksheetDrafts,
@@ -35,6 +36,7 @@ import {
   type BridgeCapability,
   type HostBridgeSnapshot,
   type ImportFileResponse,
+  type InchDisplayFormat,
   type ImportFieldName,
   optionalImportFieldNames,
   requiredImportFieldNames,
@@ -67,6 +69,7 @@ import {
   type ProjectRecord,
   type ProjectSettings,
   type ReportSettings,
+  type RequiredPieceChange,
   type StiffenerTakeoffReportData,
   type StiffenerTakeoffSettings,
   type WorkbookImportProgress,
@@ -105,7 +108,7 @@ declare global {
 const importFileDialogTimeoutMs = 300000;
 const importBridgeTimeoutMs = 120000;
 const nestingBridgeTimeoutMs = 300000;
-const currentProjectVersion = 5;
+const currentProjectVersion = 6;
 
 interface AppState {
   activeRoute: AppRoute;
@@ -414,6 +417,7 @@ function createProjectSettings(
 ): ProjectSettings {
   return {
     kerfWidth: projectKind === 'stockLength' ? 0 : demoKerfWidth,
+    inchDisplayFormat: 'decimal',
     reportSettings: createDefaultReportSettings(metadata, companyNameDefault),
     stiffenerTakeoff: { ...defaultStiffenerTakeoffSettings },
   };
@@ -471,6 +475,7 @@ function normalizeProjectSettings(
       typeof settings?.kerfWidth === 'number' && settings.kerfWidth >= 0
         ? settings.kerfWidth
         : projectKind === 'stockLength' ? 0 : demoKerfWidth,
+    inchDisplayFormat: settings?.inchDisplayFormat ?? 'decimal',
     reportSettings: normalizeReportSettings(
       settings?.reportSettings,
       metadata,
@@ -1249,6 +1254,9 @@ function buildOptimizationGroups(
       order: existingGroup?.order ?? 0,
       origin: existingGroup?.origin ?? 'project',
       parts: state.importResponse.parts,
+      stockLength: existingGroup?.stockLength ?? null,
+      requiredPieces: existingGroup?.requiredPieces ?? [],
+      stockGroups: existingGroup?.stockGroups ?? [],
       lastNestingResult,
       lastBatchNestingResult,
       resultStatus:
@@ -4446,6 +4454,37 @@ export default function App() {
       },
     );
 
+  const updateRequiredPieces = async (change: RequiredPieceChange): Promise<void> => {
+    if (!hasCapability(bridgeMessageTypes.updateRequiredPieces)) {
+      throw new Error('Required Piece management is not available from the connected desktop host.');
+    }
+
+    dispatch({ type: 'project-operation-started', message: 'Updating Required Pieces…' });
+    try {
+      const response = await hostBridge.updateRequiredPieces({
+        project: buildProjectRecord(state),
+        change,
+      });
+      if (!response.success || !response.project) {
+        throw new Error(getBridgeErrorMessage(
+          response.error,
+          response.message ?? 'Required Pieces could not be updated.',
+        ));
+      }
+
+      dispatch({
+        type: 'optimization-groups-updated',
+        project: response.project,
+        activeOptimizationGroupId: change.optimizationGroupId ?? state.activeOptimizationGroupId,
+        message: response.message ?? 'Updated Required Pieces.',
+      });
+    } catch (error) {
+      const message = getErrorMessage(error, 'Required Pieces could not be updated.');
+      dispatch({ type: 'project-operation-failed', message });
+      throw new Error(message);
+    }
+  };
+
   const exportReport = async (overrides?: ReportExportOverrides) => {
     const reportSettingsOverride = overrides?.reportSettings;
     const hasResult =
@@ -4803,7 +4842,40 @@ export default function App() {
   let content: React.ReactNode;
   switch (state.activeRoute) {
     case 'import':
-      content = (
+      content = state.projectKind === 'stockLength' ? (
+        <RequiredPiecesPage
+          busy={state.projectBusy}
+          inchDisplayFormat={state.projectSettings.inchDisplayFormat}
+          message={state.projectMessage}
+          onCreateOptimizationGroup={(name, stockLength) =>
+            updateOptimizationGroups({ type: 'create', name, stockLength })
+          }
+          onCreateRequiredPiece={updateRequiredPieces}
+          onDeleteRequiredPiece={(optimizationGroupId, requiredPieceId) =>
+            updateRequiredPieces({
+              type: 'delete',
+              optimizationGroupId,
+              requiredPieceId,
+            })
+          }
+          onInchDisplayFormatChange={(inchDisplayFormat: InchDisplayFormat) =>
+            dispatch({
+              type: 'project-settings-changed',
+              settings: { ...state.projectSettings, inchDisplayFormat },
+              message: 'Length display changed. Save the project to persist this preference.',
+            })
+          }
+          onUpdateRequiredPiece={updateRequiredPieces}
+          onUpdateStockLength={(optimizationGroupId, stockLength) =>
+            updateOptimizationGroups({
+              type: 'updateStockLength',
+              optimizationGroupId,
+              stockLength,
+            })
+          }
+          optimizationGroups={state.optimizationGroups}
+        />
+      ) : (
         <ImportPage
           bridge={state.bridge}
           materials={state.materials}
@@ -5004,7 +5076,9 @@ export default function App() {
           projectKind={state.projectKind}
           canChangeProjectKind={
             state.importResponse.parts.length === 0 &&
-            state.optimizationGroups.every((group) => group.parts.length === 0)
+            state.optimizationGroups.every((group) =>
+              group.parts.length === 0 && group.requiredPieces.length === 0
+            )
           }
           metadata={state.projectMetadata}
           projectBusy={state.projectBusy}

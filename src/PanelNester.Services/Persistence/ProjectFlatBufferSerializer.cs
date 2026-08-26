@@ -162,6 +162,7 @@ internal sealed class ProjectFlatBufferSerializer
         Fb.ProjectSettings.AddKerfWidth(builder, (double)settings.KerfWidth);
         Fb.ProjectSettings.AddReportSettings(builder, reportSettings);
         Fb.ProjectSettings.AddStiffenerTakeoff(builder, stiffenerTakeoff);
+        Fb.ProjectSettings.AddInchDisplayFormat(builder, (Fb.InchDisplayFormat)settings.InchDisplayFormat);
         return Fb.ProjectSettings.EndProjectSettings(builder);
     }
 
@@ -603,6 +604,7 @@ internal sealed class ProjectFlatBufferSerializer
         return new ProjectSettings
         {
             KerfWidth = kerfWidth > 0 ? (decimal)kerfWidth : defaultKerfWidth,
+            InchDisplayFormat = (InchDisplayFormat)value.InchDisplayFormat,
             ReportSettings = reportSettings,
             StiffenerTakeoff = stiffenerTakeoff
         };

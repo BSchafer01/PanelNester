@@ -50,6 +50,93 @@ public sealed class ProjectBridgeSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Manual_required_piece_workflow_round_trips_through_the_desktop_bridge()
+    {
+        var projectPath = Path.Combine(_workspacePath, "manual-stock.pnest");
+        var repository = new JsonMaterialRepository(Path.Combine(_workspacePath, "materials.json"));
+        var materialService = new MaterialService(repository);
+        var ids = new Queue<string>(["stock-project", "frames", "piece-1"]);
+        var dispatcher = DesktopBridgeRegistration.CreateDefault(
+            new RecordingFileDialogService(),
+            materialService,
+            new ProjectService(materialService, idGenerator: ids.Dequeue),
+            new CsvImportService(repository),
+            new PartEditorService(repository),
+            new ShelfNestingService(),
+            () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true));
+
+        var created = await DispatchAsync<NewProjectResponse>(
+            dispatcher,
+            BridgeMessageTypes.NewProject,
+            new NewProjectRequest(ProjectKind: ProjectKind.StockLength));
+        var grouped = await DispatchAsync<UpdateOptimizationGroupsResponse>(
+            dispatcher,
+            BridgeMessageTypes.UpdateOptimizationGroups,
+            new UpdateOptimizationGroupsRequest(created.Project!, new OptimizationGroupChange
+            {
+                Type = OptimizationGroupChangeType.Create,
+                Name = "Frames",
+                StockLength = "240"
+            }));
+        var added = await DispatchAsync<UpdateRequiredPiecesResponse>(
+            dispatcher,
+            BridgeMessageTypes.UpdateRequiredPieces,
+            new UpdateRequiredPiecesRequest(grouped.Project!, new RequiredPieceChange
+            {
+                Type = RequiredPieceChangeType.Create,
+                OptimizationGroupId = "frames",
+                Quantity = "2",
+                Length = "18 7/16",
+                ProfileNumber = "H-120",
+                Finish = "Clear"
+            }));
+
+        Assert.True(added.Success);
+        var group = Assert.Single(added.Project!.State.OptimizationGroups);
+        Assert.Equal(240m, group.StockLength);
+        Assert.Equal(18.4375m, Assert.Single(group.RequiredPieces).Length);
+        Assert.Empty(added.Project.MaterialSnapshots);
+
+        var edited = await DispatchAsync<UpdateRequiredPiecesResponse>(
+            dispatcher,
+            BridgeMessageTypes.UpdateRequiredPieces,
+            new UpdateRequiredPiecesRequest(added.Project, new RequiredPieceChange
+            {
+                Type = RequiredPieceChangeType.Update,
+                OptimizationGroupId = "frames",
+                RequiredPieceId = "piece-1",
+                Quantity = "3",
+                Length = "18 1/2",
+                ProfileNumber = "H-120",
+                Finish = "Clear"
+            }));
+        var saved = await DispatchAsync<SaveProjectResponse>(
+            dispatcher,
+            BridgeMessageTypes.SaveProject,
+            new SaveProjectRequest(edited.Project!, projectPath));
+        var reopened = await DispatchAsync<OpenProjectResponse>(
+            dispatcher,
+            BridgeMessageTypes.OpenProject,
+            new OpenProjectRequest(projectPath));
+        var deleted = await DispatchAsync<UpdateRequiredPiecesResponse>(
+            dispatcher,
+            BridgeMessageTypes.UpdateRequiredPieces,
+            new UpdateRequiredPiecesRequest(reopened.Project!, new RequiredPieceChange
+            {
+                Type = RequiredPieceChangeType.Delete,
+                OptimizationGroupId = "frames",
+                RequiredPieceId = "piece-1"
+            }));
+
+        Assert.True(edited.Success);
+        Assert.True(saved.Success);
+        Assert.True(reopened.Success);
+        Assert.Equal(18.5m, Assert.Single(reopened.Project!.State.OptimizationGroups[0].RequiredPieces).Length);
+        Assert.True(deleted.Success);
+        Assert.Empty(deleted.Project!.State.OptimizationGroups[0].RequiredPieces);
+    }
+
+    [Fact]
     public void Phase_three_project_bridge_message_names_follow_the_existing_request_response_pattern()
     {
         var responseTypes = Phase03ProjectBridgeExpectations.ProjectMessageTypes

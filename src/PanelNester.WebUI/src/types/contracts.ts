@@ -40,6 +40,7 @@ export const bridgeMessageTypes = {
   updateProjectMetadata: 'update-project-metadata',
   changeProjectKind: 'change-project-kind',
   updateOptimizationGroups: 'update-optimization-groups',
+  updateRequiredPieces: 'update-required-pieces',
   getDesktopAppSettings: 'get-desktop-app-settings',
   updateDesktopAppSettings: 'update-desktop-app-settings',
 } as const;
@@ -590,9 +591,16 @@ export interface DesktopAppSettings {
 
 export interface ProjectSettings {
   kerfWidth: number;
+  inchDisplayFormat: InchDisplayFormat;
   reportSettings: ReportSettings;
   stiffenerTakeoff: StiffenerTakeoffSettings;
 }
+
+export type InchDisplayFormat =
+  | 'decimal'
+  | 'fractional16'
+  | 'fractional32'
+  | 'fractional64';
 
 export interface ProjectMaterialSnapshot extends Material {}
 
@@ -605,6 +613,9 @@ export interface OptimizationGroup {
   order: number;
   origin?: OptimizationGroupOrigin;
   parts: PartRow[];
+  stockLength?: number | null;
+  requiredPieces: RequiredPiece[];
+  stockGroups: StockGroup[];
   lastNestingResult?: NestResponse | null;
   lastBatchNestingResult?: BatchNestResponse | null;
   resultStatus: OptimizationResultStatus;
@@ -615,16 +626,50 @@ export type OptimizationGroupChangeType =
   | 'rename'
   | 'reorder'
   | 'movePart'
+  | 'updateStockLength'
   | 'delete';
 
 export interface OptimizationGroupChange {
   type: OptimizationGroupChangeType;
   optimizationGroupId?: string | null;
   name?: string | null;
+  stockLength?: string | null;
   orderedOptimizationGroupIds?: string[];
   partRowId?: string | null;
   targetOptimizationGroupId?: string | null;
   removeOwnedContent?: boolean;
+}
+
+export interface RequiredPiece {
+  requiredPieceId: string;
+  quantity: number;
+  length: number;
+  profileNumber: string;
+  partName?: string | null;
+  finish?: string | null;
+  partNumber?: string | null;
+  isManual: boolean;
+  sourceReferences: SourceReference[];
+}
+
+export interface StockGroup {
+  profileNumber: string;
+  finish?: string | null;
+  requiredPieceIds: string[];
+}
+
+export type RequiredPieceChangeType = 'create' | 'update' | 'delete';
+
+export interface RequiredPieceChange {
+  type: RequiredPieceChangeType;
+  optimizationGroupId?: string | null;
+  requiredPieceId?: string | null;
+  quantity?: string;
+  length?: string;
+  profileNumber?: string;
+  partName?: string | null;
+  finish?: string | null;
+  partNumber?: string | null;
 }
 
 export interface ProjectStateRecord {
@@ -1103,6 +1148,18 @@ export interface UpdateOptimizationGroupsResponse {
   message?: string;
 }
 
+export interface UpdateRequiredPiecesRequest {
+  project: ProjectRecord;
+  change: RequiredPieceChange;
+}
+
+export interface UpdateRequiredPiecesResponse {
+  success: boolean;
+  project?: ProjectRecord | null;
+  error?: BridgeError | null;
+  message?: string;
+}
+
 export interface StiffenerTakeoffLengthSummary {
   label: string;
   lengthInches: number;
@@ -1280,6 +1337,7 @@ export const requestedBridgeCapabilities: BridgeCapability[] = [
   bridgeMessageTypes.getProjectMetadata,
   bridgeMessageTypes.updateProjectMetadata,
   bridgeMessageTypes.updateOptimizationGroups,
+  bridgeMessageTypes.updateRequiredPieces,
   bridgeMessageTypes.getDesktopAppSettings,
   bridgeMessageTypes.updateDesktopAppSettings,
 ];

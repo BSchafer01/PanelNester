@@ -67,6 +67,8 @@ import {
   type UpdateProjectMetadataRequest,
   type UpdateOptimizationGroupsRequest,
   type UpdateOptimizationGroupsResponse,
+  type UpdateRequiredPiecesRequest,
+  type UpdateRequiredPiecesResponse,
   type UpdateDesktopAppSettingsRequest,
   type UpdateDesktopAppSettingsResponse,
   type UpdateReportSettingsRequest,
@@ -502,6 +504,15 @@ class HostBridgeClient {
   ): Promise<UpdateOptimizationGroupsResponse> {
     return this.invoke<UpdateOptimizationGroupsResponse>(
       bridgeMessageTypes.updateOptimizationGroups,
+      request,
+    );
+  }
+
+  updateRequiredPieces(
+    request: UpdateRequiredPiecesRequest,
+  ): Promise<UpdateRequiredPiecesResponse> {
+    return this.invoke<UpdateRequiredPiecesResponse>(
+      bridgeMessageTypes.updateRequiredPieces,
       request,
     );
   }

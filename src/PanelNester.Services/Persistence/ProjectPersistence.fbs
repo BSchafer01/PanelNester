@@ -5,6 +5,13 @@ enum ProjectKind : byte {
   StockLength = 1
 }
 
+enum InchDisplayFormat : byte {
+  Decimal = 0,
+  Fractional16 = 1,
+  Fractional32 = 2,
+  Fractional64 = 3
+}
+
 table ProjectDocument {
   version:int;
   project_id:string;
@@ -34,6 +41,7 @@ table ProjectSettings {
   kerf_width:double;
   report_settings:ReportSettings;
   stiffener_takeoff:StiffenerTakeoffSettings;
+  inch_display_format:InchDisplayFormat = Decimal;
 }
 
 table StiffenerTakeoffSettings {

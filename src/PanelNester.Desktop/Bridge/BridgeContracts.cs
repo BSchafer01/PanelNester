@@ -43,6 +43,7 @@ public static class BridgeMessageTypes
     public const string UpdateProjectMetadata = "update-project-metadata";
     public const string ChangeProjectKind = "change-project-kind";
     public const string UpdateOptimizationGroups = "update-optimization-groups";
+    public const string UpdateRequiredPieces = "update-required-pieces";
     public const string GetDesktopAppSettings = "get-desktop-app-settings";
     public const string UpdateDesktopAppSettings = "update-desktop-app-settings";
     public const string UpdateReportSettings = "update-report-settings";
@@ -117,6 +118,16 @@ public sealed record BridgeError(string Code, string Message, string? UserMessag
                 "A project must keep at least one Optimization Group.",
             "optimization-group-part-not-manual" =>
                 "Imported parts move with their Worksheet. Move only manual parts individually.",
+            "stock-length-required" or "stock-length-invalid" =>
+                "Enter a positive Stock Length in inches.",
+            "required-piece-quantity-invalid" =>
+                "Quantity must be a positive whole number.",
+            "required-piece-length-invalid" =>
+                "Length must be a positive decimal, fraction, or mixed-number inch measurement.",
+            "required-piece-profile-required" =>
+                "Profile Number is required.",
+            "required-piece-not-found" =>
+                "The Required Piece could not be found.",
             "report-settings-update-failed" =>
                 "The report settings could not be updated.",
             "desktop-settings-update-failed" =>
@@ -779,6 +790,21 @@ public sealed record UpdateOptimizationGroupsResponse(
     string? Message)
 {
     public static UpdateOptimizationGroupsResponse Failure(string code, string message, string? userMessage = null)
+    {
+        var failure = BridgeFailure.Create(code, message, userMessage);
+        return new(false, null, failure.Error, failure.ResponseMessage);
+    }
+}
+
+public sealed record UpdateRequiredPiecesRequest(Project Project, RequiredPieceChange Change);
+
+public sealed record UpdateRequiredPiecesResponse(
+    bool Success,
+    Project? Project,
+    BridgeError? Error,
+    string? Message)
+{
+    public static UpdateRequiredPiecesResponse Failure(string code, string message, string? userMessage = null)
     {
         var failure = BridgeFailure.Create(code, message, userMessage);
         return new(false, null, failure.Error, failure.ResponseMessage);

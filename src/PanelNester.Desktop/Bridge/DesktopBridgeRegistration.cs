@@ -971,6 +971,25 @@ public static class DesktopBridgeRegistration
                         GetFirstErrorMessage(result.Errors, "Optimization Groups could not be updated."));
             });
 
+        dispatcher.Register<UpdateRequiredPiecesRequest>(
+            BridgeMessageTypes.UpdateRequiredPieces,
+            async (request, cancellationToken) =>
+            {
+                var result = await projectService
+                    .UpdateRequiredPiecesAsync(request.Project, request.Change, cancellationToken)
+                    .ConfigureAwait(false);
+
+                return result.Success && result.Project is not null
+                    ? new UpdateRequiredPiecesResponse(
+                        true,
+                        result.Project,
+                        null,
+                        "Updated Required Pieces.")
+                    : UpdateRequiredPiecesResponse.Failure(
+                        GetFirstErrorCode(result.Errors, "required-piece-change-invalid"),
+                        GetFirstErrorMessage(result.Errors, "Required Pieces could not be updated."));
+            });
+
         if (batchNestingService is not null &&
             reportDataService is not null &&
             pdfReportExporter is not null)

@@ -12,6 +12,14 @@ public enum ProjectKind : byte
     StockLength = 1
 }
 
+public enum InchDisplayFormat : byte
+{
+    Decimal = 0,
+    Fractional16 = 1,
+    Fractional32 = 2,
+    Fractional64 = 3
+}
+
 public struct ProjectDocument : IFlatbufferObject
 {
     private Table __p;
@@ -310,10 +318,20 @@ public struct ProjectSettings : IFlatbufferObject
         }
     }
 
-    public static void StartProjectSettings(FlatBufferBuilder builder) => builder.StartTable(3);
+    public InchDisplayFormat InchDisplayFormat
+    {
+        get
+        {
+            var o = __p.__offset(10);
+            return o != 0 ? (InchDisplayFormat)__p.bb.Get(o + __p.bb_pos) : InchDisplayFormat.Decimal;
+        }
+    }
+
+    public static void StartProjectSettings(FlatBufferBuilder builder) => builder.StartTable(4);
     public static void AddKerfWidth(FlatBufferBuilder builder, double kerfWidth) => builder.AddDouble(0, kerfWidth, 0);
     public static void AddReportSettings(FlatBufferBuilder builder, Offset<ReportSettings> reportSettingsOffset) => builder.AddOffset(1, reportSettingsOffset.Value, 0);
     public static void AddStiffenerTakeoff(FlatBufferBuilder builder, Offset<StiffenerTakeoffSettings> stiffenerTakeoffOffset) => builder.AddOffset(2, stiffenerTakeoffOffset.Value, 0);
+    public static void AddInchDisplayFormat(FlatBufferBuilder builder, InchDisplayFormat inchDisplayFormat) => builder.AddByte(3, (byte)inchDisplayFormat, 0);
 
     public static Offset<ProjectSettings> EndProjectSettings(FlatBufferBuilder builder)
     {

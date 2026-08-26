@@ -12,6 +12,12 @@ public sealed record OptimizationGroup
 
     public IReadOnlyList<PartRow> Parts { get; init; } = Array.Empty<PartRow>();
 
+    public decimal? StockLength { get; init; }
+
+    public IReadOnlyList<RequiredPiece> RequiredPieces { get; init; } = Array.Empty<RequiredPiece>();
+
+    public IReadOnlyList<StockGroup> StockGroups { get; init; } = Array.Empty<StockGroup>();
+
     public NestResponse? LastNestingResult { get; init; }
 
     public BatchNestResponse? LastBatchNestingResult { get; init; }

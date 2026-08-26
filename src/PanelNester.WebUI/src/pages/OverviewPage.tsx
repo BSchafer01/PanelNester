@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { StatusPill } from '../components/StatusPill';
 import { ProjectKindControl } from '../components/ProjectKindControls';
 import { projectKindSupportsStiffeners } from '../projectKind';
@@ -170,6 +170,85 @@ function NumberField({
           step={step}
           type="number"
           value={value}
+        />
+        <strong>{unit}</strong>
+      </div>
+    </SectionField>
+  );
+}
+
+function parseInches(value: string): number | null {
+  const normalized = value.trim();
+  const mixed = normalized.match(/^([+-]?\d+)\s+(\d+)\/(\d+)$/);
+  const fraction = normalized.match(/^([+-]?\d+)\/(\d+)$/);
+  let result: number;
+
+  if (mixed) {
+    const whole = Number(mixed[1]);
+    const numerator = Number(mixed[2]);
+    const denominator = Number(mixed[3]);
+    if (denominator === 0) return null;
+    result = whole < 0
+      ? whole - numerator / denominator
+      : whole + numerator / denominator;
+  } else if (fraction) {
+    const numerator = Number(fraction[1]);
+    const denominator = Number(fraction[2]);
+    if (denominator === 0) return null;
+    result = numerator / denominator;
+  } else if (/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(normalized)) {
+    result = Number(normalized);
+  } else {
+    return null;
+  }
+
+  return Number.isFinite(result) ? result : null;
+}
+
+function InchField({
+  label,
+  description,
+  value,
+  unit,
+  min,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  description?: string;
+  value: number;
+  unit: string;
+  min: number;
+  disabled: boolean;
+  onChange: (value: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+
+  useEffect(() => setDraft(String(value)), [value]);
+
+  const commit = () => {
+    const parsed = parseInches(draft);
+    if (parsed !== null && parsed >= min) {
+      onChange(parsed);
+      setDraft(String(parsed));
+    } else {
+      setDraft(String(value));
+    }
+  };
+
+  return (
+    <SectionField description={description} label={label}>
+      <div className="project-inline-input">
+        <input
+          disabled={disabled}
+          inputMode="decimal"
+          onBlur={commit}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') event.currentTarget.blur();
+          }}
+          type="text"
+          value={draft}
         />
         <strong>{unit}</strong>
       </div>
@@ -397,7 +476,7 @@ export function OverviewPage({
 
   const algorithmButtons: TabButton[] = [
     { key: 'general', label: 'General' },
-    { key: 'nesting', label: 'Nesting' },
+    ...(projectKind === 'sheet' ? [{ key: 'nesting', label: 'Nesting' }] : []),
     ...(projectKindSupportsStiffeners(projectKind)
       ? [{ key: 'stiffeners', label: 'Stiffeners' }]
       : []),
@@ -405,7 +484,7 @@ export function OverviewPage({
 
   const reportButtons: TabButton[] = [
     { key: 'general', label: 'General' },
-    { key: 'nesting', label: 'Nesting' },
+    ...(projectKind === 'sheet' ? [{ key: 'nesting', label: 'Nesting' }] : []),
     ...(projectKindSupportsStiffeners(projectKind)
       ? [{ key: 'stiffeners', label: 'Stiffeners' }]
       : []),
@@ -575,7 +654,17 @@ export function OverviewPage({
           <div className="project-tab-panel">
             {algorithmTab === 'general' ? (
               <div className="project-tab-form">
-                <NumberField
+                {projectKind === 'stockLength' ? <InchField
+                  description={projectKind === 'stockLength'
+                    ? 'Saw blade width consumed between adjacent Required Pieces'
+                    : 'Tool diameter offset compensation'}
+                  disabled={projectBusy}
+                  label={projectKind === 'stockLength' ? 'Saw Kerf' : 'Kerf Allowance'}
+                  min={0}
+                  onChange={onKerfWidthChange}
+                  unit="IN"
+                  value={kerfWidth}
+                /> : <NumberField
                   description="Tool diameter offset compensation"
                   disabled={projectBusy}
                   label="Kerf Allowance"
@@ -584,7 +673,7 @@ export function OverviewPage({
                   step={0.0625}
                   unit="IN"
                   value={kerfWidth}
-                />
+                />}
               </div>
             ) : null}
 

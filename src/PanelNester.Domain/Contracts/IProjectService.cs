@@ -34,4 +34,9 @@ public interface IProjectService
         Project project,
         OptimizationGroupChange change,
         CancellationToken cancellationToken = default);
+
+    Task<ProjectOperationResult> UpdateRequiredPiecesAsync(
+        Project project,
+        RequiredPieceChange change,
+        CancellationToken cancellationToken = default);
 }

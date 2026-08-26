@@ -1,5 +1,6 @@
 using PanelNester.Domain.Contracts;
 using PanelNester.Domain.Models;
+using System.Globalization;
 
 namespace PanelNester.Services.Projects;
 
@@ -78,7 +79,9 @@ public sealed class ProjectService : IProjectService
             var normalized = NormalizeProject(project);
             var savedProject = normalized with
             {
-                MaterialSnapshots = await CaptureMaterialSnapshotsAsync(normalized, cancellationToken).ConfigureAwait(false)
+                MaterialSnapshots = ExcludesMaterialSnapshots(normalized.ProjectKind)
+                    ? Array.Empty<Material>()
+                    : await CaptureMaterialSnapshotsAsync(normalized, cancellationToken).ConfigureAwait(false)
             };
 
             await _serializer.SaveAsync(savedProject, filePath, cancellationToken).ConfigureAwait(false);
@@ -133,7 +136,8 @@ public sealed class ProjectService : IProjectService
         }
 
         if (normalized.State.Parts.Count > 0 ||
-            normalized.State.OptimizationGroups.Any(group => group.Parts.Count > 0))
+            normalized.State.OptimizationGroups.Any(group =>
+                group.Parts.Count > 0 || group.RequiredPieces.Count > 0))
         {
             return Task.FromResult(Failure(
                 "project-kind-change-not-empty",
@@ -168,7 +172,11 @@ public sealed class ProjectService : IProjectService
 
         ProjectOperationResult result = change.Type switch
         {
-            OptimizationGroupChangeType.Create => CreateOptimizationGroup(normalizedProject, groups, change.Name),
+            OptimizationGroupChangeType.Create => CreateOptimizationGroup(
+                normalizedProject,
+                groups,
+                change.Name,
+                change.StockLength),
             OptimizationGroupChangeType.Rename => RenameOptimizationGroup(
                 normalizedProject,
                 groups,
@@ -183,6 +191,11 @@ public sealed class ProjectService : IProjectService
                 groups,
                 change.PartRowId,
                 change.TargetOptimizationGroupId),
+            OptimizationGroupChangeType.UpdateStockLength => UpdateStockLength(
+                normalizedProject,
+                groups,
+                change.OptimizationGroupId,
+                change.StockLength),
             OptimizationGroupChangeType.Delete => DeleteOptimizationGroup(
                 normalizedProject,
                 groups,
@@ -194,10 +207,122 @@ public sealed class ProjectService : IProjectService
         return Task.FromResult(result);
     }
 
+    public Task<ProjectOperationResult> UpdateRequiredPiecesAsync(
+        Project project,
+        RequiredPieceChange change,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        ArgumentNullException.ThrowIfNull(change);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var normalizedProject = NormalizeProject(project);
+        if (normalizedProject.ProjectKind != ProjectKind.StockLength)
+        {
+            return Task.FromResult(Failure(
+                "required-piece-project-kind-invalid",
+                "Required Pieces can be managed only in a Stock-Length Project."));
+        }
+
+        var groups = normalizedProject.State.OptimizationGroups.ToList();
+        var groupIndex = FindOptimizationGroupIndex(groups, change.OptimizationGroupId);
+        if (groupIndex < 0)
+        {
+            return Task.FromResult(Failure(
+                "optimization-group-not-found",
+                "The Optimization Group was not found."));
+        }
+
+        var group = groups[groupIndex];
+        if (change.Type is RequiredPieceChangeType.Create or RequiredPieceChangeType.Update &&
+            group.StockLength is not > 0)
+        {
+            return Task.FromResult(Failure(
+                "stock-length-required",
+                "Enter a positive Stock Length before adding Required Pieces."));
+        }
+
+        var pieces = group.RequiredPieces.ToList();
+        ProjectOperationResult result;
+        switch (change.Type)
+        {
+            case RequiredPieceChangeType.Create:
+            case RequiredPieceChangeType.Update:
+                var validation = ValidateRequiredPiece(change);
+                if (validation.Error is not null)
+                {
+                    result = validation.Error;
+                    break;
+                }
+
+                var piece = validation.Piece!;
+                if (change.Type == RequiredPieceChangeType.Create)
+                {
+                    piece = piece with { RequiredPieceId = CreateUniqueRequiredPieceId(groups) };
+                    pieces.Add(piece);
+                }
+                else
+                {
+                    var sourceGroupIndex = groups.FindIndex(item =>
+                        item.RequiredPieces.Any(pieceItem => pieceItem.RequiredPieceId == change.RequiredPieceId));
+                    if (sourceGroupIndex < 0)
+                    {
+                        result = Failure("required-piece-not-found", "The Required Piece was not found.");
+                        break;
+                    }
+
+                    piece = piece with { RequiredPieceId = change.RequiredPieceId! };
+                    if (sourceGroupIndex == groupIndex)
+                    {
+                        var pieceIndex = pieces.FindIndex(item => item.RequiredPieceId == change.RequiredPieceId);
+                        pieces[pieceIndex] = piece;
+                    }
+                    else
+                    {
+                        var sourceGroup = groups[sourceGroupIndex];
+                        groups[sourceGroupIndex] = NormalizeStockGroup(InvalidateOptimizationGroup(sourceGroup with
+                        {
+                            RequiredPieces = sourceGroup.RequiredPieces
+                                .Where(item => item.RequiredPieceId != change.RequiredPieceId)
+                                .ToArray()
+                        }));
+                        pieces.Add(piece);
+                    }
+                }
+
+                groups[groupIndex] = NormalizeStockGroup(InvalidateOptimizationGroup(group with
+                {
+                    RequiredPieces = pieces
+                }));
+                result = Success(ApplyOptimizationGroups(normalizedProject, groups));
+                break;
+            case RequiredPieceChangeType.Delete:
+                var removed = pieces.RemoveAll(item => item.RequiredPieceId == change.RequiredPieceId);
+                if (removed == 0)
+                {
+                    result = Failure("required-piece-not-found", "The Required Piece was not found.");
+                    break;
+                }
+
+                groups[groupIndex] = NormalizeStockGroup(InvalidateOptimizationGroup(group with
+                {
+                    RequiredPieces = pieces
+                }));
+                result = Success(ApplyOptimizationGroups(normalizedProject, groups));
+                break;
+            default:
+                result = Failure("required-piece-change-invalid", "Choose a valid Required Piece change.");
+                break;
+        }
+
+        return Task.FromResult(result);
+    }
+
     private ProjectOperationResult CreateOptimizationGroup(
         Project project,
         List<OptimizationGroup> groups,
-        string? requestedName)
+        string? requestedName,
+        string? stockLengthText)
     {
         var nameValidation = ValidateOptimizationGroupName(groups, requestedName);
         if (nameValidation.Error is not null)
@@ -212,13 +337,46 @@ public sealed class ProjectService : IProjectService
             uniqueId = $"{generatedId}-{suffix}";
         }
 
+        decimal? stockLength = null;
+        if (!string.IsNullOrWhiteSpace(stockLengthText))
+        {
+            if (!TryParsePositiveInches(stockLengthText, out var parsedStockLength))
+            {
+                return Failure("stock-length-invalid", "Stock Length must be a positive inch measurement.");
+            }
+
+            stockLength = parsedStockLength;
+        }
+
         groups.Add(new OptimizationGroup
         {
             OptimizationGroupId = uniqueId,
             Name = nameValidation.Name!,
-            Order = groups.Count
+            Order = groups.Count,
+            StockLength = stockLength
         });
 
+        return Success(ApplyOptimizationGroups(project, groups));
+    }
+
+    private static ProjectOperationResult UpdateStockLength(
+        Project project,
+        List<OptimizationGroup> groups,
+        string? optimizationGroupId,
+        string? stockLengthText)
+    {
+        var index = FindOptimizationGroupIndex(groups, optimizationGroupId);
+        if (index < 0)
+        {
+            return Failure("optimization-group-not-found", "The Optimization Group was not found.");
+        }
+
+        if (!TryParsePositiveInches(stockLengthText, out var stockLength))
+        {
+            return Failure("stock-length-invalid", "Stock Length must be a positive inch measurement.");
+        }
+
+        groups[index] = InvalidateOptimizationGroup(groups[index] with { StockLength = stockLength });
         return Success(ApplyOptimizationGroups(project, groups));
     }
 
@@ -333,6 +491,7 @@ public sealed class ProjectService : IProjectService
         var group = groups[index];
         var hasOwnedContent =
             group.Parts.Count > 0 ||
+            group.RequiredPieces.Count > 0 ||
             group.LastNestingResult is not null ||
             group.LastBatchNestingResult is not null;
         if (hasOwnedContent && !removeOwnedContent)
@@ -357,7 +516,7 @@ public sealed class ProjectService : IProjectService
     private static Project ApplyOptimizationGroups(Project project, IReadOnlyList<OptimizationGroup> groups)
     {
         var orderedGroups = groups
-            .Select((group, order) => group with { Order = order })
+            .Select((group, order) => NormalizeStockGroup(group with { Order = order }))
             .ToArray();
         var compatibilityGroup = orderedGroups.Length == 1 ? orderedGroups[0] : null;
 
@@ -370,6 +529,136 @@ public sealed class ProjectService : IProjectService
                 LastNestingResult = compatibilityGroup?.LastNestingResult,
                 LastBatchNestingResult = compatibilityGroup?.LastBatchNestingResult
             }
+        };
+    }
+
+    private string CreateUniqueRequiredPieceId(IEnumerable<OptimizationGroup> groups)
+    {
+        var usedIds = groups
+            .SelectMany(group => group.RequiredPieces)
+            .Select(piece => piece.RequiredPieceId)
+            .ToHashSet(StringComparer.Ordinal);
+        var generatedId = NormalizeOptional(_idGenerator()) ?? Guid.NewGuid().ToString("N");
+        if (usedIds.Add(generatedId))
+        {
+            return generatedId;
+        }
+
+        for (var suffix = 2; ; suffix++)
+        {
+            var candidate = $"{generatedId}-{suffix}";
+            if (usedIds.Add(candidate))
+            {
+                return candidate;
+            }
+        }
+    }
+
+    private static (RequiredPiece? Piece, ProjectOperationResult? Error) ValidateRequiredPiece(
+        RequiredPieceChange change)
+    {
+        if (!int.TryParse(change.Quantity?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var quantity) ||
+            quantity <= 0)
+        {
+            return (null, Failure("required-piece-quantity-invalid", "Quantity must be a positive whole number."));
+        }
+
+        if (!TryParsePositiveInches(change.Length, out var length))
+        {
+            return (null, Failure("required-piece-length-invalid", "Length must be a positive inch measurement."));
+        }
+
+        var profileNumber = change.ProfileNumber?.Trim();
+        if (string.IsNullOrWhiteSpace(profileNumber))
+        {
+            return (null, Failure("required-piece-profile-required", "Profile Number is required."));
+        }
+
+        return (new RequiredPiece
+        {
+            Quantity = quantity,
+            Length = length,
+            ProfileNumber = profileNumber,
+            PartName = NormalizeOptional(change.PartName),
+            Finish = NormalizeOptional(change.Finish),
+            PartNumber = NormalizeOptional(change.PartNumber),
+            IsManual = true
+        }, null);
+    }
+
+    private static bool TryParsePositiveInches(string? text, out decimal value)
+    {
+        value = 0m;
+        var normalized = text?.Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return false;
+        }
+
+        if (decimal.TryParse(normalized, NumberStyles.Number, CultureInfo.InvariantCulture, out value))
+        {
+            return value > 0;
+        }
+
+        var terms = normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (terms.Length is < 1 or > 2)
+        {
+            return false;
+        }
+
+        decimal whole = 0m;
+        var fractionText = terms[0];
+        if (terms.Length == 2)
+        {
+            if (!decimal.TryParse(terms[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out whole) || whole < 0)
+            {
+                return false;
+            }
+
+            fractionText = terms[1];
+        }
+
+        var fraction = fractionText.Split('/', StringSplitOptions.TrimEntries);
+        if (fraction.Length != 2 ||
+            !decimal.TryParse(fraction[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var numerator) ||
+            !decimal.TryParse(fraction[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var denominator) ||
+            numerator < 0 || denominator <= 0 || numerator >= denominator)
+        {
+            return false;
+        }
+
+        value = whole + (numerator / denominator);
+        return value > 0;
+    }
+
+    private static OptimizationGroup NormalizeStockGroup(OptimizationGroup group)
+    {
+        var requiredPieces = (group.RequiredPieces ?? Array.Empty<RequiredPiece>())
+            .Where(piece => piece is not null)
+            .Select(piece => piece with
+            {
+                ProfileNumber = piece.ProfileNumber.Trim(),
+                PartName = NormalizeOptional(piece.PartName),
+                Finish = NormalizeOptional(piece.Finish),
+                PartNumber = NormalizeOptional(piece.PartNumber),
+                SourceReferences = piece.SourceReferences ?? Array.Empty<SourceReference>()
+            })
+            .ToArray();
+        var stockGroups = requiredPieces
+            .GroupBy(
+                piece => (piece.ProfileNumber.Trim().ToUpperInvariant(), (piece.Finish ?? string.Empty).Trim().ToUpperInvariant()))
+            .Select(items => new StockGroup
+            {
+                ProfileNumber = items.First().ProfileNumber,
+                Finish = items.First().Finish,
+                RequiredPieceIds = items.Select(piece => piece.RequiredPieceId).ToArray()
+            })
+            .ToArray();
+
+        return group with
+        {
+            RequiredPieces = requiredPieces,
+            StockGroups = stockGroups
         };
     }
 
@@ -501,10 +790,15 @@ public sealed class ProjectService : IProjectService
             ProjectId = projectId,
             Metadata = NormalizeMetadata(project.Metadata),
             Settings = NormalizeSettings(project.Settings, project.Metadata, project.ProjectKind),
-            MaterialSnapshots = NormalizeSnapshots(project.MaterialSnapshots),
+            MaterialSnapshots = ExcludesMaterialSnapshots(project.ProjectKind)
+                ? Array.Empty<Material>()
+                : NormalizeSnapshots(project.MaterialSnapshots),
             State = NormalizeState(project.State, projectId)
         };
     }
+
+    private static bool ExcludesMaterialSnapshots(ProjectKind projectKind) =>
+        projectKind == ProjectKind.StockLength;
 
     private static IReadOnlyList<Material> NormalizeSnapshots(IReadOnlyList<Material>? snapshots) =>
         (snapshots ?? Array.Empty<Material>())
@@ -547,7 +841,10 @@ public sealed class ProjectService : IProjectService
                 ? CreateDefaultSettings(projectKind).KerfWidth
                 : settings.KerfWidth,
             ReportSettings = reportSettings,
-            StiffenerTakeoff = stiffenerTakeoff
+            StiffenerTakeoff = stiffenerTakeoff,
+            InchDisplayFormat = Enum.IsDefined(settings.InchDisplayFormat)
+                ? settings.InchDisplayFormat
+                : InchDisplayFormat.Decimal
         };
     }
 
@@ -613,7 +910,8 @@ public sealed class ProjectService : IProjectService
         {
             SourceFilePath = NormalizeOptional(groupedState.SourceFilePath),
             SelectedMaterialId = NormalizeOptional(groupedState.SelectedMaterialId),
-            ExtrusionLayout = NormalizeExtrusionLayout(state.ExtrusionLayout)
+            ExtrusionLayout = NormalizeExtrusionLayout(state.ExtrusionLayout),
+            OptimizationGroups = groupedState.OptimizationGroups.Select(NormalizeStockGroup).ToArray()
         };
     }
 
