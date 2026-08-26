@@ -32,7 +32,7 @@ public sealed class WorkbookDiscoveryServiceSpecs : IDisposable
             workbook.Worksheet("Very Hidden").Visibility = XLWorksheetVisibility.VeryHidden;
             workbook.SaveAs(workbookPath);
         }
-        AddChartOnlyTab(workbookPath);
+        AddChartSheet(workbookPath);
 
         var result = await new WorkbookDiscoveryService().DiscoverAsync(workbookPath);
 
@@ -51,7 +51,7 @@ public sealed class WorkbookDiscoveryServiceSpecs : IDisposable
             });
     }
 
-    private static void AddChartOnlyTab(string workbookPath)
+    private static void AddChartSheet(string workbookPath)
     {
         using var document = SpreadsheetDocument.Open(workbookPath, isEditable: true);
         var workbookPart = document.WorkbookPart!;

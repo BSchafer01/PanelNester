@@ -204,6 +204,14 @@ public static class DesktopBridgeRegistration
                     filePath = dialogResult.FilePath;
                 }
 
+                if (IsExcelWorkbookPath(filePath))
+                {
+                    return ImportFileResponse.Failure(
+                        filePath,
+                        "workbook-discovery-required",
+                        "Excel Workbook imports must begin with Workbook discovery.");
+                }
+
                 var importPreparation = await PrepareImportOptionsAsync(request, materialService, cancellationToken)
                     .ConfigureAwait(false);
                 if (!importPreparation.Success)
@@ -373,6 +381,17 @@ public static class DesktopBridgeRegistration
                         var orderedSelections = request.Worksheets
                             .OrderBy(selection => selection.OriginalPosition)
                             .ToArray();
+                        var conflictingMaterialLabel = FindConflictingMaterialResolution(
+                            orderedSelections);
+                        if (conflictingMaterialLabel is not null)
+                        {
+                            return ImportSessionResponse.Failure(
+                                request.SessionId,
+                                null,
+                                ImportSessionPhase.Failed,
+                                "import-material-resolution-conflict",
+                                $"Material label '{conflictingMaterialLabel}' has conflicting resolutions across the Workbook.");
+                        }
 
                         foreach (var selection in orderedSelections)
                         {
@@ -1949,6 +1968,13 @@ public static class DesktopBridgeRegistration
     private static string? NormalizeFilePath(string? filePath) =>
         string.IsNullOrWhiteSpace(filePath) ? null : filePath.Trim();
 
+    private static bool IsExcelWorkbookPath(string filePath)
+    {
+        var extension = Path.GetExtension(filePath);
+        return string.Equals(extension, ".xlsx", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(extension, ".xlsm", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string? NormalizeOptionalValue(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
@@ -2185,6 +2211,21 @@ public static class DesktopBridgeRegistration
                 : warning).ToArray()
         };
     }
+
+    private static string? FindConflictingMaterialResolution(
+        IReadOnlyList<ImportWorksheetSelection> selections) =>
+        selections
+            .SelectMany(selection => selection.Options?.MaterialMappings ?? [])
+            .Where(mapping =>
+                !string.IsNullOrWhiteSpace(mapping.SourceMaterialName) &&
+                !string.IsNullOrWhiteSpace(mapping.TargetMaterialId))
+            .GroupBy(mapping => mapping.SourceMaterialName.Trim(), StringComparer.Ordinal)
+            .FirstOrDefault(group => group
+                .Select(mapping => mapping.TargetMaterialId)
+                .Distinct(StringComparer.Ordinal)
+                .Skip(1)
+                .Any())
+            ?.Key;
 
     private static ImportSessionResult CombineWorksheetImports(
         ImportSourceMetadata importSource,

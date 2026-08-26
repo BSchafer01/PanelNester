@@ -15,12 +15,17 @@ public sealed class ImportResultsRevisionGateSpecs
             "src",
             "pages",
             "ImportPage.tsx");
+        var draftState = ReadRepositoryText(
+            "src",
+            "PanelNester.WebUI",
+            "src",
+            "pages",
+            "workbookImportDraftState.ts");
 
-        Assert.Contains("selected: true", app);
-        Assert.Contains("selected: false", app);
-        Assert.Contains("optimizationGroupName: worksheet.worksheetName", app);
-        Assert.Contains("draft.worksheet.worksheetName === worksheetName", importPage);
-        Assert.Contains("? { ...draft, selected }", importPage);
+        Assert.Contains("createWorkbookWorksheetDrafts", app);
+        Assert.Contains("worksheet.worksheetName === firstWorksheet.worksheetName", draftState);
+        Assert.Contains("optimizationGroupName: worksheet.worksheetName", draftState);
+        Assert.Contains("setWorkbookWorksheetSelected", importPage);
         Assert.Contains("selectedWorksheetDrafts.map((draft) => ({", app);
         Assert.Contains("Select all Worksheets", importPage);
         Assert.Contains("Clear selection", importPage);

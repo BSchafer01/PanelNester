@@ -115,11 +115,83 @@ public sealed class ImportBridgeSpecs : IDisposable
             project.State.ImportConfiguration!.Worksheets,
             worksheet => Assert.Equal("combined", worksheet.OptimizationGroupId));
     }
+
+    [Fact]
+    public async Task Excel_session_rejects_conflicting_Workbook_wide_Material_Resolutions()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "conflicting-materials.xlsx");
+        using (var workbook = new XLWorkbook())
+        {
+            WriteWorkbookWorksheet(workbook.AddWorksheet("First"), "FIRST", "Shared Label");
+            WriteWorkbookWorksheet(workbook.AddWorksheet("Second"), "SECOND", "Shared Label");
+            workbook.SaveAs(workbookPath);
+        }
+
+        var dispatcher = CreateDispatcher();
+        const string sessionId = "conflicting-material-resolution-session";
+        var started = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest { SessionId = sessionId, ImportSourcePath = workbookPath });
+        Assert.True(started.Success);
+
+        var finalized = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.FinalizeImportSession,
+            new FinalizeImportSessionRequest
+            {
+                SessionId = sessionId,
+                Project = new Project { ProjectId = "conflicting-material-project" },
+                Worksheets =
+                [
+                    new ImportWorksheetSelection
+                    {
+                        WorksheetName = "First",
+                        OriginalPosition = 1,
+                        OptimizationGroupId = "first-group",
+                        OptimizationGroupName = "First",
+                        Options = new ImportOptions
+                        {
+                            MaterialMappings =
+                            [
+                                new ImportMaterialMapping
+                                {
+                                    SourceMaterialName = "Shared Label",
+                                    TargetMaterialId = "material-a"
+                                }
+                            ]
+                        }
+                    },
+                    new ImportWorksheetSelection
+                    {
+                        WorksheetName = "Second",
+                        OriginalPosition = 2,
+                        OptimizationGroupId = "second-group",
+                        OptimizationGroupName = "Second",
+                        Options = new ImportOptions
+                        {
+                            MaterialMappings =
+                            [
+                                new ImportMaterialMapping
+                                {
+                                    SourceMaterialName = "Shared Label",
+                                    TargetMaterialId = "material-b"
+                                }
+                            ]
+                        }
+                    }
+                ]
+            });
+
+        Assert.False(finalized.Success);
+        Assert.Equal("import-material-resolution-conflict", finalized.Error?.Code);
+    }
     private static readonly JsonSerializerOptions SerializerOptions = BridgeJson.SerializerOptions;
     private readonly string _workspacePath = Path.Combine(Path.GetTempPath(), $"PanelNester.ImportBridgeSpecs.{Guid.NewGuid():N}");
 
     [Fact]
-    public async Task Import_file_message_uses_native_filters_and_routes_csv_and_xlsx_files()
+    public async Task Import_file_message_offers_Excel_Workbooks_but_requires_discovery_for_them()
     {
         Directory.CreateDirectory(_workspacePath);
 
@@ -199,20 +271,10 @@ public sealed class ImportBridgeSpecs : IDisposable
             BridgeMessageTypes.ImportFile,
             new ImportFileRequest { FilePath = xlsxPath });
 
-        Assert.True(xlsxResponse.Success);
+        Assert.False(xlsxResponse.Success);
         Assert.Equal(xlsxPath, xlsxResponse.FilePath);
-        var csvPart = Assert.Single(csvResponse.Parts);
-        var xlsxPart = Assert.Single(xlsxResponse.Parts);
-        Assert.Equal(csvPart.ImportedId, xlsxPart.ImportedId);
-        Assert.Equal(csvPart.Length, xlsxPart.Length);
-        Assert.Equal(csvPart.Width, xlsxPart.Width);
-        Assert.Equal(csvPart.Quantity, xlsxPart.Quantity);
-        Assert.Equal(csvPart.MaterialName, xlsxPart.MaterialName);
-        Assert.Equal(csvResponse.Errors, xlsxResponse.Errors);
-        Assert.Equal(csvResponse.Warnings, xlsxResponse.Warnings);
-        Assert.Equal(csvResponse.AvailableColumns, xlsxResponse.AvailableColumns);
-        Assert.Equal(csvResponse.ColumnMappings, xlsxResponse.ColumnMappings);
-        Assert.Equal(csvResponse.MaterialResolutions, xlsxResponse.MaterialResolutions);
+        Assert.Equal("workbook-discovery-required", xlsxResponse.Error?.Code);
+        Assert.Empty(xlsxResponse.Parts);
     }
 
     [Fact]

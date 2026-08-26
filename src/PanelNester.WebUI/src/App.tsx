@@ -2,6 +2,7 @@ import { useEffect, useReducer, useRef, useState } from 'react';
 import { AppShell } from './components/AppShell';
 import { hostBridge } from './bridge/hostBridge';
 import { ImportPage } from './pages/ImportPage';
+import { createWorkbookWorksheetDrafts } from './pages/workbookImportDraftState';
 import { MaterialsPage } from './pages/MaterialsPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { ResultsPage } from './pages/ResultsPage';
@@ -1061,39 +1062,22 @@ function createWorkbookImportMappingSession(
 ): ImportMappingSession {
   const workbook = started.workbook!;
   const firstWorksheet = workbook.worksheets[0];
-  const firstDraft = {
-    worksheet: firstWorksheet,
-    selected: true,
-    optimizationGroupId: `import-${sessionId}-${firstWorksheet.originalPosition}`,
-    optimizationGroupName: firstWorksheet.worksheetName,
-    preview,
-    options: buildImportOptionsFromResponse(preview),
-    newMaterials: [],
-    hasPendingChanges: false,
-  };
+  const firstOptions = buildImportOptionsFromResponse(preview);
 
   return {
     sessionId,
     filePath,
     preview,
-    options: firstDraft.options,
+    options: firstOptions,
     newMaterials: [],
     hasPendingChanges: false,
     workbook,
     activeWorksheetName: firstWorksheet.worksheetName,
-    worksheets: workbook.worksheets.map((worksheet) =>
-      worksheet.worksheetName === firstWorksheet.worksheetName
-        ? firstDraft
-        : {
-            worksheet,
-            selected: false,
-            optimizationGroupId: `import-${sessionId}-${worksheet.originalPosition}`,
-            optimizationGroupName: worksheet.worksheetName,
-            preview: normalizeImportFileResponse({}),
-            options: { columnMappings: [], materialMappings: [] },
-            newMaterials: [],
-            hasPendingChanges: true,
-          },
+    worksheets: createWorkbookWorksheetDrafts(
+      sessionId,
+      workbook,
+      preview,
+      firstOptions,
     ),
   };
 }
@@ -3403,20 +3387,51 @@ export default function App() {
   };
 
   const updateImportMappingSession = (session: ImportMappingSession) => {
+    const sharedMaterialLabels = new Set(
+      session.preview.materialResolutions.map(
+        (resolution) => resolution.sourceMaterialName,
+      ),
+    );
     const synchronizedSession = session.worksheets && session.activeWorksheetName
       ? {
           ...session,
-          worksheets: session.worksheets.map((draft) =>
-            draft.worksheet.worksheetName === session.activeWorksheetName
+          worksheets: session.worksheets.map((draft) => {
+            const sharedMaterialMappings = session.options.materialMappings.filter(
+              (mapping) => sharedMaterialLabels.has(mapping.sourceMaterialName),
+            );
+            const sharedNewMaterials = session.newMaterials.filter((material) =>
+              sharedMaterialLabels.has(material.sourceMaterialName),
+            );
+            const synchronizedMaterials = {
+              options: {
+                ...draft.options,
+                materialMappings: [
+                  ...draft.options.materialMappings.filter(
+                    (mapping) => !sharedMaterialLabels.has(mapping.sourceMaterialName),
+                  ),
+                  ...sharedMaterialMappings,
+                ],
+              },
+              newMaterials: [
+                ...draft.newMaterials.filter(
+                  (material) => !sharedMaterialLabels.has(material.sourceMaterialName),
+                ),
+                ...sharedNewMaterials,
+              ],
+            };
+            return draft.worksheet.worksheetName === session.activeWorksheetName
               ? {
                   ...draft,
+                  ...synchronizedMaterials,
                   preview: session.preview,
-                  options: session.options,
-                  newMaterials: session.newMaterials,
+                  options: {
+                    ...session.options,
+                    materialMappings: synchronizedMaterials.options.materialMappings,
+                  },
                   hasPendingChanges: session.hasPendingChanges,
                 }
-              : draft,
-          ),
+              : { ...draft, ...synchronizedMaterials };
+          }),
         }
       : session;
     dispatch({

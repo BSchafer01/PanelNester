@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { MaterialCombobox } from '../components/MaterialCombobox';
 import { StatusPill } from '../components/StatusPill';
 import { ThemedSelect, type ThemedSelectOption } from '../components/ThemedSelect';
+import { setWorkbookWorksheetSelected } from './workbookImportDraftState';
 import {
   requiredImportFieldNames,
   type HostBridgeSnapshot,
@@ -864,10 +865,10 @@ export function ImportPage({
       return;
     }
 
-    const worksheets = mappingSession.worksheets.map((draft) =>
-      draft.worksheet.worksheetName === worksheetName
-        ? { ...draft, selected }
-        : draft,
+    const worksheets = setWorkbookWorksheetSelected(
+      mappingSession.worksheets,
+      worksheetName,
+      selected,
     );
     const nextActive = selected
       ? worksheetName

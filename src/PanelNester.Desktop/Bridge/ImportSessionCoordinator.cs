@@ -133,21 +133,33 @@ internal sealed class ImportSessionCoordinator
         string? worksheetName,
         CancellationToken operationToken)
     {
+        var response = await WithSnapshotFileAsync(
+            session,
+            operationToken,
+            snapshotPath => _importService.ImportAsync(
+                new ImportRequest
+                {
+                    FilePath = snapshotPath,
+                    Options = options ?? new ImportOptions(),
+                    WorksheetName = worksheetName
+                },
+                operationToken)).ConfigureAwait(false);
+
+        return RestoreImportSourceIdentity(session, response);
+    }
+
+    private static async Task<TResult> WithSnapshotFileAsync<TResult>(
+        ImportSessionSnapshot session,
+        CancellationToken cancellationToken,
+        Func<string, Task<TResult>> operation)
+    {
         Directory.CreateDirectory(SnapshotDirectory);
         var snapshotPath = Path.Combine(SnapshotDirectory, $"{Guid.NewGuid():N}{session.Extension}");
         try
         {
-            await File.WriteAllBytesAsync(snapshotPath, session.GetContents(), operationToken).ConfigureAwait(false);
-            var response = await _importService.ImportAsync(
-                    new ImportRequest
-                    {
-                        FilePath = snapshotPath,
-                        Options = options ?? new ImportOptions(),
-                        WorksheetName = worksheetName
-                    },
-                    operationToken)
+            await File.WriteAllBytesAsync(snapshotPath, session.GetContents(), cancellationToken)
                 .ConfigureAwait(false);
-            return RestoreImportSourceIdentity(session, response);
+            return await operation(snapshotPath).ConfigureAwait(false);
         }
         finally
         {
@@ -168,23 +180,11 @@ internal sealed class ImportSessionCoordinator
             return null;
         }
 
-        Directory.CreateDirectory(SnapshotDirectory);
-        var snapshotPath = Path.Combine(SnapshotDirectory, $"{Guid.NewGuid():N}{session.Extension}");
-        try
-        {
-            await File.WriteAllBytesAsync(snapshotPath, session.GetContents(), cancellationToken)
-                .ConfigureAwait(false);
-            return await new WorkbookDiscoveryService()
-                .DiscoverAsync(snapshotPath, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        finally
-        {
-            if (File.Exists(snapshotPath))
-            {
-                File.Delete(snapshotPath);
-            }
-        }
+        return await WithSnapshotFileAsync(
+                session,
+                cancellationToken,
+                snapshotPath => new WorkbookDiscoveryService().DiscoverAsync(snapshotPath, cancellationToken))
+            .ConfigureAwait(false);
     }
 
     private static ImportResponse RestoreImportSourceIdentity(
