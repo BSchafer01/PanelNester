@@ -280,35 +280,6 @@ internal sealed class ImportMappingResolver
         return new MaterialMappingPlan(resolvedUpdates, resolutions);
     }
 
-    private static string? FindSuggestedSource(
-        string field,
-        IReadOnlyList<SourceColumnCandidate> sourceColumns,
-        IReadOnlySet<string> resolvedSources)
-    {
-        if (!SuggestedHeaderAliases.TryGetValue(field, out var aliases))
-        {
-            return null;
-        }
-
-        var aliasSet = aliases.ToHashSet(StringComparer.Ordinal);
-
-        foreach (var column in sourceColumns)
-        {
-            var identifier = column.Identifier.Trim();
-            if (string.IsNullOrWhiteSpace(identifier) || resolvedSources.Contains(identifier))
-            {
-                continue;
-            }
-
-            if (aliasSet.Contains(Normalize(column.Heading.Trim())))
-            {
-                return identifier;
-            }
-        }
-
-        return null;
-    }
-
     private static (Material? Material, bool IsExplicit) ResolveMaterial(
         string sourceMaterialName,
         IReadOnlyDictionary<string, Material> requestedMappings,
@@ -377,16 +348,18 @@ internal sealed class ImportMappingResolver
     {
         explicitMappings.TryGetValue(field, out var sourceColumn);
 
-        if (sourceColumn is null && !explicitTargets.Contains(field))
+        var recognizedSources = sourceColumns
+            .Where(column =>
+                !resolvedSources.Contains(column.Identifier) &&
+                string.Equals(RecognizeHeading(column.Heading), field, StringComparison.Ordinal))
+            .ToArray();
+
+        if (sourceColumn is null &&
+            !explicitTargets.Contains(field) &&
+            recognizedSources.Length == 1 &&
+            string.Equals(recognizedSources[0].Heading.Trim(), field, StringComparison.Ordinal))
         {
-            sourceColumn = sourceColumns
-                .FirstOrDefault(column =>
-                    !resolvedSources.Contains(column.Identifier) &&
-                    string.Equals(
-                        column.Heading.Trim(),
-                        field,
-                        StringComparison.Ordinal))
-                ?.Identifier;
+            sourceColumn = recognizedSources[0].Identifier;
         }
 
         if (sourceColumn is not null)
@@ -395,8 +368,10 @@ internal sealed class ImportMappingResolver
             fieldToSource[field] = sourceColumn;
         }
 
-        var suggestion = sourceColumn is null
-            ? FindSuggestedSource(field, sourceColumns, resolvedSources)
+        var suggestion = sourceColumn is null &&
+                         !explicitTargets.Contains(field) &&
+                         recognizedSources.Length == 1
+            ? recognizedSources[0].Identifier
             : null;
 
         if (sourceColumn is null && isRequired)

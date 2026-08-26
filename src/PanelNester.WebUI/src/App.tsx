@@ -2,7 +2,11 @@ import { useEffect, useReducer, useRef, useState } from 'react';
 import { AppShell } from './components/AppShell';
 import { hostBridge } from './bridge/hostBridge';
 import { ImportPage } from './pages/ImportPage';
-import { createWorkbookWorksheetDrafts } from './pages/workbookImportDraftState';
+import {
+  collectWorkbookNewMaterials,
+  createWorkbookWorksheetDrafts,
+  mergeRecognizedColumnMappings,
+} from './pages/workbookImportDraftState';
 import { MaterialsPage } from './pages/MaterialsPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { ResultsPage } from './pages/ResultsPage';
@@ -3450,8 +3454,8 @@ export default function App() {
     });
   };
 
-  const previewImportMapping = async () => {
-    const session = state.importMappingSession;
+  const previewImportMapping = async (sessionOverride?: ImportMappingSession) => {
+    const session = sessionOverride ?? state.importMappingSession;
     if (!session) {
       return;
     }
@@ -3507,9 +3511,16 @@ export default function App() {
         return;
       }
 
-      const refreshedOptions = session.options.columnMappings.length > 0
-        ? session.options
-        : buildImportOptionsFromResponse(response);
+      const recognizedOptions = buildImportOptionsFromResponse(response);
+      const refreshedOptions = mergeRecognizedColumnMappings(
+        {
+          ...session.options,
+          materialMappings: session.options.materialMappings.length > 0
+            ? session.options.materialMappings
+            : recognizedOptions.materialMappings,
+        },
+        response,
+      );
       let nextSession = createImportMappingSession(session.sessionId, filePath, response, {
         ...session,
         options: refreshedOptions,
@@ -3569,7 +3580,7 @@ export default function App() {
     try {
       const selectedWorksheetDrafts = session.worksheets?.filter((draft) => draft.selected) ?? [];
       const sessionNewMaterials = selectedWorksheetDrafts.length > 0
-        ? selectedWorksheetDrafts.flatMap((draft) => draft.newMaterials)
+        ? collectWorkbookNewMaterials(selectedWorksheetDrafts)
         : session.newMaterials;
       const usesImportSession =
         session.sessionId !== 'legacy-import' &&

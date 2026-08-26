@@ -1,6 +1,10 @@
 import type {
+  ImportColumnMapping,
   ImportFileResponse,
+  ImportMaterialMapping,
+  ImportNewMaterialRequest,
   ImportOptions,
+  ImportSourceColumn,
   ImportWorksheetDraft,
   WorkbookDiscovery,
 } from '../types/contracts';
@@ -33,7 +37,7 @@ export function createWorkbookWorksheetDrafts(
   }));
 }
 
-export interface ConfirmHeadingRangeResult {
+export interface WorksheetDraftOperationResult {
   drafts: ImportWorksheetDraft[];
   error?: string;
 }
@@ -46,7 +50,7 @@ export function confirmWorksheetHeadingRange(
   drafts: ImportWorksheetDraft[],
   worksheetName: string,
   address: string,
-): ConfirmHeadingRangeResult {
+): WorksheetDraftOperationResult {
   const normalized = normalizeHeadingRangeAddress(address);
   if (!normalized) {
     return {
@@ -66,21 +70,140 @@ export function confirmWorksheetHeadingRange(
   return {
     drafts: drafts.map((draft) =>
       draft.worksheet.worksheetName === worksheetName
-        ? {
-            ...draft,
-            headingRange: normalized,
-            headingRangeConfirmed: true,
-            hasPendingChanges: true,
-          }
+        ? confirmHeadingRange(draft, normalized)
         : draft,
     ),
   };
 }
 
+export function copyColumnMappingsFromPreviousSelectedWorksheet(
+  drafts: ImportWorksheetDraft[],
+  worksheetName: string,
+): WorksheetDraftOperationResult {
+  const targetIndex = drafts.findIndex(
+    (draft) => draft.worksheet.worksheetName === worksheetName,
+  );
+  const previous = drafts
+    .slice(0, targetIndex)
+    .reverse()
+    .find((draft) => draft.selected && draft.headingRangeConfirmed);
+  const target = drafts[targetIndex];
+  if (targetIndex < 0 || !previous || !target?.headingRangeConfirmed) {
+    return {
+      drafts,
+      error: 'Confirm both Worksheet Heading Ranges before copying Column Mappings.',
+    };
+  }
+
+  const reconciliation = reconcileMappingsByUniqueHeading(
+    previous.options.columnMappings,
+    sourceColumnsForDraft(previous),
+    sourceColumnsForDraft(target),
+  );
+  const nextDraft = {
+    ...target,
+    options: {
+      ...target.options,
+      columnMappings: reconciliation.mappings,
+    },
+    clearedColumnMappingFields: reconciliation.clearedFields,
+    hasPendingChanges: true,
+  };
+
+  return {
+    drafts: drafts.map((draft, index) => index === targetIndex ? nextDraft : draft),
+  };
+}
+
+export function mergeRecognizedColumnMappings(
+  options: ImportOptions,
+  response: ImportFileResponse,
+): ImportOptions {
+  const retainedTargets = new Set(
+    options.columnMappings.map((mapping) => mapping.targetField),
+  );
+  const usedSources = new Set(
+    options.columnMappings.map((mapping) => mapping.sourceColumn.trim()),
+  );
+  const recognized = response.columnMappings.flatMap((mapping) => {
+    const sourceColumn = (
+      mapping.sourceColumn ?? mapping.suggestedSourceColumn ?? ''
+    ).trim();
+    if (
+      sourceColumn.length === 0 ||
+      retainedTargets.has(mapping.targetField) ||
+      usedSources.has(sourceColumn)
+    ) {
+      return [];
+    }
+
+    retainedTargets.add(mapping.targetField);
+    usedSources.add(sourceColumn);
+    return [{ sourceColumn, targetField: mapping.targetField }];
+  });
+
+  return {
+    ...options,
+    columnMappings: [...options.columnMappings, ...recognized],
+  };
+}
+
+export function synchronizeWorkbookMaterialResolution(
+  drafts: ImportWorksheetDraft[],
+  sourceMaterialName: string,
+  materialMapping?: ImportMaterialMapping,
+  newMaterial?: ImportNewMaterialRequest,
+): ImportWorksheetDraft[] {
+  return drafts.map((draft) => {
+    if (!draft.selected) {
+      return draft;
+    }
+
+    const materialMappings = draft.options.materialMappings.filter(
+      (mapping) => mapping.sourceMaterialName !== sourceMaterialName,
+    );
+    const newMaterials = draft.newMaterials.filter(
+      (material) => material.sourceMaterialName !== sourceMaterialName,
+    );
+    if (materialMapping?.targetMaterialId?.trim()) {
+      materialMappings.push(materialMapping);
+    }
+    if (newMaterial) {
+      newMaterials.push(newMaterial);
+    }
+
+    return {
+      ...draft,
+      options: { ...draft.options, materialMappings },
+      newMaterials,
+      hasPendingChanges: true,
+    };
+  });
+}
+
+export function collectWorkbookNewMaterials(
+  drafts: ImportWorksheetDraft[],
+): ImportNewMaterialRequest[] {
+  const grouped = new Map<string, ImportNewMaterialRequest[]>();
+  for (const material of drafts
+    .filter((draft) => draft.selected)
+    .flatMap((draft) => draft.newMaterials)) {
+    const label = material.sourceMaterialName.trim();
+    grouped.set(label, [...(grouped.get(label) ?? []), material]);
+  }
+
+  return Array.from(grouped.values()).flatMap((materials) => {
+    const distinctDefinitions = new Set(
+      materials.map((material) => JSON.stringify(material.material)),
+    );
+    return distinctDefinitions.size === 1 ? [materials[0]] : materials;
+  });
+}
+
 export function copyHeadingRangeFromPreviousSelectedWorksheet(
   drafts: ImportWorksheetDraft[],
   worksheetName: string,
-): ConfirmHeadingRangeResult {
+): WorksheetDraftOperationResult {
   const targetIndex = drafts.findIndex(
     (draft) => draft.worksheet.worksheetName === worksheetName,
   );
@@ -180,9 +303,52 @@ export function setWorkbookWorksheetSelected(
   worksheetName: string,
   selected: boolean,
 ): ImportWorksheetDraft[] {
+  const workbookMaterialMappings = new Map(
+    drafts
+      .filter((draft) => draft.selected)
+      .flatMap((draft) => draft.options.materialMappings)
+      .map((mapping) => [mapping.sourceMaterialName, mapping]),
+  );
+  const workbookNewMaterials = new Map(
+    drafts
+      .filter((draft) => draft.selected)
+      .flatMap((draft) => draft.newMaterials)
+      .map((material) => [material.sourceMaterialName, material]),
+  );
+
   return drafts.map((draft) =>
     draft.worksheet.worksheetName === worksheetName
-      ? { ...draft, selected }
+      ? {
+          ...draft,
+          selected,
+          options: selected
+            ? {
+                ...draft.options,
+                materialMappings: Array.from(
+                  new Map([
+                    ...draft.options.materialMappings.map(
+                      (mapping) => [mapping.sourceMaterialName, mapping] as const,
+                    ),
+                    ...workbookMaterialMappings,
+                  ]).values(),
+                ).filter(
+                  (mapping) => !workbookNewMaterials.has(mapping.sourceMaterialName),
+                ),
+              }
+            : draft.options,
+          newMaterials: selected
+            ? Array.from(
+                new Map([
+                  ...draft.newMaterials.map(
+                    (material) => [material.sourceMaterialName, material] as const,
+                  ),
+                  ...workbookNewMaterials,
+                ]).values(),
+              ).filter(
+                (material) => !workbookMaterialMappings.has(material.sourceMaterialName),
+              )
+            : draft.newMaterials,
+        }
       : draft,
   );
 }
@@ -214,6 +380,122 @@ function normalizeHeadingRangeAddress(address: string): string | undefined {
   }
 
   return `${match[1].toUpperCase()}${match[2]}:${match[3].toUpperCase()}${match[4]}`;
+}
+
+function confirmHeadingRange(
+  draft: ImportWorksheetDraft,
+  normalizedAddress: string,
+): ImportWorksheetDraft {
+  if (!draft.headingRangeConfirmed || draft.headingRange === normalizedAddress) {
+    return {
+      ...draft,
+      headingRange: normalizedAddress,
+      headingRangeConfirmed: true,
+      hasPendingChanges: true,
+    };
+  }
+
+  const reconciliation = reconcileMappingsByUniqueHeading(
+    draft.options.columnMappings,
+    draft.preview.sourceColumns,
+    sourceColumnsForHeadingRange(draft, normalizedAddress),
+  );
+  return {
+    ...draft,
+    headingRange: normalizedAddress,
+    headingRangeConfirmed: true,
+    options: {
+      ...draft.options,
+      columnMappings: reconciliation.mappings,
+    },
+    clearedColumnMappingFields: reconciliation.clearedFields,
+    hasPendingChanges: true,
+  };
+}
+
+function reconcileMappingsByUniqueHeading(
+  mappings: ImportColumnMapping[],
+  sourceColumns: ImportSourceColumn[],
+  targetColumns: ImportSourceColumn[],
+): { mappings: ImportColumnMapping[]; clearedFields: string[] } {
+  const uniqueSourceHeadings = uniqueHeadingAddresses(sourceColumns);
+  const uniqueTargetHeadings = uniqueHeadingAddresses(targetColumns);
+  const sourceHeadingByAddress = new Map(
+    sourceColumns.map((column) => [column.address.trim(), normalizeHeading(column.heading)]),
+  );
+  const retained: ImportColumnMapping[] = [];
+  const clearedFields: string[] = [];
+
+  for (const mapping of mappings) {
+    const normalizedHeading = sourceHeadingByAddress.get(mapping.sourceColumn.trim()) ?? '';
+    const sourceIsUnique = uniqueSourceHeadings.get(normalizedHeading) === mapping.sourceColumn.trim();
+    const targetAddress = sourceIsUnique
+      ? uniqueTargetHeadings.get(normalizedHeading)
+      : undefined;
+    if (normalizedHeading.length > 0 && targetAddress) {
+      retained.push({ sourceColumn: targetAddress, targetField: mapping.targetField });
+    } else {
+      clearedFields.push(mapping.targetField);
+    }
+  }
+
+  return { mappings: retained, clearedFields };
+}
+
+function uniqueHeadingAddresses(
+  columns: ImportSourceColumn[],
+): Map<string, string> {
+  const grouped = new Map<string, string[]>();
+  for (const column of columns) {
+    const normalized = normalizeHeading(column.heading);
+    if (normalized.length === 0) {
+      continue;
+    }
+    grouped.set(normalized, [...(grouped.get(normalized) ?? []), column.address.trim()]);
+  }
+
+  return new Map(
+    Array.from(grouped.entries())
+      .filter(([, addresses]) => addresses.length === 1)
+      .map(([heading, addresses]) => [heading, addresses[0]]),
+  );
+}
+
+function sourceColumnsForDraft(
+  draft: ImportWorksheetDraft,
+): ImportSourceColumn[] {
+  const fromRange = sourceColumnsForHeadingRange(draft, draft.headingRange);
+  return fromRange.length > 0 ? fromRange : draft.preview.sourceColumns;
+}
+
+function sourceColumnsForHeadingRange(
+  draft: ImportWorksheetDraft,
+  address: string,
+): ImportSourceColumn[] {
+  const match = /^([A-Z]+)([1-9]\d*):([A-Z]+)([1-9]\d*)$/.exec(address);
+  if (!match || match[2] !== match[4]) {
+    return [];
+  }
+
+  const firstColumn = columnNumber(match[1]);
+  const lastColumn = columnNumber(match[3]);
+  const row = draft.worksheet.previewRows?.find(
+    (previewRow) => previewRow.rowNumber === Number(match[2]),
+  );
+  return (row?.cells ?? [])
+    .filter(
+      (cell) => cell.columnNumber >= firstColumn && cell.columnNumber <= lastColumn,
+    )
+    .map((cell) => ({
+      address: cell.address.replace(/[0-9]+$/, ''),
+      heading: cell.value,
+    }));
+}
+
+function normalizeHeading(value: string): string {
+  return Array.from(value.toLowerCase())
+    .filter((character) => /[\p{L}\p{N}]/u.test(character))
+    .join('');
 }
 
 function columnNumber(letters: string): number {

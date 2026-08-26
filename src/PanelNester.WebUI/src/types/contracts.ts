@@ -390,6 +390,7 @@ export interface ImportWorksheetDraft {
   hasPendingChanges: boolean;
   headingRange: string;
   headingRangeConfirmed: boolean;
+  clearedColumnMappingFields?: string[];
 }
 
 export interface Material {

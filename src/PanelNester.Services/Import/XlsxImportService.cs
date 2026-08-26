@@ -149,14 +149,35 @@ public sealed class XlsxImportService : IImportService
                 HeadingRange = headingRange.RangeAddress.ToStringRelative()
             };
 
-            sourceColumns = Enumerable.Range(firstHeadingColumn, lastHeadingColumn - firstHeadingColumn + 1)
+            var headingColumns = Enumerable.Range(
+                    firstHeadingColumn,
+                    lastHeadingColumn - firstHeadingColumn + 1)
                 .Select(columnNumber => new ImportSourceColumn
                 {
                     Address = XLHelper.GetColumnLetterFromNumber(columnNumber),
                     Heading = GetCellText(worksheet.Cell(headingRowNumber, columnNumber))
                 })
                 .ToArray();
+            sourceColumns = headingColumns
+                .Where(column => !string.IsNullOrWhiteSpace(column.Heading))
+                .ToArray();
             availableColumns = sourceColumns.Select(column => column.Address).ToArray();
+
+            var lastTableRegionRow = worksheet.LastRowUsed()?.RowNumber() ?? headingRowNumber;
+            foreach (var blankHeading in headingColumns.Where(column => string.IsNullOrWhiteSpace(column.Heading)))
+            {
+                var columnNumber = XLHelper.GetColumnNumberFromLetter(blankHeading.Address);
+                var containsData = Enumerable
+                    .Range(headingRowNumber + 1, Math.Max(0, lastTableRegionRow - headingRowNumber))
+                    .Any(rowNumber => !string.IsNullOrWhiteSpace(GetCellText(worksheet.Cell(rowNumber, columnNumber))));
+                if (containsData)
+                {
+                    warnings.Add(new ValidationWarning(
+                        "ignored-data-without-heading",
+                        $"Worksheet column {blankHeading.Address} contains data but its Heading Range cell is blank, so that data was ignored."));
+                }
+            }
+
             var columnPlan = _mappingResolver.ResolveWorksheetColumns(sourceColumns, request.Options, errors);
             columnMappings = columnPlan.FieldMappings;
 
@@ -184,7 +205,6 @@ public sealed class XlsxImportService : IImportService
             var hasRowNumberColumn = columnPlan.FieldToSource.TryGetValue(ImportFieldNames.RowNumber, out var rowNumberSourceColumn);
             var hasColumnNumberColumn = columnPlan.FieldToSource.TryGetValue(ImportFieldNames.ColumnNumber, out var columnNumberSourceColumn);
 
-            var lastTableRegionRow = worksheet.LastRowUsed()?.RowNumber() ?? headingRowNumber;
             foreach (var row in Enumerable.Range(headingRowNumber + 1, Math.Max(0, lastTableRegionRow - headingRowNumber))
                          .Select(worksheet.Row))
             {

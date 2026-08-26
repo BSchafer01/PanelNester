@@ -5,18 +5,24 @@ import { ThemedSelect, type ThemedSelectOption } from '../components/ThemedSelec
 import {
   applyHighConfidenceHeadingRanges,
   confirmWorksheetHeadingRange,
+  copyColumnMappingsFromPreviousSelectedWorksheet,
   copyHeadingRangeFromPreviousSelectedWorksheet,
   getWorksheetNavigationStatus,
   headingRangeFromPreviewCells,
   setWorkbookWorksheetSelected,
   summarizeHighConfidenceHeadingRanges,
+  synchronizeWorkbookMaterialResolution,
   type BulkHeadingRangeConfirmationSummary,
+  type WorksheetDraftOperationResult,
 } from './workbookImportDraftState';
 import {
   requiredImportFieldNames,
   type HostBridgeSnapshot,
   type ImportFieldName,
   type ImportMappingSession,
+  type ImportMaterialMapping,
+  type ImportNewMaterialRequest,
+  type ImportWorksheetDraft,
   type ImportSessionPhase,
   type ImportMaterialResolution,
   type Material,
@@ -89,7 +95,7 @@ interface ImportPageProps {
   readyMaterialCount: number;
   onImportFile: () => Promise<void>;
   onUpdateImportMappingSession: (session: ImportMappingSession) => void;
-  onPreviewImportMapping: () => Promise<void>;
+  onPreviewImportMapping: (sessionOverride?: ImportMappingSession) => Promise<void>;
   onFinalizeImportMapping: () => Promise<void>;
   onCancelImportMapping: () => void | Promise<void>;
   onAddPartRow: (part: PartRowUpdate) => Promise<void>;
@@ -326,6 +332,25 @@ function updateColumnMapping(
   };
 }
 
+function synchronizeMaterialResolutionInSession(
+  session: ImportMappingSession,
+  sourceMaterialName: string,
+  materialMapping?: ImportMaterialMapping,
+  newMaterial?: ImportNewMaterialRequest,
+): ImportMappingSession {
+  return session.worksheets
+    ? {
+        ...session,
+        worksheets: synchronizeWorkbookMaterialResolution(
+          session.worksheets,
+          sourceMaterialName,
+          materialMapping,
+          newMaterial,
+        ),
+      }
+    : session;
+}
+
 function updateExistingMaterialMapping(
   session: ImportMappingSession,
   sourceMaterialName: string,
@@ -342,7 +367,7 @@ function updateExistingMaterialMapping(
     });
   }
 
-  return {
+  const nextSession = {
     ...session,
     options: {
       ...session.options,
@@ -353,6 +378,14 @@ function updateExistingMaterialMapping(
     ),
     hasPendingChanges: true,
   };
+  const materialMapping = materialId.trim().length > 0
+    ? { sourceMaterialName, targetMaterialId: materialId }
+    : undefined;
+  return synchronizeMaterialResolutionInSession(
+    nextSession,
+    sourceMaterialName,
+    materialMapping,
+  );
 }
 
 function startNewMaterialMapping(
@@ -363,7 +396,11 @@ function startNewMaterialMapping(
     (material) => material.sourceMaterialName === sourceMaterialName,
   );
 
-  return {
+  const newMaterial = existingDraft ?? {
+    sourceMaterialName,
+    material: createMaterialDraft(sourceMaterialName),
+  };
+  const nextSession = {
     ...session,
     options: {
       ...session.options,
@@ -371,17 +408,15 @@ function startNewMaterialMapping(
         (mapping) => mapping.sourceMaterialName !== sourceMaterialName,
       ),
     },
-    newMaterials: existingDraft
-      ? session.newMaterials
-      : [
-          ...session.newMaterials,
-          {
-            sourceMaterialName,
-            material: createMaterialDraft(sourceMaterialName),
-          },
-        ],
+    newMaterials: existingDraft ? session.newMaterials : [...session.newMaterials, newMaterial],
     hasPendingChanges: true,
   };
+  return synchronizeMaterialResolutionInSession(
+    nextSession,
+    sourceMaterialName,
+    undefined,
+    newMaterial,
+  );
 }
 
 function updateNewMaterialDraft(
@@ -389,7 +424,8 @@ function updateNewMaterialDraft(
   sourceMaterialName: string,
   material: MaterialDraft,
 ): ImportMappingSession {
-  return {
+  const newMaterial = { sourceMaterialName, material };
+  const nextSession = {
     ...session,
     newMaterials: session.newMaterials.map((entry) =>
       entry.sourceMaterialName === sourceMaterialName
@@ -398,19 +434,26 @@ function updateNewMaterialDraft(
     ),
     hasPendingChanges: true,
   };
+  return synchronizeMaterialResolutionInSession(
+    nextSession,
+    sourceMaterialName,
+    undefined,
+    newMaterial,
+  );
 }
 
 function cancelNewMaterialMapping(
   session: ImportMappingSession,
   sourceMaterialName: string,
 ): ImportMappingSession {
-  return {
+  const nextSession = {
     ...session,
     newMaterials: session.newMaterials.filter(
       (material) => material.sourceMaterialName !== sourceMaterialName,
     ),
     hasPendingChanges: true,
   };
+  return synchronizeMaterialResolutionInSession(nextSession, sourceMaterialName);
 }
 
 function getResolutionTone(
@@ -971,10 +1014,14 @@ export function ImportPage({
     });
   };
 
-  const confirmHeadingRange = (worksheetName: string, address: string) => {
+  const confirmHeadingRange = async (worksheetName: string, address: string) => {
     if (!mappingSession?.worksheets) {
       return;
     }
+
+    const previousDraft = mappingSession.worksheets.find(
+      (draft) => draft.worksheet.worksheetName === worksheetName,
+    );
 
     const result = confirmWorksheetHeadingRange(
       mappingSession.worksheets,
@@ -994,8 +1041,19 @@ export function ImportPage({
       return;
     }
 
+    const changedDraft = result.drafts.find(
+      (draft) => draft.worksheet.worksheetName === worksheetName,
+    );
+    const headingRangeChanged = Boolean(
+      previousDraft?.headingRangeConfirmed &&
+      changedDraft &&
+      previousDraft.headingRange !== changedDraft.headingRange,
+    );
+    const activeWorksheetName = headingRangeChanged
+      ? worksheetName
+      : mappingSession.activeWorksheetName;
     const activeDraft = result.drafts.find(
-      (draft) => draft.worksheet.worksheetName === mappingSession.activeWorksheetName,
+      (draft) => draft.worksheet.worksheetName === activeWorksheetName,
     );
     setHeadingRangeInputs((current) => ({
       ...current,
@@ -1004,22 +1062,37 @@ export function ImportPage({
       )?.headingRange ?? address,
     }));
     setHeadingRangeErrors((current) => ({ ...current, [worksheetName]: '' }));
-    onUpdateImportMappingSession({
+    const nextSession = {
       ...mappingSession,
       worksheets: result.drafts,
+      activeWorksheetName,
+      preview: activeDraft?.preview ?? mappingSession.preview,
+      options: activeDraft?.options ?? mappingSession.options,
+      newMaterials: activeDraft?.newMaterials ?? mappingSession.newMaterials,
       hasPendingChanges: activeDraft?.hasPendingChanges ?? mappingSession.hasPendingChanges,
-    });
+    };
+    onUpdateImportMappingSession(nextSession);
+    if (headingRangeChanged) {
+      await onPreviewImportMapping(nextSession);
+    }
   };
 
-  const copyPreviousHeadingRange = (worksheetName: string) => {
+  const copyFromPreviousWorksheet = async (
+    worksheetName: string,
+    operation: (
+      drafts: ImportWorksheetDraft[],
+      targetWorksheetName: string,
+    ) => WorksheetDraftOperationResult,
+    updateHeadingRangeInput: boolean,
+  ) => {
     if (!mappingSession?.worksheets) {
       return;
     }
 
-    const result = copyHeadingRangeFromPreviousSelectedWorksheet(
-      mappingSession.worksheets,
-      worksheetName,
+    const previousDraft = mappingSession.worksheets.find(
+      (draft) => draft.worksheet.worksheetName === worksheetName,
     );
+    const result = operation(mappingSession.worksheets, worksheetName);
     if (result.error) {
       setHeadingRangeErrors((current) => ({ ...current, [worksheetName]: result.error! }));
       return;
@@ -1028,18 +1101,53 @@ export function ImportPage({
     const copied = result.drafts.find(
       (draft) => draft.worksheet.worksheetName === worksheetName,
     );
-    setHeadingRangeInputs((current) => ({
-      ...current,
-      [worksheetName]: copied?.headingRange ?? '',
-    }));
-    const activeDraft = result.drafts.find(
-      (draft) => draft.worksheet.worksheetName === mappingSession.activeWorksheetName,
+    if (updateHeadingRangeInput) {
+      setHeadingRangeInputs((current) => ({
+        ...current,
+        [worksheetName]: copied?.headingRange ?? '',
+      }));
+    }
+    const headingRangeChanged = Boolean(
+      updateHeadingRangeInput &&
+      previousDraft?.headingRangeConfirmed &&
+      copied &&
+      previousDraft.headingRange !== copied.headingRange,
     );
-    onUpdateImportMappingSession({
+    const activeWorksheetName = headingRangeChanged
+      ? worksheetName
+      : mappingSession.activeWorksheetName;
+    const activeDraft = result.drafts.find(
+      (draft) => draft.worksheet.worksheetName === activeWorksheetName,
+    );
+    const nextSession = {
       ...mappingSession,
       worksheets: result.drafts,
+      activeWorksheetName,
+      preview: activeDraft?.preview ?? mappingSession.preview,
+      options: activeDraft?.options ?? mappingSession.options,
+      newMaterials: activeDraft?.newMaterials ?? mappingSession.newMaterials,
       hasPendingChanges: activeDraft?.hasPendingChanges ?? mappingSession.hasPendingChanges,
-    });
+    };
+    onUpdateImportMappingSession(nextSession);
+    if (headingRangeChanged) {
+      await onPreviewImportMapping(nextSession);
+    }
+  };
+
+  const copyPreviousHeadingRange = (worksheetName: string) => {
+    void copyFromPreviousWorksheet(
+      worksheetName,
+      copyHeadingRangeFromPreviousSelectedWorksheet,
+      true,
+    );
+  };
+
+  const copyPreviousColumnMappings = (worksheetName: string) => {
+    void copyFromPreviousWorksheet(
+      worksheetName,
+      copyColumnMappingsFromPreviousSelectedWorksheet,
+      false,
+    );
   };
 
   const prepareBulkHeadingConfirmation = () => {
@@ -1725,6 +1833,40 @@ export function ImportPage({
                 Map each required field to one source column from the file header. Part Group
                 is optional and can stay blank to keep imported rows ungrouped.
               </p>
+
+              {activeWorksheetDraft ? (
+                <div className="module-toolbar-group">
+                  <button
+                    className="secondary-button"
+                    disabled={
+                      busy ||
+                      !activeWorksheetDraft.headingRangeConfirmed ||
+                      !worksheetDrafts
+                        .slice(0, worksheetDrafts.indexOf(activeWorksheetDraft))
+                        .some(
+                          (previous) =>
+                            previous.selected &&
+                            previous.headingRangeConfirmed &&
+                            previous.options.columnMappings.length > 0,
+                        )
+                    }
+                    onClick={() =>
+                      copyPreviousColumnMappings(
+                        activeWorksheetDraft.worksheet.worksheetName,
+                      )
+                    }
+                    type="button"
+                  >
+                    Copy Mappings from Previous
+                  </button>
+                </div>
+              ) : null}
+
+              {(activeWorksheetDraft?.clearedColumnMappingFields?.length ?? 0) > 0 ? (
+                <p className="mapping-warning" role="status">
+                  Review cleared mappings: {activeWorksheetDraft!.clearedColumnMappingFields!.join(', ')}.
+                </p>
+              ) : null}
 
               <div className="module-mapping-grid">
                 {mappingSession.preview.columnMappings.map((mapping) => {

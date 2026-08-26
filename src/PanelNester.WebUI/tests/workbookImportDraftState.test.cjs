@@ -31,13 +31,17 @@ const statePath = path.join(
 );
 const {
   applyHighConfidenceHeadingRanges,
+  collectWorkbookNewMaterials,
   confirmWorksheetHeadingRange,
+  copyColumnMappingsFromPreviousSelectedWorksheet,
   copyHeadingRangeFromPreviousSelectedWorksheet,
   createWorkbookWorksheetDrafts,
   getWorksheetNavigationStatus,
   headingRangeFromPreviewCells,
+  mergeRecognizedColumnMappings,
   setWorkbookWorksheetSelected,
   summarizeHighConfidenceHeadingRanges,
+  synchronizeWorkbookMaterialResolution,
 } = loadTsModule(statePath);
 
 const workbook = {
@@ -138,6 +142,188 @@ test('Same Heading Range as Previous copies an independently editable snapshot a
 
   assert.equal(drafts[1].headingRange, 'B4:H4');
   assert.equal(drafts[1].headingRangeConfirmed, true);
+});
+
+test('Copy Mappings from Previous matches only unique normalized heading labels and keeps Heading Ranges independent', () => {
+  let drafts = createWorkbookWorksheetDrafts('fixture', workbook, preview, options)
+    .map((draft) => ({ ...draft, selected: true, headingRangeConfirmed: true }));
+  drafts[0] = {
+    ...drafts[0],
+    headingRange: 'A1:D1',
+    preview: {
+      ...preview,
+      sourceColumns: [
+        { address: 'A', heading: 'Part ID' },
+        { address: 'B', heading: 'Width' },
+        { address: 'C', heading: 'Length' },
+        { address: 'D', heading: 'W-i-d-t-h' },
+      ],
+    },
+    options: {
+      ...options,
+      columnMappings: [
+        { sourceColumn: 'A', targetField: 'Id' },
+        { sourceColumn: 'B', targetField: 'Width' },
+        { sourceColumn: 'C', targetField: 'Length' },
+      ],
+    },
+  };
+  drafts[1] = {
+    ...drafts[1],
+    headingRange: 'D4:G4',
+    preview: {
+      ...preview,
+      sourceColumns: [
+        { address: 'D', heading: 'Length' },
+        { address: 'E', heading: 'Part-ID' },
+        { address: 'F', heading: 'Width' },
+        { address: 'G', heading: 'Width' },
+      ],
+    },
+    options: { columnMappings: [], materialMappings: [] },
+  };
+
+  const result = copyColumnMappingsFromPreviousSelectedWorksheet(drafts, 'Second');
+  const copied = result.drafts[1];
+
+  assert.equal(result.error, undefined);
+  assert.equal(copied.headingRange, 'D4:G4');
+  assert.deepEqual(copied.options.columnMappings, [
+    { sourceColumn: 'E', targetField: 'Id' },
+    { sourceColumn: 'D', targetField: 'Length' },
+  ]);
+  assert.deepEqual(copied.clearedColumnMappingFields, ['Width']);
+});
+
+test('changing a confirmed Heading Range keeps only mappings whose normalized labels remain unique', () => {
+  const rangeWorkbook = {
+    ...workbook,
+    worksheets: [{
+      ...workbook.worksheets[0],
+      headingRange: 'A1:E1',
+      previewRows: [{
+        rowNumber: 3,
+        cells: [
+          { address: 'C3', columnNumber: 3, value: 'Width' },
+          { address: 'D3', columnNumber: 4, value: 'Id' },
+          { address: 'E3', columnNumber: 5, value: 'Material' },
+          { address: 'F3', columnNumber: 6, value: 'Length' },
+          { address: 'G3', columnNumber: 7, value: 'Quantity' },
+          { address: 'H3', columnNumber: 8, value: 'W-i-d-t-h' },
+        ],
+      }],
+    }],
+  };
+  let drafts = createWorkbookWorksheetDrafts('fixture', rangeWorkbook, {
+    ...preview,
+    sourceColumns: [
+      { address: 'A', heading: 'Id' },
+      { address: 'B', heading: 'Length' },
+      { address: 'C', heading: 'Width' },
+      { address: 'D', heading: 'Quantity' },
+      { address: 'E', heading: 'Material' },
+    ],
+  }, {
+    columnMappings: [
+      { sourceColumn: 'A', targetField: 'Id' },
+      { sourceColumn: 'B', targetField: 'Length' },
+      { sourceColumn: 'C', targetField: 'Width' },
+      { sourceColumn: 'D', targetField: 'Quantity' },
+      { sourceColumn: 'E', targetField: 'Material' },
+    ],
+    materialMappings: [],
+  });
+  drafts = confirmWorksheetHeadingRange(drafts, 'First', 'A1:E1').drafts;
+
+  const changed = confirmWorksheetHeadingRange(drafts, 'First', 'C3:H3').drafts[0];
+
+  assert.deepEqual(changed.options.columnMappings, [
+    { sourceColumn: 'D', targetField: 'Id' },
+    { sourceColumn: 'F', targetField: 'Length' },
+    { sourceColumn: 'G', targetField: 'Quantity' },
+    { sourceColumn: 'E', targetField: 'Material' },
+  ]);
+  assert.deepEqual(changed.clearedColumnMappingFields, ['Width']);
+  assert.equal(changed.hasPendingChanges, true);
+});
+
+test('refreshed recognition prefills newly unambiguous aliases without replacing retained mappings', () => {
+  const existingOptions = {
+    columnMappings: [
+      { sourceColumn: 'D', targetField: 'Id' },
+      { sourceColumn: 'F', targetField: 'Length' },
+    ],
+    materialMappings: [
+      { sourceMaterialName: 'Shared Label', targetMaterialId: 'material-a' },
+    ],
+  };
+  const refreshed = {
+    ...preview,
+    columnMappings: [
+      { sourceColumn: 'D', targetField: 'Id' },
+      { sourceColumn: 'F', targetField: 'Length' },
+      { targetField: 'Width', suggestedSourceColumn: 'C' },
+    ],
+  };
+
+  assert.deepEqual(mergeRecognizedColumnMappings(existingOptions, refreshed), {
+    columnMappings: [
+      { sourceColumn: 'D', targetField: 'Id' },
+      { sourceColumn: 'F', targetField: 'Length' },
+      { sourceColumn: 'C', targetField: 'Width' },
+    ],
+    materialMappings: existingOptions.materialMappings,
+  });
+});
+
+test('one Material Resolution is synchronized across selected Worksheets and Optimization Groups', () => {
+  let drafts = createWorkbookWorksheetDrafts('fixture', workbook, preview, options)
+    .map((draft, index) => ({
+      ...draft,
+      selected: index < 2,
+      optimizationGroupId: index === 0 ? 'group-a' : 'group-b',
+      options: {
+        ...draft.options,
+        materialMappings: index === 0
+          ? [{ sourceMaterialName: 'Shared Label', targetMaterialId: 'old-material' }]
+          : [],
+      },
+    }));
+
+  drafts = synchronizeWorkbookMaterialResolution(
+    drafts,
+    'Shared Label',
+    { sourceMaterialName: 'Shared Label', targetMaterialId: 'material-a' },
+  );
+
+  assert.deepEqual(
+    drafts.slice(0, 2).map((draft) => draft.options.materialMappings),
+    [
+      [{ sourceMaterialName: 'Shared Label', targetMaterialId: 'material-a' }],
+      [{ sourceMaterialName: 'Shared Label', targetMaterialId: 'material-a' }],
+    ],
+  );
+  assert.deepEqual(drafts[2].options.materialMappings, []);
+
+  drafts = setWorkbookWorksheetSelected(drafts, 'Third', true);
+  assert.deepEqual(drafts[2].options.materialMappings, [
+    { sourceMaterialName: 'Shared Label', targetMaterialId: 'material-a' },
+  ]);
+});
+
+test('Workbook finalization submits one shared new Material Resolution only once', () => {
+  const sharedCreation = {
+    sourceMaterialName: 'Shared Label',
+    material: { name: 'Created Material' },
+  };
+  const drafts = createWorkbookWorksheetDrafts('fixture', workbook, preview, options)
+    .map((draft, index) => ({
+      ...draft,
+      selected: index < 2,
+      newMaterials: index < 2 ? [sharedCreation] : [],
+    }));
+
+  assert.deepEqual(collectWorkbookNewMaterials(drafts), [sharedCreation]);
 });
 
 test('bulk confirmation summarizes and applies only unique high-confidence detections', () => {

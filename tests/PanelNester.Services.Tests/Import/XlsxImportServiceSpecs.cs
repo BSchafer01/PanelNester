@@ -173,6 +173,115 @@ public sealed class XlsxImportServiceSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Excel_import_leaves_duplicate_normalized_headings_unresolved_without_an_explicit_mapping()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "ambiguous-duplicate-headings.xlsx");
+        using (var workbook = new XLWorkbook())
+        {
+            var worksheet = workbook.AddWorksheet("Parts");
+            string[] headings = ["Id", "Length", "Width", "Quantity", "Material", "W-i-d-t-h"];
+            for (var index = 0; index < headings.Length; index++)
+            {
+                worksheet.Cell(1, index + 1).Value = headings[index];
+            }
+
+            worksheet.Cell(2, 1).Value = "P-001";
+            worksheet.Cell(2, 2).Value = 20;
+            worksheet.Cell(2, 3).Value = 10;
+            worksheet.Cell(2, 4).Value = 1;
+            worksheet.Cell(2, 5).Value = "Demo Material";
+            worksheet.Cell(2, 6).Value = 42;
+            workbook.SaveAs(workbookPath);
+        }
+
+        var response = await new XlsxImportService().ImportAsync(new ImportRequest
+        {
+            FilePath = workbookPath
+        });
+
+        var widthMapping = Assert.Single(
+            response.ColumnMappings,
+            mapping => mapping.TargetField == ImportFieldNames.Width);
+        Assert.False(response.Success);
+        Assert.Null(widthMapping.SourceColumn);
+        Assert.Null(widthMapping.SuggestedSourceColumn);
+        Assert.Contains(
+            response.Errors,
+            error => error.Code == "missing-column" && error.Message.Contains("Width", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Excel_import_ignores_blank_heading_columns_and_warns_when_they_contain_data()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "blank-heading-data.xlsx");
+        using (var workbook = new XLWorkbook())
+        {
+            var worksheet = workbook.AddWorksheet("Parts");
+            string[] headings = ["Id", "Length", "Width", "Quantity", "Material"];
+            for (var index = 0; index < headings.Length; index++)
+            {
+                worksheet.Cell(1, index + 1).Value = headings[index];
+            }
+
+            worksheet.Cell("A2").Value = "P-001";
+            worksheet.Cell("B2").Value = 20;
+            worksheet.Cell("C2").Value = 10;
+            worksheet.Cell("D2").Value = 1;
+            worksheet.Cell("E2").Value = "Demo Material";
+            worksheet.Cell("F2").Value = "must be ignored";
+            workbook.SaveAs(workbookPath);
+        }
+
+        var response = await new XlsxImportService().ImportAsync(new ImportRequest
+        {
+            FilePath = workbookPath,
+            HeadingRange = "A1:F1"
+        });
+
+        Assert.True(response.Success);
+        Assert.DoesNotContain(response.SourceColumns, column => column.Address == "F");
+        Assert.Contains(
+            response.Warnings,
+            warning => warning.Code == "ignored-data-without-heading" &&
+                       warning.Message.Contains("F", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Excel_import_prefills_unique_aliases_for_a_shifted_and_reordered_schema()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "shifted-reordered-aliases.xlsx");
+        using (var workbook = new XLWorkbook())
+        {
+            var worksheet = workbook.AddWorksheet("Parts");
+            string[] headings = ["Stock", "Qty", "Part No", "Wid", "Len"];
+            for (var index = 0; index < headings.Length; index++)
+            {
+                worksheet.Cell(3, index + 3).Value = headings[index];
+            }
+
+            workbook.SaveAs(workbookPath);
+        }
+
+        var response = await new XlsxImportService().ImportAsync(new ImportRequest
+        {
+            FilePath = workbookPath,
+            HeadingRange = "C3:G3"
+        });
+
+        Assert.False(response.Success);
+        Assert.Collection(
+            response.ColumnMappings.Take(5),
+            mapping => Assert.Equal("E", mapping.SuggestedSourceColumn),
+            mapping => Assert.Equal("G", mapping.SuggestedSourceColumn),
+            mapping => Assert.Equal("F", mapping.SuggestedSourceColumn),
+            mapping => Assert.Equal("D", mapping.SuggestedSourceColumn),
+            mapping => Assert.Equal("C", mapping.SuggestedSourceColumn));
+    }
+
+    [Fact]
     public async Task Xlsx_import_matches_csv_validation_output_for_equivalent_rows()
     {
         Directory.CreateDirectory(_workspacePath);
