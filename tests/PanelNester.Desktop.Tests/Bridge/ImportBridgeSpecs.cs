@@ -2884,6 +2884,231 @@ public sealed class ImportBridgeSpecs : IDisposable
         Assert.Null(Assert.Single(response.Parts).Group);
     }
 
+    [Theory]
+    [InlineData(".xlsx")]
+    [InlineData(".xlsm")]
+    public async Task Stock_length_Workbook_uses_group_lengths_despite_mismatched_Worksheet_values_and_reconciles_reimport(
+        string extension)
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, $"stock-multi{extension}");
+        using (var workbook = new XLWorkbook())
+        {
+            WriteStockWorksheet(workbook.AddWorksheet("Frames"), 2, 48, "P-100", "A-1");
+            WriteStockWorksheet(workbook.AddWorksheet("Doors"), 3, 48, "P-100", "A-1");
+            WriteStockWorksheet(workbook.AddWorksheet("Rails"), 4, 72, "P-200", "B-1");
+            workbook.SaveAs(workbookPath);
+        }
+
+        var dispatcher = CreateDispatcher();
+        var sessionId = $"stock-multi-{Guid.NewGuid():N}";
+        var started = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest
+            {
+                SessionId = sessionId,
+                ImportSourcePath = workbookPath,
+                ProjectKind = ProjectKind.StockLength
+            });
+        Assert.True(started.Success);
+        Assert.Equal(["Frames", "Doors", "Rails"], started.Workbook?.Worksheets.Select(item => item.WorksheetName));
+
+        var stockOptions = new ImportOptions
+        {
+            ProjectKind = ProjectKind.StockLength,
+            ColumnMappings =
+            [
+                new ImportColumnMapping { SourceColumn = "A", TargetField = ImportFieldNames.Quantity },
+                new ImportColumnMapping { SourceColumn = "B", TargetField = ImportFieldNames.Length },
+                new ImportColumnMapping { SourceColumn = "C", TargetField = ImportFieldNames.ProfileNumber },
+                new ImportColumnMapping { SourceColumn = "D", TargetField = ImportFieldNames.PartName },
+                new ImportColumnMapping { SourceColumn = "E", TargetField = ImportFieldNames.Finish },
+                new ImportColumnMapping { SourceColumn = "F", TargetField = ImportFieldNames.PartNumber }
+            ]
+        };
+        var frames = await PreviewStockWorksheetSelectionAsync(
+            dispatcher, sessionId, "Frames", 1, "shared", "Shared", "A1:F1", stockOptions);
+        var doors = await PreviewStockWorksheetSelectionAsync(
+            dispatcher, sessionId, "Doors", 2, "shared", "Shared", "A1:F1", stockOptions);
+        var rails = await PreviewStockWorksheetSelectionAsync(
+            dispatcher, sessionId, "Rails", 3, "rails", "Rails", "A1:F1", stockOptions);
+        var project = new Project
+        {
+            ProjectId = "stock-workbook-project",
+            ProjectKind = ProjectKind.StockLength,
+            State = new ProjectState
+            {
+                OptimizationGroups =
+                [
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "shared",
+                        Name = "Shared",
+                        StockLength = 240
+                    },
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "rails",
+                        Name = "Rails",
+                        StockLength = 144
+                    }
+                ]
+            }
+        };
+
+        // Worksheet-local Stock Length is intentionally absent from the contract. Unknown values from an
+        // older or malicious caller must not override the Optimization Group's shared Stock Length.
+        var finalizePayload = JsonSerializer.SerializeToNode(
+            new FinalizeImportSessionRequest
+            {
+                SessionId = sessionId,
+                Project = project,
+                Worksheets = [doors, rails, frames]
+            },
+            SerializerOptions)!.AsObject();
+        var worksheetPayloads = finalizePayload["worksheets"]!.AsArray();
+        worksheetPayloads[0]!.AsObject()["stockLength"] = 96;
+        worksheetPayloads[1]!.AsObject()["stockLength"] = 120;
+        worksheetPayloads[2]!.AsObject()["stockLength"] = 144;
+        var finalized = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.FinalizeImportSession,
+            JsonSerializer.SerializeToElement(finalizePayload, SerializerOptions));
+
+        Assert.True(finalized.Success, finalized.Message);
+        var groups = finalized.Project!.State.OptimizationGroups.ToDictionary(group => group.OptimizationGroupId);
+        var sharedPiece = Assert.Single(groups["shared"].RequiredPieces);
+        Assert.Equal(240, groups["shared"].StockLength);
+        Assert.Equal(5, sharedPiece.Quantity);
+        Assert.Equal(["Frames!2", "Doors!2"], sharedPiece.SourceReferences.Select(reference =>
+            $"{reference.WorksheetName}!{reference.PhysicalRow}"));
+        var railsPiece = Assert.Single(groups["rails"].RequiredPieces);
+        Assert.Equal(144, groups["rails"].StockLength);
+        Assert.Equal(4, railsPiece.Quantity);
+        Assert.Equal(
+            ["Frames", "Doors", "Rails"],
+            finalized.Project.State.ImportConfiguration!.Worksheets.Select(item => item.WorksheetName));
+        Assert.Equal(
+            ["shared", "shared", "rails"],
+            finalized.Project.State.ImportConfiguration.Worksheets.Select(item => item.OptimizationGroupId));
+
+        var originalPieces = groups.Values
+            .SelectMany(group => group.RequiredPieces)
+            .ToDictionary(piece => piece.RequiredPieceId);
+        var reimportSessionId = $"stock-multi-reimport-{Guid.NewGuid():N}";
+        var restarted = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest
+            {
+                SessionId = reimportSessionId,
+                ImportSourcePath = workbookPath,
+                ProjectKind = ProjectKind.StockLength
+            });
+        Assert.True(restarted.Success);
+
+        var reimportSelections = new List<ImportWorksheetSelection>();
+        foreach (var saved in finalized.Project.State.ImportConfiguration.Worksheets)
+        {
+            var groupId = Assert.IsType<string>(saved.OptimizationGroupId);
+            var savedOptions = new ImportOptions
+            {
+                ProjectKind = ProjectKind.StockLength,
+                ColumnMappings = saved.ColumnMappings
+            };
+            reimportSelections.Add(await PreviewStockWorksheetSelectionAsync(
+                dispatcher,
+                reimportSessionId,
+                saved.WorksheetName,
+                saved.OriginalPosition,
+                groupId,
+                groups[groupId].Name,
+                saved.HeadingRange,
+                savedOptions));
+        }
+
+        var reimported = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.FinalizeImportSession,
+            new FinalizeImportSessionRequest
+            {
+                SessionId = reimportSessionId,
+                Project = finalized.Project,
+                ReplaceExistingImportSource = true,
+                Worksheets = reimportSelections
+            });
+
+        Assert.True(reimported.Success, reimported.Message);
+        var reconciledPieces = reimported.Project!.State.OptimizationGroups
+            .SelectMany(group => group.RequiredPieces)
+            .ToDictionary(piece => piece.RequiredPieceId);
+        Assert.Equal(originalPieces.Keys.Order(), reconciledPieces.Keys.Order());
+        Assert.All(originalPieces, item => Assert.Equal(
+            item.Value.SourceReferences.Select(reference => reference.SourceFingerprint),
+            reconciledPieces[item.Key].SourceReferences.Select(reference => reference.SourceFingerprint)));
+    }
+
+    [Theory]
+    [InlineData(".xlsx")]
+    [InlineData(".xlsm")]
+    public async Task Stock_length_Workbook_rejects_bulk_assignment_to_a_group_without_shared_Stock_Length(
+        string extension)
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, $"stock-mismatched{extension}");
+        using (var workbook = new XLWorkbook())
+        {
+            WriteStockWorksheet(workbook.AddWorksheet("Frames"), 2, 48, "P-100", "A-1");
+            WriteStockWorksheet(workbook.AddWorksheet("Doors"), 3, 48, "P-100", "A-1");
+            workbook.SaveAs(workbookPath);
+        }
+
+        var dispatcher = CreateDispatcher();
+        var sessionId = $"stock-mismatched-{Guid.NewGuid():N}";
+        var started = await DispatchAsync<ImportSessionResponse>(dispatcher, BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest
+            {
+                SessionId = sessionId,
+                ImportSourcePath = workbookPath,
+                ProjectKind = ProjectKind.StockLength
+            });
+        Assert.True(started.Success);
+        var options = new ImportOptions { ProjectKind = ProjectKind.StockLength };
+        var frames = await PreviewStockWorksheetSelectionAsync(
+            dispatcher, sessionId, "Frames", 1, "missing-length", "Missing Length", "A1:F1", options);
+        var doors = await PreviewStockWorksheetSelectionAsync(
+            dispatcher, sessionId, "Doors", 2, "missing-length", "Missing Length", "A1:F1", options);
+
+        var finalized = await DispatchAsync<ImportSessionResponse>(dispatcher, BridgeMessageTypes.FinalizeImportSession,
+            new FinalizeImportSessionRequest
+            {
+                SessionId = sessionId,
+                Project = new Project
+                {
+                    ProjectKind = ProjectKind.StockLength,
+                    State = new ProjectState
+                    {
+                        OptimizationGroups =
+                        [
+                            new OptimizationGroup
+                            {
+                                OptimizationGroupId = "missing-length", Name = "Missing Length", StockLength = 0
+                            },
+                            new OptimizationGroup
+                            {
+                                OptimizationGroupId = "other", Name = "Other", StockLength = 240
+                            }
+                        ]
+                    }
+                },
+                Worksheets = [frames, doors]
+            });
+
+        Assert.False(finalized.Success);
+        Assert.Equal("import-stock-length-required", finalized.Error?.Code);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_workspacePath))
@@ -2930,6 +3155,27 @@ public sealed class ImportBridgeSpecs : IDisposable
         worksheet.Cell(2, 5).Value = materialName;
     }
 
+    private static void WriteStockWorksheet(
+        IXLWorksheet worksheet,
+        int quantity,
+        decimal length,
+        string profileNumber,
+        string partNumber)
+    {
+        string[] headers = ["Quantity", "Length", "Profile Number", "Part Name", "Finish", "Part Number"];
+        for (var column = 0; column < headers.Length; column++)
+        {
+            worksheet.Cell(1, column + 1).Value = headers[column];
+        }
+
+        worksheet.Cell(2, 1).Value = quantity;
+        worksheet.Cell(2, 2).Value = length;
+        worksheet.Cell(2, 3).Value = profileNumber;
+        worksheet.Cell(2, 4).Value = "Jamb";
+        worksheet.Cell(2, 5).Value = "Clear";
+        worksheet.Cell(2, 6).Value = partNumber;
+    }
+
     private static async Task<ImportWorksheetSelection> PreviewWorksheetSelectionAsync(
         BridgeMessageDispatcher dispatcher,
         string sessionId,
@@ -2958,6 +3204,31 @@ public sealed class ImportBridgeSpecs : IDisposable
             optimizationGroupId,
             optimizationGroupName,
             previewOptions);
+    }
+
+    private static async Task<ImportWorksheetSelection> PreviewStockWorksheetSelectionAsync(
+        BridgeMessageDispatcher dispatcher,
+        string sessionId,
+        string worksheetName,
+        int originalPosition,
+        string optimizationGroupId,
+        string optimizationGroupName,
+        string headingRange,
+        ImportOptions options)
+    {
+        var preview = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.PreviewImportSession,
+            new PreviewImportSessionRequest
+            {
+                SessionId = sessionId,
+                WorksheetName = worksheetName,
+                HeadingRange = headingRange,
+                Options = options
+            });
+        Assert.True(preview.Success, string.Join("; ", preview.Errors.Select(error => error.Message)));
+        Assert.Equal(originalPosition, preview.Worksheet?.OriginalPosition);
+        return SelectionFromPreview(preview, optimizationGroupId, optimizationGroupName, options);
     }
 
     private static ImportWorksheetSelection SelectionFromPreview(
@@ -3003,11 +3274,14 @@ public sealed class ImportBridgeSpecs : IDisposable
         string type,
         object payload)
     {
+        var payloadElement = payload is JsonElement element
+            ? element
+            : JsonSerializer.SerializeToElement(payload, SerializerOptions);
         var response = await dispatcher.DispatchAsync(
             new BridgeMessageEnvelope(
                 type,
                 Guid.NewGuid().ToString("N"),
-                JsonSerializer.SerializeToElement(payload, SerializerOptions)));
+                payloadElement));
 
         Assert.NotNull(response);
         var typed = response!.Payload.Deserialize<TResponse>(SerializerOptions);

@@ -1093,6 +1093,8 @@ function createWorkbookImportMappingSession(
   filePath: string,
   started: ImportSessionResponse,
   preview: ImportSessionResponse,
+  savedConfiguration?: ImportConfiguration,
+  optimizationGroups: OptimizationGroup[] = [],
 ): ImportMappingSession {
   const workbook = started.workbook!;
   const firstWorksheet =
@@ -1100,22 +1102,26 @@ function createWorkbookImportMappingSession(
       (worksheet) => worksheet.worksheetName === workbook.initialWorksheetName,
     ) ?? workbook.worksheets[0];
   const firstOptions = buildImportOptionsFromResponse(preview);
+  const worksheets = createWorkbookWorksheetDrafts(
+    sessionId,
+    workbook,
+    preview,
+    firstOptions,
+    savedConfiguration,
+    optimizationGroups,
+  );
+  const activeWorksheet = worksheets.find((worksheet) => worksheet.selected) ?? worksheets[0];
 
   return {
     sessionId,
     filePath,
-    preview,
-    options: firstOptions,
-    newMaterials: [],
-    hasPendingChanges: false,
+    preview: activeWorksheet?.preview ?? preview,
+    options: activeWorksheet?.options ?? firstOptions,
+    newMaterials: activeWorksheet?.newMaterials ?? [],
+    hasPendingChanges: activeWorksheet?.hasPendingChanges ?? false,
     workbook,
-    activeWorksheetName: firstWorksheet.worksheetName,
-    worksheets: createWorkbookWorksheetDrafts(
-      sessionId,
-      workbook,
-      preview,
-      firstOptions,
-    ),
+    activeWorksheetName: activeWorksheet?.worksheet.worksheetName ?? firstWorksheet.worksheetName,
+    worksheets,
   };
 }
 
@@ -3420,8 +3426,14 @@ export default function App() {
           phase: 'validating',
           message: `Validating the snapshot for ${fileNameFromPath(selectedFilePath)}…`,
         });
-        const initialWorksheet = started.workbook?.worksheets[0];
-        if (started.workbook && !initialWorksheet?.headingRange) {
+        const initialWorksheet = started.workbook?.worksheets.find((worksheet) =>
+          state.importConfiguration?.worksheets.some((saved) =>
+            saved.originalPosition === worksheet.originalPosition &&
+            saved.worksheetName === worksheet.worksheetName)) ?? started.workbook?.worksheets[0];
+        const savedInitialWorksheet = state.importConfiguration?.worksheets.find((saved) =>
+          saved.originalPosition === initialWorksheet?.originalPosition &&
+          saved.worksheetName === initialWorksheet?.worksheetName);
+        if (started.workbook && !(savedInitialWorksheet?.headingRange || initialWorksheet?.headingRange)) {
           dispatch({
             type: 'import-mapping-ready',
             session: createWorkbookImportMappingSession(
@@ -3429,6 +3441,8 @@ export default function App() {
               selectedFilePath,
               started,
               started,
+              state.importConfiguration,
+              state.optimizationGroups,
             ),
             message: `Discovered ${started.workbook.worksheets.length} visible, nonempty Worksheet(s). Confirm each Heading Range before previewing mappings.`,
           });
@@ -3440,11 +3454,11 @@ export default function App() {
               sessionId,
               options: {
                 projectKind: state.projectKind,
-                columnMappings: [],
-                materialMappings: [],
+                columnMappings: savedInitialWorksheet?.columnMappings ?? [],
+                materialMappings: state.importConfiguration?.options.materialMappings ?? [],
               },
               worksheetName: initialWorksheet?.worksheetName ?? null,
-              headingRange: initialWorksheet?.headingRange ?? null,
+              headingRange: savedInitialWorksheet?.headingRange ?? initialWorksheet?.headingRange ?? null,
             })),
           sessionId,
         );
@@ -3473,6 +3487,8 @@ export default function App() {
               selectedFilePath,
               started,
               response,
+              state.importConfiguration,
+              state.optimizationGroups,
             ),
             message: `Discovered ${started.workbook.worksheets.length} visible, nonempty Worksheet(s). Select and assign Worksheets before finalizing.`,
           });

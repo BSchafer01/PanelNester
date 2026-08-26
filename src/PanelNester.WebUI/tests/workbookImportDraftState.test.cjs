@@ -31,6 +31,8 @@ const statePath = path.join(
 );
 const {
   applyHighConfidenceHeadingRanges,
+  assignSelectedWorksheetsToOptimizationGroup,
+  canFinalizeStockLengthWorkbook,
   collectWorkbookNewMaterials,
   confirmWorksheetHeadingRange,
   copyColumnMappingsFromPreviousSelectedWorksheet,
@@ -51,6 +53,7 @@ const {
   summarizeWorkbookPreview,
   summarizeHighConfidenceHeadingRanges,
   synchronizeWorkbookMaterialResolution,
+  validateRequiredPieceCorrection,
 } = loadTsModule(statePath);
 
 const workbook = {
@@ -110,6 +113,115 @@ test('selects only the discovered initial Worksheet and restores its complete dr
   drafts = setWorkbookWorksheetSelected(drafts, 'First', true);
 
   assert.deepEqual(drafts[0], { ...savedDraft, selected: true });
+});
+
+test('re-import restores each matched Worksheet configuration independently', () => {
+  const sourceReference = {
+    worksheetName: 'Second', worksheetPosition: 2, physicalRow: 7, sourceFingerprint: 'ROW-7',
+  };
+  const configuration = {
+    options: { projectKind: 'stockLength', columnMappings: [], materialMappings: [] },
+    worksheets: [{
+      worksheetName: 'Second', originalPosition: 2, headingRange: 'B4:G4',
+      columnMappings: [
+        { sourceColumn: 'B', targetField: 'Quantity' },
+        { sourceColumn: 'C', targetField: 'Length' },
+        { sourceColumn: 'D', targetField: 'Profile Number' },
+      ],
+      optimizationGroupId: 'group-b',
+      excludedSourceRows: [{
+        rowId: 'row-7', sourceReference,
+        originalValidationError: { code: 'invalid-length', message: 'Bad length' },
+      }],
+    }],
+    partOverrides: [{ rowId: 'row-8', sourceReferences: [{ ...sourceReference, physicalRow: 8 }] }],
+  };
+  const groups = [{ optimizationGroupId: 'group-b', name: 'Frames', stockLength: 240 }];
+
+  const drafts = createWorkbookWorksheetDrafts(
+    'fixture', workbook, preview, options, configuration, groups,
+  );
+
+  assert.deepEqual(drafts.map((draft) => draft.selected), [false, true, false]);
+  assert.equal(drafts[1].headingRange, 'B4:G4');
+  assert.equal(drafts[1].headingRangeConfirmed, true);
+  assert.equal(drafts[1].optimizationGroupId, 'group-b');
+  assert.equal(drafts[1].optimizationGroupName, 'Frames');
+  assert.deepEqual(drafts[1].options.columnMappings, configuration.worksheets[0].columnMappings);
+  assert.deepEqual(drafts[1].excludedSourceRows, configuration.worksheets[0].excludedSourceRows);
+  assert.equal(drafts[1].partOverrides.length, 1);
+});
+
+test('bulk Stock-Length assignment adopts one group without changing independent mappings', () => {
+  const drafts = createWorkbookWorksheetDrafts('fixture', workbook, preview, options)
+    .map((draft, index) => ({ ...draft, selected: index < 2 }));
+  const mappings = drafts.map((draft) => draft.options.columnMappings);
+
+  const assigned = assignSelectedWorksheetsToOptimizationGroup(
+    drafts,
+    { optimizationGroupId: 'shared', name: 'Shared', stockLength: 240 },
+  );
+
+  assert.deepEqual(assigned.slice(0, 2).map((draft) => draft.optimizationGroupId), ['shared', 'shared']);
+  assert.deepEqual(assigned.map((draft) => draft.options.columnMappings), mappings);
+});
+
+test('Stock-Length Workbook finalization requires every selected Worksheet to be ready with positive shared Stock Length', () => {
+  const requiredMappings = [
+    { sourceColumn: 'A', targetField: 'Quantity' },
+    { sourceColumn: 'B', targetField: 'Length' },
+    { sourceColumn: 'C', targetField: 'Profile Number' },
+  ];
+  const readyDrafts = createWorkbookWorksheetDrafts('fixture', workbook, preview, options)
+    .slice(0, 2)
+    .map((draft) => ({
+      ...draft,
+      selected: true,
+      optimizationGroupId: 'shared',
+      headingRangeConfirmed: true,
+      hasPendingChanges: false,
+      options: { projectKind: 'stockLength', columnMappings: requiredMappings, materialMappings: [] },
+    }));
+
+  assert.equal(canFinalizeStockLengthWorkbook(readyDrafts, [
+    { optimizationGroupId: 'shared', stockLength: 240 },
+  ]), true);
+  assert.equal(canFinalizeStockLengthWorkbook(readyDrafts, [
+    { optimizationGroupId: 'shared', stockLength: 0 },
+  ]), false);
+  assert.equal(canFinalizeStockLengthWorkbook([
+    readyDrafts[0], { ...readyDrafts[1], hasPendingChanges: true },
+  ], [{ optimizationGroupId: 'shared', stockLength: 240 }]), false);
+  assert.equal(canFinalizeStockLengthWorkbook([
+    {
+      ...readyDrafts[0],
+      preview: { ...readyDrafts[0].preview, errors: [{ code: 'bad-row', message: 'Bad row', rowId: 'row-1' }] },
+      partOverrides: [{
+        rowId: 'row-1', sourceReferences: [],
+        currentRequiredPiece: { validationStatus: 'error' },
+      }],
+    },
+  ], [{ optimizationGroupId: 'shared', stockLength: 240 }]), false);
+});
+
+test('invalid Required Piece corrections remain blockers until all required values validate', () => {
+  const invalid = validateRequiredPieceCorrection('abc', '0', '');
+  const exponent = validateRequiredPieceCorrection('1', '1e2', 'P-100');
+  const valid = validateRequiredPieceCorrection('3', '12 3/8', 'P-100');
+
+  assert.equal(invalid.validationStatus, 'error');
+  assert.deepEqual(invalid.validationMessages, [
+    'Quantity must be an integer greater than zero.',
+    'Length must be greater than zero.',
+    'Profile Number is required.',
+  ]);
+  assert.equal(exponent.validationStatus, 'error');
+  assert.deepEqual(exponent.validationMessages, [
+    'Length must be a decimal, fraction, or mixed-number inch value.',
+  ]);
+  assert.equal(valid.validationStatus, 'valid');
+  assert.equal(valid.quantity, 3);
+  assert.equal(valid.length, 12.375);
 });
 
 test('manual A1 entry confirms one contiguous single-row Heading Range', () => {

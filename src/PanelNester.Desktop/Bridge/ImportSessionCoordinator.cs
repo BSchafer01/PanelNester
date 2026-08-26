@@ -267,7 +267,10 @@ internal sealed class ImportSessionCoordinator
                         WorkbookSafetyLimits.DesktopDefault,
                         cancellationToken);
                     session.RecordPreflight(assessment);
-                    return new WorkbookDiscoveryService().DiscoverAsync(snapshotPath, cancellationToken);
+                    return new WorkbookDiscoveryService().DiscoverAsync(
+                        snapshotPath,
+                        session.ProjectKind,
+                        cancellationToken);
                 })
             .ConfigureAwait(false);
     }

@@ -1,6 +1,7 @@
 using ClosedXML.Excel;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
+using PanelNester.Domain.Models;
 using PanelNester.Services.Import;
 
 namespace PanelNester.Services.Tests.Import;
@@ -90,6 +91,41 @@ public sealed class WorkbookDiscoveryServiceSpecs : IDisposable
             row => row.RowNumber == 3 && row.Cells.Any(cell => cell.Address == "D3" && cell.Value == "Qty"));
         Assert.True(worksheetResult.PreviewRows.Count <= 25);
         Assert.All(worksheetResult.PreviewRows, row => Assert.True(row.Cells.Count <= 16));
+    }
+
+    [Fact]
+    public async Task Stock_length_discovery_scores_required_and_optional_headings_for_a_unique_Heading_Range()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "stock-headings.xlsx");
+
+        using (var workbook = new XLWorkbook())
+        {
+            var worksheet = workbook.AddWorksheet("Required Pieces");
+            worksheet.Cell("A1").Value = "Cut list";
+            worksheet.Cell("B4").Value = "Qty";
+            worksheet.Cell("C4").Value = "Length";
+            worksheet.Cell("D4").Value = "Die";
+            worksheet.Cell("E4").Value = "Description";
+            worksheet.Cell("F4").Value = "Finish";
+            worksheet.Cell("G4").Value = "Part No";
+            worksheet.Cell("B5").Value = 2;
+            worksheet.Cell("C5").Value = 48;
+            worksheet.Cell("D5").Value = "P-100";
+            worksheet.Cell("E5").Value = "Jamb";
+            worksheet.Cell("F5").Value = "Clear";
+            worksheet.Cell("G5").Value = "A-1";
+            workbook.SaveAs(workbookPath);
+        }
+
+        var result = await new WorkbookDiscoveryService()
+            .DiscoverAsync(workbookPath, ProjectKind.StockLength);
+
+        var worksheetResult = Assert.Single(result.Worksheets);
+        Assert.Equal("B4:G4", worksheetResult.HeadingRange);
+        Assert.Equal(
+            HeadingRangeDetectionStatuses.UniqueHighConfidence,
+            worksheetResult.HeadingRangeDetectionStatus);
     }
 
     [Fact]

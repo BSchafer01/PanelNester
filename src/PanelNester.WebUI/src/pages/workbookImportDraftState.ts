@@ -1,5 +1,6 @@
 import type {
   ImportColumnMapping,
+  ImportConfiguration,
   ImportFileResponse,
   ImportMaterialMapping,
   ImportMappingSession,
@@ -8,6 +9,7 @@ import type {
   ImportPreviewSummary,
   ImportSourceColumn,
   ImportWorksheetDraft,
+  OptimizationGroup,
   PartRow,
   WorkbookDiscovery,
 } from '../types/contracts';
@@ -81,30 +83,163 @@ export function createWorkbookWorksheetDrafts(
   workbook: WorkbookDiscovery,
   firstPreview: ImportFileResponse,
   firstOptions: ImportOptions,
+  savedConfiguration?: ImportConfiguration,
+  optimizationGroups: Array<Pick<OptimizationGroup, 'optimizationGroupId' | 'name'>> = [],
 ): ImportWorksheetDraft[] {
   const initialWorksheetName =
     workbook.initialWorksheetName || workbook.worksheets[0]?.worksheetName;
-  return workbook.worksheets.map((worksheet) => ({
-    worksheet,
-    selected: worksheet.worksheetName === initialWorksheetName,
-    optimizationGroupId: `import-${sessionId}-${worksheet.originalPosition}`,
-    optimizationGroupName: worksheet.worksheetName,
-    preview:
-      worksheet.worksheetName === initialWorksheetName
-        ? firstPreview
-        : emptyPreview(),
-    options:
-      worksheet.worksheetName === initialWorksheetName
-        ? firstOptions
-        : { columnMappings: [], materialMappings: [] },
-    newMaterials: [],
-    hasPendingChanges: worksheet.worksheetName !== initialWorksheetName,
-    headingRange: worksheet.headingRange,
-    headingRangeConfirmed: false,
-    excludedSourceRows: [],
-    ignoredMaterialNames: [],
-    partOverrides: [],
-  }));
+  const previewWorksheetName = firstPreview.worksheet?.worksheetName || initialWorksheetName;
+  const savedWorksheets = savedConfiguration?.worksheets ?? [];
+  const hasRestoredWorksheet = workbook.worksheets.some((worksheet) =>
+    savedWorksheets.some((saved) =>
+      saved.originalPosition === worksheet.originalPosition &&
+      saved.worksheetName === worksheet.worksheetName));
+  const groupNames = new Map(
+    optimizationGroups.map((group) => [group.optimizationGroupId, group.name]),
+  );
+
+  return workbook.worksheets.map((worksheet) => {
+    const saved = savedWorksheets.find((candidate) =>
+      candidate.originalPosition === worksheet.originalPosition &&
+      candidate.worksheetName === worksheet.worksheetName);
+    const isInitial = worksheet.worksheetName === previewWorksheetName;
+    const optimizationGroupId = saved?.optimizationGroupId ??
+      `import-${sessionId}-${worksheet.originalPosition}`;
+    const columnMappings = saved?.columnMappings ??
+      (isInitial ? firstOptions.columnMappings : []);
+    const materialMappings = savedConfiguration?.options.materialMappings ??
+      (isInitial ? firstOptions.materialMappings : []);
+    const headingRange = saved?.headingRange || worksheet.headingRange;
+
+    return {
+      worksheet,
+      selected: saved ? true : !hasRestoredWorksheet && isInitial,
+      optimizationGroupId,
+      optimizationGroupName: worksheet.worksheetName,
+      ...(saved ? {
+        optimizationGroupName: groupNames.get(optimizationGroupId) ?? worksheet.worksheetName,
+      } : {}),
+      preview: isInitial ? firstPreview : emptyPreview(),
+      options: {
+        ...(savedConfiguration?.options ?? (isInitial ? firstOptions : {})),
+        columnMappings,
+        materialMappings,
+      },
+      newMaterials: [],
+      hasPendingChanges: !isInitial || Boolean(saved && firstPreview.worksheet?.worksheetName !== worksheet.worksheetName),
+      headingRange,
+      headingRangeConfirmed: Boolean(saved?.headingRange),
+      excludedSourceRows: saved?.excludedSourceRows ?? [],
+      ignoredMaterialNames: [],
+      partOverrides: (savedConfiguration?.partOverrides ?? []).filter((partOverride) =>
+        partOverride.sourceReferences.some((reference) =>
+          reference.worksheetPosition === worksheet.originalPosition &&
+          reference.worksheetName === worksheet.worksheetName)),
+    };
+  });
+}
+
+export function assignSelectedWorksheetsToOptimizationGroup(
+  drafts: ImportWorksheetDraft[],
+  group: Pick<OptimizationGroup, 'optimizationGroupId' | 'name'>,
+): ImportWorksheetDraft[] {
+  return drafts.map((draft) => draft.selected
+    ? {
+        ...draft,
+        optimizationGroupId: group.optimizationGroupId,
+        optimizationGroupName: group.name,
+      }
+    : draft);
+}
+
+export function canFinalizeStockLengthWorkbook(
+  drafts: ImportWorksheetDraft[],
+  optimizationGroups: Array<Pick<OptimizationGroup, 'optimizationGroupId' | 'stockLength'>>,
+): boolean {
+  const selected = drafts.filter((draft) => draft.selected);
+  const groups = new Map(
+    optimizationGroups.map((group) => [group.optimizationGroupId, group]),
+  );
+  const requiredFields = ['Quantity', 'Length', 'Profile Number'];
+
+  return selected.length > 0 && selected.every((draft) => {
+    const group = groups.get(draft.optimizationGroupId);
+    const resolvedRowIds = new Set([
+      ...draft.excludedSourceRows.map((row) => row.rowId),
+      ...draft.partOverrides
+        .filter((partOverride) => partOverride.currentRequiredPiece
+          ? partOverride.currentRequiredPiece.validationStatus !== 'error'
+          : partOverride.currentValues?.validationStatus !== 'error')
+        .map((partOverride) => partOverride.rowId),
+    ]);
+    const mappings = draft.options.columnMappings.length > 0
+      ? draft.options.columnMappings
+      : draft.preview.columnMappings.flatMap((mapping) => mapping.sourceColumn
+        ? [{ sourceColumn: mapping.sourceColumn, targetField: mapping.targetField }]
+        : []);
+    return Boolean(group?.stockLength && group.stockLength > 0) &&
+      draft.headingRangeConfirmed &&
+      !draft.hasPendingChanges &&
+      draft.preview.errors.every((error) => Boolean(error.rowId && resolvedRowIds.has(error.rowId))) &&
+      requiredFields.every((field) => mappings.some(
+        (mapping) => mapping.targetField === field && mapping.sourceColumn.trim().length > 0,
+      ));
+  });
+}
+
+export function validateRequiredPieceCorrection(
+  quantityText: string,
+  lengthText: string,
+  profileNumber: string,
+) {
+  const validationMessages: string[] = [];
+  const trimmedQuantity = quantityText.trim();
+  const quantity = /^[-+]?\d+$/.test(trimmedQuantity)
+    ? Number.parseInt(trimmedQuantity, 10)
+    : 0;
+  if (!Number.isSafeInteger(quantity) || quantity <= 0) {
+    validationMessages.push('Quantity must be an integer greater than zero.');
+  }
+
+  const length = parseInchMeasurement(lengthText);
+  if (length == null) {
+    validationMessages.push('Length must be a decimal, fraction, or mixed-number inch value.');
+  } else if (length <= 0) {
+    validationMessages.push('Length must be greater than zero.');
+  }
+
+  if (profileNumber.trim().length === 0) {
+    validationMessages.push('Profile Number is required.');
+  }
+
+  return {
+    quantity,
+    length: length ?? 0,
+    validationStatus: validationMessages.length === 0 ? 'valid' as const : 'error' as const,
+    validationMessages,
+  };
+}
+
+function parseInchMeasurement(rawValue: string): number | undefined {
+  const parts = rawValue.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 2 && /^[-+]?\d+$/.test(parts[0])) {
+    const whole = Number.parseInt(parts[0], 10);
+    const fraction = parseFraction(parts[1]);
+    return fraction == null ? undefined : whole < 0 ? whole - fraction : whole + fraction;
+  }
+  if (parts.length !== 1) return undefined;
+  const decimalText = parts[0];
+  const decimal = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(decimalText)
+    ? Number(decimalText)
+    : Number.NaN;
+  return Number.isFinite(decimal) ? decimal : parseFraction(decimalText);
+}
+
+function parseFraction(value: string): number | undefined {
+  const match = /^([-+]?\d+)\/([-+]?\d+)$/.exec(value);
+  if (!match) return undefined;
+  const denominator = Number.parseInt(match[2], 10);
+  return denominator === 0 ? undefined : Number.parseInt(match[1], 10) / denominator;
 }
 
 export function editInvalidSourceRow(

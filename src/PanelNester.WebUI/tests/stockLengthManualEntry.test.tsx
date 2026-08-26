@@ -348,4 +348,81 @@ describe('Stock-Length manual entry', () => {
     expect(partOverride.currentRequiredPiece?.quantityText).toBe('3');
     expect(partOverride.sourceReferences).toEqual(requiredPiece.sourceReferences);
   });
+
+  it('configures multiple Workbook Worksheets in bulk and confirms a shared Stock Length edit', async () => {
+    const user = userEvent.setup();
+    const onUpdateImportMappingSession = vi.fn();
+    const onUpdateStockLength = vi.fn();
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const requiredMappings = [
+      { targetField: 'Quantity' as const, sourceColumn: 'A' },
+      { targetField: 'Length' as const, sourceColumn: 'B' },
+      { targetField: 'Profile Number' as const, sourceColumn: 'C' },
+    ];
+    const descriptors = ['First', 'Second'].map((worksheetName, index) => ({
+      worksheetName,
+      originalPosition: index + 1,
+      headingRange: 'A1:C1',
+      headingRangeDetectionStatus: 'unique-high-confidence' as const,
+      headingRangeCandidates: [],
+      previewRows: [],
+    }));
+    const makePreview = (index: number) => ({
+      success: true, filePath: 'F:\\stock.xlsx', parts: [], requiredPieces: [], errors: [], warnings: [],
+      availableColumns: ['A', 'B', 'C'], sourceColumns: [], columnMappings: requiredMappings,
+      materialResolutions: [], worksheet: descriptors[index],
+    });
+    const mappingSession: ImportMappingSession = {
+      sessionId: 'workbook', filePath: 'F:\\stock.xlsx', preview: makePreview(0),
+      options: { projectKind: 'stockLength', columnMappings: requiredMappings, materialMappings: [] },
+      newMaterials: [], hasPendingChanges: false, activeWorksheetName: 'First',
+      workbook: { initialWorksheetName: 'First', worksheets: descriptors, macrosPresent: false },
+      worksheets: descriptors.map((worksheet, index) => ({
+        worksheet, selected: true, optimizationGroupId: index === 0 ? 'frames' : 'doors',
+        optimizationGroupName: index === 0 ? 'Frames' : 'Doors', preview: makePreview(index),
+        options: { projectKind: 'stockLength', columnMappings: requiredMappings, materialMappings: [] },
+        newMaterials: [], hasPendingChanges: false, headingRange: 'A1:C1', headingRangeConfirmed: true,
+        excludedSourceRows: [], ignoredMaterialNames: [], partOverrides: [],
+      })),
+    };
+    const doors = { ...emptyGroup, optimizationGroupId: 'doors', name: 'Doors', order: 1, stockLength: 120 };
+
+    const pageProps = {
+      busy: false,
+      inchDisplayFormat: 'decimal' as const,
+      mappingSession,
+      onCancelImportMapping: vi.fn(),
+      onCreateOptimizationGroup: vi.fn(),
+      onCreateRequiredPiece: vi.fn(),
+      onDeleteRequiredPiece: vi.fn(),
+      onFinalizeImportMapping: vi.fn(),
+      onImportFile: vi.fn(),
+      onInchDisplayFormatChange: vi.fn(),
+      onPreviewImportMapping: vi.fn(),
+      onUpdateImportMappingSession,
+      onUpdateRequiredPiece: vi.fn(),
+      onUpdateStockLength,
+      optimizationGroups: [emptyGroup, doors],
+    };
+    const { rerender } = render(
+      <RequiredPiecesPage {...pageProps} />,
+    );
+
+    expect(screen.getByRole('heading', { name: 'Import Stock-Length Workbook' })).toBeInTheDocument();
+    expect(screen.getByText('1. First')).toBeInTheDocument();
+    expect(screen.getByText('2. Second')).toBeInTheDocument();
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Optimization Group for selected Worksheets' }), 'frames');
+    await user.click(screen.getByRole('button', { name: 'Assign selected Worksheets' }));
+    const assigned = onUpdateImportMappingSession.mock.calls.at(-1)![0] as ImportMappingSession;
+    expect(assigned.worksheets?.map((draft) => draft.optimizationGroupId)).toEqual(['frames', 'frames']);
+    rerender(<RequiredPiecesPage {...pageProps} mappingSession={assigned} />);
+
+    const stockLength = screen.getByRole('textbox', { name: 'Shared Stock Length for Frames' });
+    await user.clear(stockLength);
+    await user.type(stockLength, '288');
+    await user.click(screen.getByRole('button', { name: 'Save shared Stock Length' }));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('First, Second'));
+    expect(onUpdateStockLength).toHaveBeenCalledWith('frames', '288');
+    confirm.mockRestore();
+  });
 });

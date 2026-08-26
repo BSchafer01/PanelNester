@@ -1,4 +1,5 @@
 using ClosedXML.Excel;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using PanelNester.Domain.Contracts;
@@ -89,6 +90,7 @@ public sealed class XlsxImportService : IImportService, IWorkbookImportProgressS
         var errors = new List<ValidationError>();
         var warnings = new List<ValidationWarning>();
         var rowUpdates = new List<PartRowUpdate>();
+        var requiredPieces = new List<RequiredPiece>();
         var availableColumns = Array.Empty<string>();
         var sourceColumns = Array.Empty<ImportSourceColumn>();
         IReadOnlyList<ImportFieldMappingStatus> columnMappings = Array.Empty<ImportFieldMappingStatus>();
@@ -351,6 +353,66 @@ public sealed class XlsxImportService : IImportService, IWorkbookImportProgressS
                     return cellValues[headerMap[sourceColumn]].Value;
                 }
 
+                var sourceReference = new SourceReference
+                {
+                    WorksheetName = worksheet.Name,
+                    WorksheetPosition = worksheet.Position,
+                    PhysicalRow = row.RowNumber(),
+                    SourceFingerprint = Fingerprint(
+                        Enumerable.Range(firstHeadingColumn, lastHeadingColumn - firstHeadingColumn + 1)
+                            .Select(columnNumber => cellValues[columnNumber].Value))
+                };
+
+                if ((request.Options?.ProjectKind ?? ProjectKind.Sheet) == ProjectKind.StockLength)
+                {
+                    var pieceId = CreateRequiredPieceId(sourceReference);
+                    var rowErrors = new List<string>();
+                    var quantityText = ReadMappedCell(columnPlan.FieldToSource[ImportFieldNames.Quantity]).Trim();
+                    var lengthText = ReadMappedCell(columnPlan.FieldToSource[ImportFieldNames.Length]).Trim();
+                    var profileNumber = ReadMappedCell(columnPlan.FieldToSource[ImportFieldNames.ProfileNumber]).Trim();
+
+                    if (!int.TryParse(quantityText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var quantity))
+                    {
+                        AddStockError("invalid-quantity", "Quantity must be an integer value.", pieceId, sourceReference, rowErrors, errors);
+                    }
+                    else if (quantity <= 0)
+                    {
+                        AddStockError("quantity-out-of-range", "Quantity must be greater than zero.", pieceId, sourceReference, rowErrors, errors);
+                    }
+
+                    if (!InchMeasurementParser.TryParse(lengthText, out var length))
+                    {
+                        AddStockError("invalid-length", "Length must be a decimal, fraction, or mixed-number inch value.", pieceId, sourceReference, rowErrors, errors);
+                    }
+                    else if (length <= 0)
+                    {
+                        AddStockError("length-out-of-range", "Length must be greater than zero.", pieceId, sourceReference, rowErrors, errors);
+                    }
+
+                    if (string.IsNullOrWhiteSpace(profileNumber))
+                    {
+                        AddStockError("missing-profile-number", "Profile Number is required.", pieceId, sourceReference, rowErrors, errors);
+                    }
+
+                    requiredPieces.Add(new RequiredPiece
+                    {
+                        RequiredPieceId = pieceId,
+                        Quantity = quantity,
+                        QuantityText = quantityText,
+                        Length = length,
+                        LengthText = lengthText,
+                        ProfileNumber = profileNumber,
+                        PartName = ReadOptionalMappedCell(columnPlan, ImportFieldNames.PartName, ReadMappedCell),
+                        Finish = ReadOptionalMappedCell(columnPlan, ImportFieldNames.Finish, ReadMappedCell),
+                        PartNumber = ReadOptionalMappedCell(columnPlan, ImportFieldNames.PartNumber, ReadMappedCell),
+                        IsManual = false,
+                        ValidationStatus = rowErrors.Count == 0 ? ValidationStatuses.Valid : ValidationStatuses.Error,
+                        ValidationMessages = rowErrors,
+                        SourceReferences = [sourceReference]
+                    });
+                    continue;
+                }
+
                 rowUpdates.Add(new PartRowUpdate
                 {
                     RowId = rowId,
@@ -363,18 +425,7 @@ public sealed class XlsxImportService : IImportService, IWorkbookImportProgressS
                     SheetNumber = hasSheetNumberColumn ? ReadMappedCell(sheetNumberSourceColumn!) : null,
                     RowNumber = hasRowNumberColumn ? ReadMappedCell(rowNumberSourceColumn!) : null,
                     ColumnNumber = hasColumnNumberColumn ? ReadMappedCell(columnNumberSourceColumn!) : null,
-                    SourceReferences =
-                    [
-                        new SourceReference
-                        {
-                            WorksheetName = worksheet.Name,
-                            WorksheetPosition = worksheet.Position,
-                            PhysicalRow = row.RowNumber(),
-                            SourceFingerprint = Fingerprint(
-                                Enumerable.Range(firstHeadingColumn, lastHeadingColumn - firstHeadingColumn + 1)
-                                    .Select(columnNumber => cellValues[columnNumber].Value))
-                        }
-                    ]
+                    SourceReferences = [sourceReference]
                 });
             }
 
@@ -391,25 +442,28 @@ public sealed class XlsxImportService : IImportService, IWorkbookImportProgressS
                 WorksheetName = worksheet.Name,
                 Preflight = preflight
             });
-            var materialPlan = _mappingResolver.ResolveMaterials(rowUpdates, knownMaterials, request.Options, errors);
-            cancellationToken.ThrowIfCancellationRequested();
-            progress?.Report(new WorkbookImportProgress
+            if ((request.Options?.ProjectKind ?? ProjectKind.Sheet) != ProjectKind.StockLength)
             {
-                Phase = WorkbookImportPhase.CombiningParts,
-                Label = "Combining parts",
-                WorksheetName = worksheet.Name,
-                Preflight = preflight
-            });
-            rowUpdates = ImportedPartRowMerger
-                .MergeCompatibleRows(
-                    materialPlan.Updates,
-                    hasGroupColumn,
-                    hasSheetNumberColumn,
-                    hasRowNumberColumn,
-                    hasColumnNumberColumn,
-                    cancellationToken)
-                .ToList();
-            materialResolutions = materialPlan.Resolutions;
+                var materialPlan = _mappingResolver.ResolveMaterials(rowUpdates, knownMaterials, request.Options, errors);
+                cancellationToken.ThrowIfCancellationRequested();
+                progress?.Report(new WorkbookImportProgress
+                {
+                    Phase = WorkbookImportPhase.CombiningParts,
+                    Label = "Combining parts",
+                    WorksheetName = worksheet.Name,
+                    Preflight = preflight
+                });
+                rowUpdates = ImportedPartRowMerger
+                    .MergeCompatibleRows(
+                        materialPlan.Updates,
+                        hasGroupColumn,
+                        hasSheetNumberColumn,
+                        hasRowNumberColumn,
+                        hasColumnNumberColumn,
+                        cancellationToken)
+                    .ToList();
+                materialResolutions = materialPlan.Resolutions;
+            }
         }
         catch (EncryptedWorkbookException exception)
         {
@@ -421,6 +475,21 @@ public sealed class XlsxImportService : IImportService, IWorkbookImportProgressS
         }
 
         cancellationToken.ThrowIfCancellationRequested();
+        if ((request.Options?.ProjectKind ?? ProjectKind.Sheet) == ProjectKind.StockLength)
+        {
+            return new ImportResponse
+            {
+                Success = errors.Count == 0,
+                RequiredPieces = requiredPieces,
+                Errors = errors,
+                Warnings = warnings,
+                AvailableColumns = availableColumns,
+                SourceColumns = sourceColumns,
+                ColumnMappings = columnMappings,
+                Worksheet = worksheetDescriptor
+            };
+        }
+
         return _validator.ValidateRows(rowUpdates, knownMaterials, errors, warnings, cancellationToken) with
         {
             AvailableColumns = availableColumns,
@@ -459,6 +528,39 @@ public sealed class XlsxImportService : IImportService, IWorkbookImportProgressS
 
     private static string GetCellText(IXLCell cell) =>
         WorkbookCellValueReader.ReadText(cell);
+
+    private static string? ReadOptionalMappedCell(
+        ColumnMappingPlan plan,
+        string field,
+        Func<string, string> readMappedCell)
+    {
+        if (!plan.FieldToSource.TryGetValue(field, out var sourceColumn))
+        {
+            return null;
+        }
+
+        var value = readMappedCell(sourceColumn).Trim();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    private static void AddStockError(
+        string code,
+        string message,
+        string rowId,
+        SourceReference sourceReference,
+        ICollection<string> rowErrors,
+        ICollection<ValidationError> errors)
+    {
+        rowErrors.Add(message);
+        errors.Add(new ValidationError(code, message, rowId, sourceReference));
+    }
+
+    private static string CreateRequiredPieceId(SourceReference sourceReference)
+    {
+        var identity = $"{sourceReference.WorksheetPosition}\u001f{sourceReference.PhysicalRow}\u001f{sourceReference.SourceFingerprint}";
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
+        return $"required-{hash[..24].ToLowerInvariant()}";
+    }
 
     private static string Fingerprint(IEnumerable<string?> values)
     {

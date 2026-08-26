@@ -9,7 +9,9 @@ internal static class HeadingRangeDetector
     private const int MaximumPreviewColumns = 16;
     private const double HighConfidenceThreshold = 0.72;
 
-    public static ImportWorksheetDescriptor Describe(IXLWorksheet worksheet)
+    public static ImportWorksheetDescriptor Describe(
+        IXLWorksheet worksheet,
+        ProjectKind projectKind = ProjectKind.Sheet)
     {
         var usedRange = worksheet.RangeUsed()!;
         var firstRow = usedRange.RangeAddress.FirstAddress.RowNumber;
@@ -48,7 +50,7 @@ internal static class HeadingRangeDetector
             .ToArray();
 
         var candidates = Enumerable.Range(firstRow, lastRow - firstRow + 1)
-            .Select(rowNumber => ScoreRow(worksheet, rowNumber, firstColumn, lastColumn))
+            .Select(rowNumber => ScoreRow(worksheet, rowNumber, firstColumn, lastColumn, projectKind))
             .Where(candidate => candidate is not null)
             .Cast<HeadingRangeCandidate>()
             .OrderByDescending(candidate => candidate.Confidence)
@@ -97,7 +99,8 @@ internal static class HeadingRangeDetector
         IXLWorksheet worksheet,
         int rowNumber,
         int firstPreviewColumn,
-        int lastPreviewColumn)
+        int lastPreviewColumn,
+        ProjectKind projectKind)
     {
         var populatedColumns = Enumerable.Range(firstPreviewColumn, lastPreviewColumn - firstPreviewColumn + 1)
             .Where(columnNumber => !string.IsNullOrWhiteSpace(GetCellText(worksheet.Cell(rowNumber, columnNumber))))
@@ -113,7 +116,8 @@ internal static class HeadingRangeDetector
             .Select(columnNumber => new RecognizedHeading(
                 columnNumber,
                 ImportMappingResolver.RecognizeHeading(
-                    GetCellText(worksheet.Cell(rowNumber, columnNumber)))))
+                    GetCellText(worksheet.Cell(rowNumber, columnNumber)),
+                    projectKind)))
             .Where(item => item.Field is not null)
             .ToArray();
         if (recognized.Length == 0)
@@ -122,12 +126,14 @@ internal static class HeadingRangeDetector
         }
 
         var uniqueFields = recognized.Select(item => item.Field!).Distinct(StringComparer.Ordinal).ToArray();
-        var requiredCount = uniqueFields.Count(field => ImportFieldNames.Required.Contains(field, StringComparer.Ordinal));
-        var optionalCount = uniqueFields.Count(field => ImportFieldNames.Optional.Contains(field, StringComparer.Ordinal));
+        var requiredFields = ImportFieldNames.RequiredFor(projectKind);
+        var optionalFields = ImportFieldNames.OptionalFor(projectKind);
+        var requiredCount = uniqueFields.Count(field => requiredFields.Contains(field, StringComparer.Ordinal));
+        var optionalCount = uniqueFields.Count(field => optionalFields.Contains(field, StringComparer.Ordinal));
         var uniqueness = (double)uniqueFields.Length / recognized.Length;
         var plausibleData = PlausibleFollowingData(worksheet, rowNumber, recognized);
         var confidence =
-            0.65 * requiredCount / ImportFieldNames.Required.Count +
+            0.65 * requiredCount / requiredFields.Count +
             0.10 * Math.Min(optionalCount, 2) / 2 +
             0.10 * uniqueness +
             0.15 * plausibleData;

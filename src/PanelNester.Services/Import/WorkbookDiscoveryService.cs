@@ -14,6 +14,12 @@ public sealed class WorkbookDiscoveryService
 
     public Task<WorkbookDiscovery> DiscoverAsync(
         string workbookPath,
+        CancellationToken cancellationToken = default) =>
+        DiscoverAsync(workbookPath, ProjectKind.Sheet, cancellationToken);
+
+    public Task<WorkbookDiscovery> DiscoverAsync(
+        string workbookPath,
+        ProjectKind projectKind,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workbookPath);
@@ -39,7 +45,7 @@ public sealed class WorkbookDiscoveryService
             if (worksheet.Visibility == XLWorksheetVisibility.Visible &&
                 worksheet.RangeUsed() is not null)
             {
-                worksheets.Add(HeadingRangeDetector.Describe(worksheet));
+                worksheets.Add(HeadingRangeDetector.Describe(worksheet, projectKind));
             }
         }
 
