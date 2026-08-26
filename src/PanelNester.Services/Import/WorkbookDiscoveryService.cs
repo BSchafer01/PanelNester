@@ -5,6 +5,13 @@ namespace PanelNester.Services.Import;
 
 public sealed class WorkbookDiscoveryService
 {
+    private readonly IProgress<WorkbookImportProgress>? _progress;
+
+    public WorkbookDiscoveryService(IProgress<WorkbookImportProgress>? progress = null)
+    {
+        _progress = progress;
+    }
+
     public Task<WorkbookDiscovery> DiscoverAsync(
         string workbookPath,
         CancellationToken cancellationToken = default)
@@ -16,8 +23,18 @@ public sealed class WorkbookDiscoveryService
         ImportFileAccessGuard.RejectEncryptedOpenXmlPackage(stream);
         using var workbook = new XLWorkbook(stream);
         var worksheets = new List<ImportWorksheetDescriptor>();
-        foreach (var worksheet in workbook.Worksheets.OrderBy(worksheet => worksheet.Position))
+        var orderedWorksheets = workbook.Worksheets.OrderBy(worksheet => worksheet.Position).ToArray();
+        for (var worksheetIndex = 0; worksheetIndex < orderedWorksheets.Length; worksheetIndex++)
         {
+            var worksheet = orderedWorksheets[worksheetIndex];
+            _progress?.Report(new WorkbookImportProgress
+            {
+                Phase = WorkbookImportPhase.InspectingWorksheets,
+                Label = "Inspecting Worksheets",
+                Current = worksheetIndex + 1,
+                Total = orderedWorksheets.Length,
+                WorksheetName = worksheet.Name
+            });
             cancellationToken.ThrowIfCancellationRequested();
             if (worksheet.Visibility == XLWorksheetVisibility.Visible &&
                 worksheet.RangeUsed() is not null)

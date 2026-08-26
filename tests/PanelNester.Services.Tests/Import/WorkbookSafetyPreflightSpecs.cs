@@ -81,13 +81,20 @@ public sealed class WorkbookSafetyPreflightSpecs : IDisposable
     [Fact]
     public async Task Discovery_honors_cancellation_and_releases_the_Workbook_file()
     {
-        var workbookPath = CreateWorkbook(worksheetCount: 30);
+        var workbookPath = CreateWorkbook(worksheetCount: 3);
         using var cancellation = new CancellationTokenSource();
-        cancellation.CancelAfter(TimeSpan.FromMilliseconds(1));
+        var progress = new RecordingProgress(item =>
+        {
+            if (item.Phase == WorkbookImportPhase.InspectingWorksheets && item.Current == 1)
+            {
+                cancellation.Cancel();
+            }
+        });
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            new WorkbookDiscoveryService().DiscoverAsync(workbookPath, cancellation.Token));
+            new WorkbookDiscoveryService(progress).DiscoverAsync(workbookPath, cancellation.Token));
 
+        Assert.Single(progress.Items);
         AssertWorkbookFileReleased(workbookPath);
     }
 
@@ -117,13 +124,14 @@ public sealed class WorkbookSafetyPreflightSpecs : IDisposable
     [Fact]
     public async Task Import_honors_cancellation_while_reading_rows_and_releases_the_Workbook_file()
     {
-        var workbookPath = CreateWorkbook(rowCount: 20_000);
+        var workbookPath = CreateWorkbook(rowCount: 512);
         using var cancellation = new CancellationTokenSource();
+        var readingCheckpoints = 0;
         var progress = new RecordingProgress(item =>
         {
-            if (item.Phase == WorkbookImportPhase.ReadingWorksheet)
+            if (item.Phase == WorkbookImportPhase.ReadingWorksheet && ++readingCheckpoints == 2)
             {
-                cancellation.CancelAfter(TimeSpan.FromMilliseconds(1));
+                cancellation.Cancel();
             }
         });
         var service = new XlsxImportService(DemoMaterialCatalog.All, progress: progress);

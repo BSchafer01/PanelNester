@@ -298,9 +298,23 @@ public sealed class XlsxImportService : IImportService, IWorkbookImportProgressS
             var hasRowNumberColumn = columnPlan.FieldToSource.TryGetValue(ImportFieldNames.RowNumber, out var rowNumberSourceColumn);
             var hasColumnNumberColumn = columnPlan.FieldToSource.TryGetValue(ImportFieldNames.ColumnNumber, out var columnNumberSourceColumn);
 
+            var rowsVisited = 0;
             foreach (var row in Enumerable.Range(headingRowNumber + 1, Math.Max(0, lastTableRegionRow - headingRowNumber))
                          .Select(worksheet.Row))
             {
+                rowsVisited++;
+                if (rowsVisited % 256 == 0)
+                {
+                    progress?.Report(new WorkbookImportProgress
+                    {
+                        Phase = WorkbookImportPhase.ReadingWorksheet,
+                        Label = $"Reading Worksheet {visibleWorksheetNumber} of {visibleWorksheets}",
+                        Current = visibleWorksheetNumber,
+                        Total = visibleWorksheets,
+                        WorksheetName = worksheet.Name,
+                        Preflight = preflight
+                    });
+                }
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var cellValues = Enumerable
