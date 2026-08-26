@@ -227,6 +227,8 @@ public sealed record ImportFileResponse(
     BridgeError? Error,
     string? Message)
 {
+    public ImportWorksheetDescriptor? Worksheet { get; init; }
+
     public static ImportFileResponse Cancelled() =>
         Failure(null, "cancelled", "File selection was cancelled.");
 
@@ -257,7 +259,10 @@ public sealed record ImportFileResponse(
             response.ColumnMappings,
             response.MaterialResolutions,
             null,
-            message);
+            message)
+        {
+            Worksheet = response.Worksheet
+        };
 }
 
 public sealed record AddPartRowRequest
@@ -332,6 +337,21 @@ public sealed record PreviewImportSessionRequest
     public string SessionId { get; init; } = string.Empty;
 
     public ImportOptions? Options { get; init; }
+
+    public string? WorksheetName { get; init; }
+}
+
+public sealed record ImportWorksheetSelection
+{
+    public string WorksheetName { get; init; } = string.Empty;
+
+    public int OriginalPosition { get; init; }
+
+    public ImportOptions? Options { get; init; }
+
+    public string OptimizationGroupId { get; init; } = string.Empty;
+
+    public string OptimizationGroupName { get; init; } = string.Empty;
 }
 
 public sealed record FinalizeImportSessionRequest
@@ -345,6 +365,9 @@ public sealed record FinalizeImportSessionRequest
     public Project? Project { get; init; }
 
     public string? TargetOptimizationGroupId { get; init; }
+
+    public IReadOnlyList<ImportWorksheetSelection> Worksheets { get; init; } =
+        Array.Empty<ImportWorksheetSelection>();
 }
 
 public sealed record CancelImportSessionRequest
@@ -380,6 +403,10 @@ public sealed record ImportSessionResponse(
     BridgeError? Error,
     string? Message)
 {
+    public WorkbookDiscovery? Workbook { get; init; }
+
+    public ImportWorksheetDescriptor? Worksheet { get; init; }
+
     public static ImportSessionResponse Failure(
         string sessionId,
         string? importSourcePath,

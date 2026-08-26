@@ -4,6 +4,117 @@ namespace PanelNester.Desktop.Bridge;
 
 internal static class ProjectImportFinalizer
 {
+    public static Project FinalizeWorkbook(
+        Project project,
+        ImportSourceMetadata importSource,
+        IReadOnlyList<FinalizedWorksheetImport> worksheetImports)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        ArgumentNullException.ThrowIfNull(importSource);
+        ArgumentNullException.ThrowIfNull(worksheetImports);
+
+        var orderedImports = worksheetImports
+            .OrderBy(item => item.Selection.OriginalPosition)
+            .ToArray();
+        if (orderedImports.Length == 0)
+        {
+            throw new ImportSessionException(
+                "import-worksheet-selection-required",
+                "Select at least one Worksheet before finalizing the Import Session.");
+        }
+
+        if (orderedImports
+            .GroupBy(item => item.Selection.OriginalPosition)
+            .Any(group => group.Count() > 1))
+        {
+            throw new ImportSessionException(
+                "import-worksheet-selection-duplicate",
+                "Each selected Worksheet may be finalized only once.");
+        }
+
+        if (orderedImports.Any(item => string.IsNullOrWhiteSpace(item.Selection.OptimizationGroupId)))
+        {
+            throw new ImportSessionException(
+                "import-optimization-group-required",
+                "Every selected Worksheet must belong to an Optimization Group.");
+        }
+
+        var allParts = orderedImports.SelectMany(item => item.Response.Parts).ToArray();
+        var groups = project.State.OptimizationGroups
+            .OrderBy(group => group.Order)
+            .Select(group => ClearResults(group with
+            {
+                Parts = group.Parts.Where(part => part.IsManual).ToArray()
+            }))
+            .ToList();
+
+        foreach (var worksheetImport in orderedImports)
+        {
+            var selection = worksheetImport.Selection;
+            var groupIndex = groups.FindIndex(group => string.Equals(
+                group.OptimizationGroupId,
+                selection.OptimizationGroupId,
+                StringComparison.Ordinal));
+            if (groupIndex < 0)
+            {
+                groupIndex = groups.Count;
+                var requestedName = string.IsNullOrWhiteSpace(selection.OptimizationGroupName)
+                    ? selection.WorksheetName
+                    : selection.OptimizationGroupName.Trim();
+                groups.Add(new OptimizationGroup
+                {
+                    OptimizationGroupId = selection.OptimizationGroupId,
+                    Name = MakeUniqueGroupName(requestedName, groups),
+                    Order = groupIndex
+                });
+            }
+
+            groups[groupIndex] = ClearResults(groups[groupIndex] with
+            {
+                Parts = groups[groupIndex].Parts.Concat(worksheetImport.Response.Parts).ToArray()
+            });
+        }
+
+        var normalizedGroups = groups
+            .Select((group, order) => group with { Order = order })
+            .ToArray();
+        var configuration = new ImportConfiguration
+        {
+            Options = orderedImports[0].Options,
+            Worksheets = orderedImports.Select(item => new ImportWorksheetConfiguration
+            {
+                WorksheetName = item.Selection.WorksheetName,
+                OriginalPosition = item.Selection.OriginalPosition,
+                HeadingRange = item.Response.Worksheet?.HeadingRange ?? string.Empty,
+                ColumnMappings = item.Response.ColumnMappings
+                    .Where(mapping => !string.IsNullOrWhiteSpace(mapping.SourceColumn))
+                    .Select(mapping => new ImportColumnMapping
+                    {
+                        SourceColumn = mapping.SourceColumn!,
+                        TargetField = mapping.TargetField
+                    })
+                    .ToArray(),
+                OptimizationGroupId = item.Selection.OptimizationGroupId,
+                ExcludedSourceRows = Array.Empty<int>()
+            }).ToArray()
+        };
+
+        var compatibilityGroup = normalizedGroups.FirstOrDefault();
+        return project with
+        {
+            State = project.State with
+            {
+                SourceFilePath = importSource.ImportSourcePath,
+                ImportSource = importSource,
+                ImportConfiguration = configuration,
+                Parts = allParts,
+                OptimizationGroups = normalizedGroups,
+                LastNestingResult = compatibilityGroup?.LastNestingResult,
+                LastBatchNestingResult = compatibilityGroup?.LastBatchNestingResult
+            }
+        };
+    }
+
     public static Project Finalize(
         Project project,
         ImportSourceMetadata importSource,
@@ -131,4 +242,31 @@ internal static class ProjectImportFinalizer
             LastBatchNestingResult = null,
             ResultStatus = OptimizationResultStatus.None
         };
+
+    private static string MakeUniqueGroupName(
+        string requestedName,
+        IReadOnlyList<OptimizationGroup> existingGroups)
+    {
+        var names = existingGroups
+            .Select(group => group.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!names.Contains(requestedName))
+        {
+            return requestedName;
+        }
+
+        for (var suffix = 2; ; suffix++)
+        {
+            var candidate = $"{requestedName} ({suffix})";
+            if (!names.Contains(candidate))
+            {
+                return candidate;
+            }
+        }
+    }
 }
+
+internal sealed record FinalizedWorksheetImport(
+    ImportWorksheetSelection Selection,
+    ImportOptions Options,
+    ImportResponse Response);

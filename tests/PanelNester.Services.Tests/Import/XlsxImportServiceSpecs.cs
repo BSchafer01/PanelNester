@@ -8,6 +8,33 @@ public sealed class XlsxImportServiceSpecs : IDisposable
 {
     private readonly string _workspacePath = Path.Combine(Path.GetTempPath(), $"PanelNester.XlsxImportServiceSpecs.{Guid.NewGuid():N}");
 
+    [Theory]
+    [InlineData(".xlsx")]
+    [InlineData(".xlsm")]
+    public async Task Excel_import_reads_the_requested_worksheet(string extension)
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, $"selected-worksheet{extension}");
+
+        using (var workbook = new XLWorkbook())
+        {
+            WriteWorksheet(workbook.AddWorksheet("First"), "FIRST");
+            WriteWorksheet(workbook.AddWorksheet("Second"), "SECOND");
+            workbook.SaveAs(workbookPath);
+        }
+
+        var response = await new XlsxImportService().ImportAsync(new ImportRequest
+        {
+            FilePath = workbookPath,
+            WorksheetName = "Second"
+        });
+
+        Assert.True(response.Success);
+        Assert.Equal("SECOND", Assert.Single(response.Parts).ImportedId);
+        Assert.Equal("Second", response.Worksheet?.WorksheetName);
+        Assert.Equal(2, response.Worksheet?.OriginalPosition);
+    }
+
     [Fact]
     public async Task Xlsx_import_matches_csv_validation_output_for_equivalent_rows()
     {
@@ -252,6 +279,21 @@ public sealed class XlsxImportServiceSpecs : IDisposable
                 SourceReferences = Array.Empty<SourceReference>()
             }).ToArray()
         };
+
+    private static void WriteWorksheet(IXLWorksheet worksheet, string partId)
+    {
+        string[] headers = ["Id", "Length", "Width", "Quantity", "Material"];
+        for (var column = 0; column < headers.Length; column++)
+        {
+            worksheet.Cell(1, column + 1).Value = headers[column];
+        }
+
+        worksheet.Cell(2, 1).Value = partId;
+        worksheet.Cell(2, 2).Value = 20;
+        worksheet.Cell(2, 3).Value = 10;
+        worksheet.Cell(2, 4).Value = 1;
+        worksheet.Cell(2, 5).Value = "Demo Material";
+    }
 
     public void Dispose()
     {

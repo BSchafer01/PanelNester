@@ -51,7 +51,7 @@ public sealed class NativeFileDialogService : IFileDialogService
                         Multiselect = false,
                         Filter = BuildFilter(
                             request.Filters,
-                            "Supported import files (*.csv, *.xlsx)|*.csv;*.xlsx|CSV files (*.csv)|*.csv|Excel workbooks (*.xlsx)|*.xlsx|All files (*.*)|*.*")
+                            "Supported import files (*.csv, *.xlsx, *.xlsm)|*.csv;*.xlsx;*.xlsm|CSV files (*.csv)|*.csv|Excel Workbooks (*.xlsx, *.xlsm)|*.xlsx;*.xlsm|All files (*.*)|*.*")
                     };
 
                     var selected = _openDialog(dialog, _ownerWindowAccessor());

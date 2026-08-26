@@ -3,6 +3,7 @@ using System.IO;
 using System.Security.Cryptography;
 using PanelNester.Domain.Contracts;
 using PanelNester.Domain.Models;
+using PanelNester.Services.Import;
 
 namespace PanelNester.Desktop.Bridge;
 
@@ -55,9 +56,11 @@ internal sealed class ImportSessionCoordinator
         try
         {
             await session.CaptureAsync(cancellationToken).ConfigureAwait(false);
+            var workbook = await DiscoverWorkbookAsync(session, cancellationToken).ConfigureAwait(false);
             return new ImportSessionResult(
                 session.ImportSource,
-                new ImportResponse { Success = true });
+                new ImportResponse { Success = true },
+                workbook);
         }
         catch
         {
@@ -69,12 +72,13 @@ internal sealed class ImportSessionCoordinator
     public async Task<ImportSessionResult> PreviewAsync(
         string sessionId,
         ImportOptions? options,
+        string? worksheetName,
         CancellationToken cancellationToken)
     {
         var session = GetSession(sessionId);
         try
         {
-            var response = await ImportSnapshotAsync(session, options, cancellationToken).ConfigureAwait(false);
+            var response = await ImportSnapshotAsync(session, options, worksheetName, cancellationToken).ConfigureAwait(false);
             return new ImportSessionResult(session.ImportSource, response);
         }
         catch
@@ -108,13 +112,14 @@ internal sealed class ImportSessionCoordinator
     private async Task<ImportResponse> ImportSnapshotAsync(
         ImportSessionSnapshot session,
         ImportOptions? options,
+        string? worksheetName,
         CancellationToken cancellationToken)
     {
         var operationToken = session.BeginOperation(cancellationToken);
 
         try
         {
-            return await ImportSnapshotFileAsync(session, options, operationToken).ConfigureAwait(false);
+            return await ImportSnapshotFileAsync(session, options, worksheetName, operationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -125,6 +130,7 @@ internal sealed class ImportSessionCoordinator
     private async Task<ImportResponse> ImportSnapshotFileAsync(
         ImportSessionSnapshot session,
         ImportOptions? options,
+        string? worksheetName,
         CancellationToken operationToken)
     {
         Directory.CreateDirectory(SnapshotDirectory);
@@ -136,11 +142,41 @@ internal sealed class ImportSessionCoordinator
                     new ImportRequest
                     {
                         FilePath = snapshotPath,
-                        Options = options ?? new ImportOptions()
+                        Options = options ?? new ImportOptions(),
+                        WorksheetName = worksheetName
                     },
                     operationToken)
                 .ConfigureAwait(false);
             return RestoreImportSourceIdentity(session, response);
+        }
+        finally
+        {
+            if (File.Exists(snapshotPath))
+            {
+                File.Delete(snapshotPath);
+            }
+        }
+    }
+
+    private static async Task<WorkbookDiscovery?> DiscoverWorkbookAsync(
+        ImportSessionSnapshot session,
+        CancellationToken cancellationToken)
+    {
+        if (!string.Equals(session.Extension, ".xlsx", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(session.Extension, ".xlsm", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        Directory.CreateDirectory(SnapshotDirectory);
+        var snapshotPath = Path.Combine(SnapshotDirectory, $"{Guid.NewGuid():N}{session.Extension}");
+        try
+        {
+            await File.WriteAllBytesAsync(snapshotPath, session.GetContents(), cancellationToken)
+                .ConfigureAwait(false);
+            return await new WorkbookDiscoveryService()
+                .DiscoverAsync(snapshotPath, cancellationToken)
+                .ConfigureAwait(false);
         }
         finally
         {
@@ -357,11 +393,13 @@ internal sealed class ImportSessionCoordinator
 
         public CancellationToken CancellationToken { get; }
 
-        public async Task<ImportSessionResult> ImportAsync(ImportOptions? options)
+        public async Task<ImportSessionResult> ImportAsync(
+            ImportOptions? options,
+            string? worksheetName = null)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             var response = await _owner
-                .ImportSnapshotFileAsync(_session, options, CancellationToken)
+                .ImportSnapshotFileAsync(_session, options, worksheetName, CancellationToken)
                 .ConfigureAwait(false);
             return new ImportSessionResult(_session.ImportSource, response);
         }
@@ -380,7 +418,10 @@ internal sealed class ImportSessionCoordinator
     }
 }
 
-internal sealed record ImportSessionResult(ImportSourceMetadata ImportSource, ImportResponse Response);
+internal sealed record ImportSessionResult(
+    ImportSourceMetadata ImportSource,
+    ImportResponse Response,
+    WorkbookDiscovery? Workbook = null);
 
 internal sealed class ImportSessionException(string code, string message) : Exception(message)
 {

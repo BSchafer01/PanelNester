@@ -33,6 +33,14 @@ public sealed record ImportWorksheetDescriptor
     public string HeadingRange { get; init; } = string.Empty;
 }
 
+public sealed record WorkbookDiscovery
+{
+    public IReadOnlyList<ImportWorksheetDescriptor> Worksheets { get; init; } =
+        Array.Empty<ImportWorksheetDescriptor>();
+
+    public bool MacrosPresent { get; init; }
+}
+
 public sealed record SourceReference
 {
     public string WorksheetName { get; init; } = string.Empty;

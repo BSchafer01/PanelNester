@@ -36,7 +36,7 @@ public sealed class XlsxImportService : IImportService
         {
             return PartRowValidator.CreateResponse(
                 [],
-                [new ValidationError("file-path-required", "An XLSX file path is required.")],
+                [new ValidationError("file-path-required", "An Excel Workbook path is required.")],
                 []);
         }
 
@@ -44,15 +44,17 @@ public sealed class XlsxImportService : IImportService
         {
             return PartRowValidator.CreateResponse(
                 [],
-                [new ValidationError("file-not-found", $"XLSX file was not found: {request.FilePath}")],
+                [new ValidationError("file-not-found", $"Excel Workbook was not found: {request.FilePath}")],
                 []);
         }
 
-        if (!string.Equals(Path.GetExtension(request.FilePath), ".xlsx", StringComparison.OrdinalIgnoreCase))
+        var extension = Path.GetExtension(request.FilePath);
+        if (!string.Equals(extension, ".xlsx", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(extension, ".xlsm", StringComparison.OrdinalIgnoreCase))
         {
             return PartRowValidator.CreateResponse(
                 [],
-                [new ValidationError("unsupported-file-type", "XlsxImportService only supports .xlsx files.")],
+                [new ValidationError("unsupported-file-type", "Excel import only supports .xlsx and .xlsm Workbooks.")],
                 []);
         }
 
@@ -69,11 +71,21 @@ public sealed class XlsxImportService : IImportService
         {
             await using var stream = ImportFileAccessGuard.OpenReadShared(request.FilePath);
             using var workbook = new XLWorkbook(stream);
-            var worksheet = workbook.Worksheets.FirstOrDefault(sheet => sheet.RangeUsed() is not null);
+            var worksheet = string.IsNullOrWhiteSpace(request.WorksheetName)
+                ? workbook.Worksheets.FirstOrDefault(sheet =>
+                    sheet.Visibility == XLWorksheetVisibility.Visible && sheet.RangeUsed() is not null)
+                : workbook.Worksheets.FirstOrDefault(sheet =>
+                    sheet.Visibility == XLWorksheetVisibility.Visible &&
+                    sheet.RangeUsed() is not null &&
+                    string.Equals(sheet.Name, request.WorksheetName, StringComparison.Ordinal));
 
             if (worksheet is null)
             {
-                errors.Add(new ValidationError("empty-workbook", "Workbook does not contain any populated worksheets."));
+                errors.Add(string.IsNullOrWhiteSpace(request.WorksheetName)
+                    ? new ValidationError("empty-workbook", "Workbook does not contain any visible, populated Worksheets.")
+                    : new ValidationError(
+                        "worksheet-not-found",
+                        $"Worksheet '{request.WorksheetName}' was not found, visible, and populated."));
                 return PartRowValidator.CreateResponse([], errors, warnings);
             }
 

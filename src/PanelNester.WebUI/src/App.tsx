@@ -277,7 +277,7 @@ type AppAction =
   | { type: 'extrusion-operation-failed'; message: string };
 
 const defaultImportMessage =
-  'Choose a CSV or XLSX file, review column/material mappings, then finalize the import before nesting.';
+  'Choose a CSV file or Excel Workbook, review its import configuration, then finalize before nesting.';
 const defaultNestingMessage =
   'Select a material for focus if needed, then run nesting when the imported rows are ready.';
 const defaultMaterialsMessage =
@@ -771,6 +771,7 @@ function normalizeImportResponse(response: {
   availableColumns?: string[];
   columnMappings?: ImportResponse['columnMappings'];
   materialResolutions?: ImportResponse['materialResolutions'];
+  worksheet?: ImportResponse['worksheet'];
 }): ImportResponse {
   return {
     success: response.success === true,
@@ -786,6 +787,7 @@ function normalizeImportResponse(response: {
     materialResolutions: Array.isArray(response.materialResolutions)
       ? response.materialResolutions
       : [],
+    worksheet: response.worksheet ?? null,
   };
 }
 
@@ -820,6 +822,7 @@ function normalizeImportSessionResponse(
     phase: response.phase ?? 'failed',
     finalized: response.finalized === true,
     project: response.project ?? null,
+    workbook: response.workbook ?? null,
   };
 }
 
@@ -871,6 +874,7 @@ function createImportMappingSession(
   existing?: ImportMappingSession,
 ): ImportMappingSession {
   return {
+    ...existing,
     sessionId,
     filePath,
     preview: response,
@@ -1047,6 +1051,51 @@ function describeBatchNestingResult(response: BatchNestResponse): string {
   );
 
   return `${response.materialResults.length} material(s): ${totals.sheets} sheet(s), ${totals.placed} placed part(s), and ${totals.unplaced} unplaced item(s).`;
+}
+
+function createWorkbookImportMappingSession(
+  sessionId: string,
+  filePath: string,
+  started: ImportSessionResponse,
+  preview: ImportSessionResponse,
+): ImportMappingSession {
+  const workbook = started.workbook!;
+  const firstWorksheet = workbook.worksheets[0];
+  const firstDraft = {
+    worksheet: firstWorksheet,
+    selected: true,
+    optimizationGroupId: `import-${sessionId}-${firstWorksheet.originalPosition}`,
+    optimizationGroupName: firstWorksheet.worksheetName,
+    preview,
+    options: buildImportOptionsFromResponse(preview),
+    newMaterials: [],
+    hasPendingChanges: false,
+  };
+
+  return {
+    sessionId,
+    filePath,
+    preview,
+    options: firstDraft.options,
+    newMaterials: [],
+    hasPendingChanges: false,
+    workbook,
+    activeWorksheetName: firstWorksheet.worksheetName,
+    worksheets: workbook.worksheets.map((worksheet) =>
+      worksheet.worksheetName === firstWorksheet.worksheetName
+        ? firstDraft
+        : {
+            worksheet,
+            selected: false,
+            optimizationGroupId: `import-${sessionId}-${worksheet.originalPosition}`,
+            optimizationGroupName: worksheet.worksheetName,
+            preview: normalizeImportFileResponse({}),
+            options: { columnMappings: [], materialMappings: [] },
+            newMaterials: [],
+            hasPendingChanges: true,
+          },
+    ),
+  };
 }
 
 function describeOptimizationGroupRun(response: BatchNestResponse): string {
@@ -3048,9 +3097,9 @@ export default function App() {
           {
             title: 'Select a parts file',
             filters: [
-              { name: 'Supported files', extensions: ['csv', 'xlsx'] },
+              { name: 'Supported files', extensions: ['csv', 'xlsx', 'xlsm'] },
               { name: 'CSV files', extensions: ['csv'] },
-              { name: 'Excel workbooks', extensions: ['xlsx'] },
+              { name: 'Excel Workbooks', extensions: ['xlsx', 'xlsm'] },
               { name: 'All files', extensions: ['*.*'] },
             ],
           },
@@ -3121,13 +3170,26 @@ export default function App() {
           return;
         }
 
+        if (started.workbook && started.workbook.worksheets.length === 0) {
+          activeImportSessionIdRef.current = undefined;
+          await hostBridge.cancelImportSession({ sessionId }).catch(() => undefined);
+          dispatch({
+            type: 'import-failed',
+            message: 'The Workbook does not contain any visible, nonempty Worksheets.',
+          });
+          return;
+        }
+
         dispatch({
           type: 'import-started',
           phase: 'validating',
           message: `Validating the snapshot for ${fileNameFromPath(selectedFilePath)}…`,
         });
         const response = normalizeImportSessionResponse(
-          await hostBridge.previewImportSession({ sessionId }),
+          await hostBridge.previewImportSession({
+            sessionId,
+            worksheetName: started.workbook?.worksheets[0]?.worksheetName ?? null,
+          }),
           sessionId,
         );
         if (activeImportSessionIdRef.current !== sessionId) {
@@ -3147,6 +3209,19 @@ export default function App() {
         }
 
         const importResponse = toImportResponse(response);
+        if (started.workbook) {
+          dispatch({
+            type: 'import-mapping-ready',
+            session: createWorkbookImportMappingSession(
+              sessionId,
+              selectedFilePath,
+              started,
+              response,
+            ),
+            message: `Discovered ${started.workbook.worksheets.length} visible, nonempty Worksheet(s). Select and assign Worksheets before finalizing.`,
+          });
+          return;
+        }
         if (shouldRequireImportReview(importResponse)) {
           dispatch({
             type: 'import-mapping-ready',
@@ -3328,9 +3403,25 @@ export default function App() {
   };
 
   const updateImportMappingSession = (session: ImportMappingSession) => {
+    const synchronizedSession = session.worksheets && session.activeWorksheetName
+      ? {
+          ...session,
+          worksheets: session.worksheets.map((draft) =>
+            draft.worksheet.worksheetName === session.activeWorksheetName
+              ? {
+                  ...draft,
+                  preview: session.preview,
+                  options: session.options,
+                  newMaterials: session.newMaterials,
+                  hasPendingChanges: session.hasPendingChanges,
+                }
+              : draft,
+          ),
+        }
+      : session;
     dispatch({
       type: 'import-mapping-updated',
-      session,
+      session: synchronizedSession,
     });
   };
 
@@ -3372,6 +3463,7 @@ export default function App() {
               await hostBridge.previewImportSession({
                 sessionId: session.sessionId,
                 options: session.options,
+                worksheetName: session.activeWorksheetName ?? null,
               }),
               session.sessionId,
             )
@@ -3404,10 +3496,30 @@ export default function App() {
         return;
       }
 
-      const nextSession = createImportMappingSession(session.sessionId, filePath, response, {
+      const refreshedOptions = session.options.columnMappings.length > 0
+        ? session.options
+        : buildImportOptionsFromResponse(response);
+      let nextSession = createImportMappingSession(session.sessionId, filePath, response, {
         ...session,
+        options: refreshedOptions,
         hasPendingChanges: false,
       });
+      if (nextSession.worksheets && nextSession.activeWorksheetName) {
+        nextSession = {
+          ...nextSession,
+          worksheets: nextSession.worksheets.map((draft) =>
+            draft.worksheet.worksheetName === nextSession.activeWorksheetName
+              ? {
+                  ...draft,
+                  preview: response,
+                  options: nextSession.options,
+                  newMaterials: nextSession.newMaterials,
+                  hasPendingChanges: false,
+                }
+              : draft,
+          ),
+        };
+      }
 
       dispatch({
         type: 'import-mapping-ready',
@@ -3444,6 +3556,16 @@ export default function App() {
     });
 
     try {
+      const selectedWorksheetDrafts = session.worksheets?.filter((draft) => draft.selected) ?? [];
+      const sessionNewMaterials = selectedWorksheetDrafts.length > 0
+        ? Array.from(
+            new Map(
+              selectedWorksheetDrafts
+                .flatMap((draft) => draft.newMaterials)
+                .map((entry) => [entry.sourceMaterialName, entry]),
+            ).values(),
+          )
+        : session.newMaterials;
       const usesImportSession =
         session.sessionId !== 'legacy-import' &&
         hasCapability(bridgeMessageTypes.finalizeImportSession);
@@ -3454,9 +3576,16 @@ export default function App() {
           await hostBridge.finalizeImportSession({
             sessionId: session.sessionId,
             options: session.options,
-            newMaterials: session.newMaterials,
+            newMaterials: sessionNewMaterials,
             project: buildProjectRecord(state),
             targetOptimizationGroupId: state.activeOptimizationGroupId ?? null,
+            worksheets: selectedWorksheetDrafts.map((draft) => ({
+              worksheetName: draft.worksheet.worksheetName,
+              originalPosition: draft.worksheet.originalPosition,
+              options: draft.options,
+              optimizationGroupId: draft.optimizationGroupId,
+              optimizationGroupName: draft.optimizationGroupName,
+            })),
           }),
           session.sessionId,
         );
@@ -3500,7 +3629,7 @@ export default function App() {
 
       const importResponse = toImportResponse(response);
       const syncedMaterials =
-        session.newMaterials.length > 0
+        sessionNewMaterials.length > 0
           ? await loadMaterials({
               message: 'Material library synced after import-time material creation.',
               selectionContext: {

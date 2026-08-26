@@ -13,6 +13,108 @@ namespace PanelNester.Desktop.Tests.Bridge;
 
 public sealed class ImportBridgeSpecs : IDisposable
 {
+    [Theory]
+    [InlineData(".xlsx", false)]
+    [InlineData(".xlsm", true)]
+    public async Task Beginning_an_Excel_import_session_discovers_selectable_Worksheets(
+        string extension,
+        bool macrosPresent)
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, $"bridge-discovery{extension}");
+        using (var workbook = new XLWorkbook())
+        {
+            workbook.AddWorksheet("Empty");
+            WriteWorkbookWorksheet(workbook.AddWorksheet("First"), "FIRST", "Demo Material");
+            WriteWorkbookWorksheet(workbook.AddWorksheet("Hidden"), "HIDDEN", "Demo Material");
+            workbook.Worksheet("Hidden").Visibility = XLWorksheetVisibility.Hidden;
+            WriteWorkbookWorksheet(workbook.AddWorksheet("Second"), "SECOND", "Demo Material");
+            workbook.SaveAs(workbookPath);
+        }
+
+        var dispatcher = CreateDispatcher();
+        var response = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest
+            {
+                SessionId = $"discovery-{Guid.NewGuid():N}",
+                ImportSourcePath = workbookPath
+            });
+
+        Assert.True(response.Success);
+        Assert.Equal(macrosPresent, response.Workbook?.MacrosPresent);
+        Assert.Equal(["First", "Second"], response.Workbook?.Worksheets.Select(sheet => sheet.WorksheetName));
+        Assert.Empty(response.Parts);
+    }
+
+    [Fact]
+    public async Task Excel_session_previews_a_named_Worksheet_and_finalizes_only_selected_Worksheets_in_source_order()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "selected-worksheets.xlsx");
+        using (var workbook = new XLWorkbook())
+        {
+            WriteWorkbookWorksheet(workbook.AddWorksheet("First"), "FIRST", "Demo Material");
+            WriteWorkbookWorksheet(workbook.AddWorksheet("Second"), "SECOND", "Demo Material");
+            WriteWorkbookWorksheet(workbook.AddWorksheet("Third"), "THIRD", "Demo Material");
+            workbook.SaveAs(workbookPath);
+        }
+
+        var dispatcher = CreateDispatcher();
+        const string sessionId = "selected-worksheets-session";
+        var started = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest { SessionId = sessionId, ImportSourcePath = workbookPath });
+        Assert.True(started.Success);
+
+        var preview = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.PreviewImportSession,
+            new PreviewImportSessionRequest { SessionId = sessionId, WorksheetName = "Second" });
+        Assert.Equal("SECOND", Assert.Single(preview.Parts).ImportedId);
+
+        var finalized = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.FinalizeImportSession,
+            new FinalizeImportSessionRequest
+            {
+                SessionId = sessionId,
+                Project = new Project { ProjectId = "worksheet-project" },
+                Worksheets =
+                [
+                    new ImportWorksheetSelection
+                    {
+                        WorksheetName = "Third",
+                        OriginalPosition = 3,
+                        OptimizationGroupId = "combined",
+                        OptimizationGroupName = "Combined"
+                    },
+                    new ImportWorksheetSelection
+                    {
+                        WorksheetName = "First",
+                        OriginalPosition = 1,
+                        OptimizationGroupId = "combined",
+                        OptimizationGroupName = "Combined"
+                    }
+                ]
+            });
+
+        Assert.True(finalized.Success);
+        var project = Assert.IsType<Project>(finalized.Project);
+        Assert.Equal(["FIRST", "THIRD"], project.State.Parts.Select(part => part.ImportedId));
+        Assert.Equal(
+            ["First", "Third"],
+            project.State.ImportConfiguration?.Worksheets.Select(sheet => sheet.WorksheetName));
+        var group = Assert.Single(project.State.OptimizationGroups);
+        Assert.Equal("combined", group.OptimizationGroupId);
+        Assert.Equal("Combined", group.Name);
+        Assert.Equal(["FIRST", "THIRD"], group.Parts.Select(part => part.ImportedId));
+        Assert.All(
+            project.State.ImportConfiguration!.Worksheets,
+            worksheet => Assert.Equal("combined", worksheet.OptimizationGroupId));
+    }
     private static readonly JsonSerializerOptions SerializerOptions = BridgeJson.SerializerOptions;
     private readonly string _workspacePath = Path.Combine(Path.GetTempPath(), $"PanelNester.ImportBridgeSpecs.{Guid.NewGuid():N}");
 
@@ -90,6 +192,7 @@ public sealed class ImportBridgeSpecs : IDisposable
         var dialogRequest = Assert.Single(dialogs.OpenRequests);
         Assert.Contains(dialogRequest.Filters!, filter => filter.Extensions.Contains("csv", StringComparer.Ordinal));
         Assert.Contains(dialogRequest.Filters!, filter => filter.Extensions.Contains("xlsx", StringComparer.Ordinal));
+        Assert.Contains(dialogRequest.Filters!, filter => filter.Extensions.Contains("xlsm", StringComparer.Ordinal));
 
         var xlsxResponse = await DispatchAsync<ImportFileResponse>(
             dispatcher,
@@ -1056,6 +1159,24 @@ public sealed class ImportBridgeSpecs : IDisposable
         workbook.SaveAs(filePath);
     }
 
+    private static void WriteWorkbookWorksheet(
+        IXLWorksheet worksheet,
+        string partId,
+        string materialName)
+    {
+        string[] headers = ["Id", "Length", "Width", "Quantity", "Material"];
+        for (var column = 0; column < headers.Length; column++)
+        {
+            worksheet.Cell(1, column + 1).Value = headers[column];
+        }
+
+        worksheet.Cell(2, 1).Value = partId;
+        worksheet.Cell(2, 2).Value = 20;
+        worksheet.Cell(2, 3).Value = 10;
+        worksheet.Cell(2, 4).Value = 1;
+        worksheet.Cell(2, 5).Value = materialName;
+    }
+
     private static async Task<TResponse> DispatchAsync<TResponse>(
         BridgeMessageDispatcher dispatcher,
         string type,
@@ -1071,6 +1192,23 @@ public sealed class ImportBridgeSpecs : IDisposable
         var typed = response!.Payload.Deserialize<TResponse>(SerializerOptions);
         Assert.NotNull(typed);
         return typed!;
+    }
+
+    private BridgeMessageDispatcher CreateDispatcher()
+    {
+        var repository = new JsonMaterialRepository(Path.Combine(_workspacePath, "discovery-materials.json"));
+        var materialService = new MaterialService(repository, idGenerator: () => "discovery-material");
+        var validator = new PartRowValidator();
+        return DesktopBridgeRegistration.CreateDefault(
+            new RecordingFileDialogService(),
+            materialService,
+            new ProjectService(materialService, idGenerator: () => "discovery-project"),
+            new FileImportDispatcher(
+                new CsvImportService(repository, validator),
+                new XlsxImportService(repository, validator)),
+            new PartEditorService(repository, validator),
+            new ShelfNestingService(),
+            () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true));
     }
 
     private sealed class RecordingFileDialogService(IEnumerable<string>? openPaths = null) : IFileDialogService

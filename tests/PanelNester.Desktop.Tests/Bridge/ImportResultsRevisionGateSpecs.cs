@@ -6,6 +6,30 @@ namespace PanelNester.Desktop.Tests.Bridge;
 public sealed class ImportResultsRevisionGateSpecs
 {
     [Fact]
+    public void Workbook_import_review_keeps_selection_grouping_and_reselection_drafts_explicit()
+    {
+        var app = ReadRepositoryText("src", "PanelNester.WebUI", "src", "App.tsx");
+        var importPage = ReadRepositoryText(
+            "src",
+            "PanelNester.WebUI",
+            "src",
+            "pages",
+            "ImportPage.tsx");
+
+        Assert.Contains("selected: true", app);
+        Assert.Contains("selected: false", app);
+        Assert.Contains("optimizationGroupName: worksheet.worksheetName", app);
+        Assert.Contains("draft.worksheet.worksheetName === worksheetName", importPage);
+        Assert.Contains("? { ...draft, selected }", importPage);
+        Assert.Contains("selectedWorksheetDrafts.map((draft) => ({", app);
+        Assert.Contains("Select all Worksheets", importPage);
+        Assert.Contains("Clear selection", importPage);
+        Assert.Contains("Assign selected Worksheets", importPage);
+        Assert.Contains("aria-label=\"Optimization Group for selected Worksheets\"", importPage);
+        Assert.Contains("Macros are not run. OptiFab reads worksheet values only.", importPage);
+    }
+
+    [Fact]
     public void App_import_flow_still_uses_a_two_step_dialog_then_import_sequence_for_first_try_success()
     {
         var app = ReadRepositoryText("src", "PanelNester.WebUI", "src", "App.tsx");

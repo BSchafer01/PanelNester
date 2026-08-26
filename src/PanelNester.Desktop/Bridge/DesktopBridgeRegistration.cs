@@ -314,7 +314,11 @@ public static class DesktopBridgeRegistration
                 try
                 {
                     var result = await importSessions
-                        .PreviewAsync(request.SessionId, request.Options, cancellationToken)
+                        .PreviewAsync(
+                            request.SessionId,
+                            request.Options,
+                            request.WorksheetName,
+                            cancellationToken)
                         .ConfigureAwait(false);
                     return BuildImportSessionResponse(request.SessionId, result, ImportSessionPhase.Validating);
                 }
@@ -347,7 +351,7 @@ public static class DesktopBridgeRegistration
             BridgeMessageTypes.FinalizeImportSession,
             async (request, cancellationToken) =>
             {
-                IReadOnlyList<Material> createdMaterials = Array.Empty<Material>();
+                var createdMaterials = new List<Material>();
                 if (request.Project is null)
                 {
                     importSessions.Cancel(request.SessionId);
@@ -362,6 +366,94 @@ public static class DesktopBridgeRegistration
                 try
                 {
                     using var finalization = importSessions.BeginFinalization(request.SessionId, cancellationToken);
+                    if (request.Worksheets.Count > 0)
+                    {
+                        var worksheetImports = new List<FinalizedWorksheetImport>();
+                        ImportSourceMetadata? workbookImportSource = null;
+                        var orderedSelections = request.Worksheets
+                            .OrderBy(selection => selection.OriginalPosition)
+                            .ToArray();
+
+                        foreach (var selection in orderedSelections)
+                        {
+                            var worksheetPreparation = await PrepareImportOptionsAsync(
+                                    new ImportFileRequest
+                                    {
+                                        Options = selection.Options,
+                                        NewMaterials = worksheetImports.Count == 0
+                                            ? request.NewMaterials
+                                            : Array.Empty<ImportNewMaterialRequest>()
+                                    },
+                                    materialService,
+                                    finalization.CancellationToken)
+                                .ConfigureAwait(false);
+                            createdMaterials.AddRange(worksheetPreparation.CreatedMaterials);
+                            if (!worksheetPreparation.Success)
+                            {
+                                await RollbackCreatedMaterialsAsync(materialService, createdMaterials)
+                                    .ConfigureAwait(false);
+                                var preparationMessage = GetFirstErrorMessage(
+                                    worksheetPreparation.Errors,
+                                    "Import material preparation failed.");
+                                return ImportSessionResponse.Failure(
+                                    request.SessionId,
+                                    null,
+                                    ImportSessionPhase.Failed,
+                                    GetFirstErrorCode(worksheetPreparation.Errors, "import-material-preparation-failed"),
+                                    preparationMessage);
+                            }
+
+                            var worksheetResult = await finalization
+                                .ImportAsync(worksheetPreparation.Options, selection.WorksheetName)
+                                .ConfigureAwait(false);
+                            var importedWorksheet = worksheetResult.Response.Worksheet;
+                            var normalizedSelection = importedWorksheet is null
+                                ? selection
+                                : selection with
+                                {
+                                    WorksheetName = importedWorksheet.WorksheetName,
+                                    OriginalPosition = importedWorksheet.OriginalPosition
+                                };
+                            worksheetResult = worksheetResult with
+                            {
+                                Response = PrefixWorksheetRowIds(
+                                    MarkCreatedMaterialResolutions(
+                                        worksheetResult.Response,
+                                        worksheetPreparation.CreatedSourceMaterials),
+                                    normalizedSelection.OriginalPosition)
+                            };
+                            workbookImportSource = worksheetResult.ImportSource;
+                            if (!worksheetResult.Response.Success)
+                            {
+                                await RollbackCreatedMaterialsAsync(materialService, createdMaterials)
+                                    .ConfigureAwait(false);
+                                return BuildImportSessionResponse(
+                                    request.SessionId,
+                                    worksheetResult,
+                                    ImportSessionPhase.Failed);
+                            }
+
+                            worksheetImports.Add(new FinalizedWorksheetImport(
+                                normalizedSelection,
+                                worksheetPreparation.Options,
+                                worksheetResult.Response));
+                        }
+
+                        var combinedResult = CombineWorksheetImports(
+                            workbookImportSource!,
+                            worksheetImports);
+                        var workbookProject = ProjectImportFinalizer.FinalizeWorkbook(
+                            request.Project,
+                            combinedResult.ImportSource,
+                            worksheetImports);
+                        return BuildImportSessionResponse(
+                            request.SessionId,
+                            combinedResult,
+                            ImportSessionPhase.Finalized,
+                            workbookProject,
+                            finalized: true);
+                    }
+
                     var importPreparation = await PrepareImportOptionsAsync(
                             new ImportFileRequest
                             {
@@ -371,7 +463,7 @@ public static class DesktopBridgeRegistration
                             materialService,
                             finalization.CancellationToken)
                         .ConfigureAwait(false);
-                    createdMaterials = importPreparation.CreatedMaterials;
+                    createdMaterials.AddRange(importPreparation.CreatedMaterials);
                     if (!importPreparation.Success)
                     {
                         importSessions.Cancel(request.SessionId);
@@ -1566,9 +1658,9 @@ public static class DesktopBridgeRegistration
 
     private static readonly IReadOnlyList<FileDialogFilter> ImportFileFilters =
     [
-        new FileDialogFilter("Supported import files", ["csv", "xlsx"]),
+        new FileDialogFilter("Supported import files", ["csv", "xlsx", "xlsm"]),
         new FileDialogFilter("CSV files", ["csv"]),
-        new FileDialogFilter("Excel workbooks", ["xlsx"]),
+        new FileDialogFilter("Excel Workbooks", ["xlsx", "xlsm"]),
         new FileDialogFilter("All files", ["*.*"])
     ];
 
@@ -2064,7 +2156,57 @@ public static class DesktopBridgeRegistration
             response.ColumnMappings,
             response.MaterialResolutions,
             null,
-            BuildImportFileMessage(response, result.ImportSource.ImportSourcePath));
+            BuildImportFileMessage(response, result.ImportSource.ImportSourcePath))
+        {
+            Workbook = result.Workbook,
+            Worksheet = response.Worksheet
+        };
+    }
+
+    private static ImportResponse PrefixWorksheetRowIds(
+        ImportResponse response,
+        int worksheetPosition)
+    {
+        var rowIds = response.Parts.ToDictionary(
+            part => part.RowId,
+            part => $"worksheet-{worksheetPosition}-{part.RowId}",
+            StringComparer.Ordinal);
+        return response with
+        {
+            Parts = response.Parts.Select(part => part with
+            {
+                RowId = rowIds[part.RowId]
+            }).ToArray(),
+            Errors = response.Errors.Select(error => error.RowId is not null && rowIds.TryGetValue(error.RowId, out var rowId)
+                ? error with { RowId = rowId }
+                : error).ToArray(),
+            Warnings = response.Warnings.Select(warning => warning.RowId is not null && rowIds.TryGetValue(warning.RowId, out var rowId)
+                ? warning with { RowId = rowId }
+                : warning).ToArray()
+        };
+    }
+
+    private static ImportSessionResult CombineWorksheetImports(
+        ImportSourceMetadata importSource,
+        IReadOnlyList<FinalizedWorksheetImport> worksheetImports)
+    {
+        var responses = worksheetImports.Select(item => item.Response).ToArray();
+        return new ImportSessionResult(
+            importSource,
+            new ImportResponse
+            {
+                Success = responses.All(response => response.Success),
+                Parts = responses.SelectMany(response => response.Parts).ToArray(),
+                Errors = responses.SelectMany(response => response.Errors).ToArray(),
+                Warnings = responses.SelectMany(response => response.Warnings).ToArray(),
+                AvailableColumns = responses.FirstOrDefault()?.AvailableColumns ?? Array.Empty<string>(),
+                ColumnMappings = responses.FirstOrDefault()?.ColumnMappings ?? Array.Empty<ImportFieldMappingStatus>(),
+                MaterialResolutions = responses
+                    .SelectMany(response => response.MaterialResolutions)
+                    .GroupBy(resolution => resolution.SourceMaterialName, StringComparer.Ordinal)
+                    .Select(group => group.First())
+                    .ToArray()
+            });
     }
 
     private static string GetFirstErrorCode(IReadOnlyList<ValidationError> errors, string fallbackCode) =>

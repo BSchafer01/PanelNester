@@ -211,6 +211,18 @@ export interface ImportResponse {
   availableColumns: string[];
   columnMappings: ImportFieldMappingStatus[];
   materialResolutions: ImportMaterialResolution[];
+  worksheet?: ImportWorksheetDescriptor | null;
+}
+
+export interface ImportWorksheetDescriptor {
+  worksheetName: string;
+  originalPosition: number;
+  headingRange: string;
+}
+
+export interface WorkbookDiscovery {
+  worksheets: ImportWorksheetDescriptor[];
+  macrosPresent: boolean;
 }
 
 export interface ImportNewMaterialRequest {
@@ -262,6 +274,15 @@ export interface BeginImportSessionRequest {
 export interface PreviewImportSessionRequest {
   sessionId: string;
   options?: ImportOptions | null;
+  worksheetName?: string | null;
+}
+
+export interface ImportWorksheetSelection {
+  worksheetName: string;
+  originalPosition: number;
+  options?: ImportOptions | null;
+  optimizationGroupId: string;
+  optimizationGroupName: string;
 }
 
 export interface FinalizeImportSessionRequest {
@@ -270,6 +291,7 @@ export interface FinalizeImportSessionRequest {
   newMaterials?: ImportNewMaterialRequest[];
   project: ProjectRecord;
   targetOptimizationGroupId?: string | null;
+  worksheets?: ImportWorksheetSelection[];
 }
 
 export interface CancelImportSessionRequest {
@@ -283,6 +305,7 @@ export interface ImportSessionResponse extends ImportFileResponse {
   phase: ImportSessionPhase;
   finalized: boolean;
   project?: ProjectRecord | null;
+  workbook?: WorkbookDiscovery | null;
 }
 
 export interface CancelImportSessionResponse {
@@ -311,6 +334,20 @@ export interface DeletePartRowRequest {
 export interface ImportMappingSession {
   sessionId: string;
   filePath: string;
+  preview: ImportFileResponse;
+  options: ImportOptions;
+  newMaterials: ImportNewMaterialRequest[];
+  hasPendingChanges: boolean;
+  workbook?: WorkbookDiscovery;
+  worksheets?: ImportWorksheetDraft[];
+  activeWorksheetName?: string;
+}
+
+export interface ImportWorksheetDraft {
+  worksheet: ImportWorksheetDescriptor;
+  selected: boolean;
+  optimizationGroupId: string;
+  optimizationGroupName: string;
   preview: ImportFileResponse;
   options: ImportOptions;
   newMaterials: ImportNewMaterialRequest[];

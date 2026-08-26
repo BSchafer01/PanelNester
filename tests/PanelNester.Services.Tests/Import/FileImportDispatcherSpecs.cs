@@ -15,13 +15,15 @@ public sealed class FileImportDispatcherSpecs
 
         var csvResponse = await dispatcher.ImportAsync(new ImportRequest { FilePath = @"C:\imports\parts.csv" });
         var xlsxResponse = await dispatcher.ImportAsync(new ImportRequest { FilePath = @"C:\imports\parts.xlsx" });
+        var xlsmResponse = await dispatcher.ImportAsync(new ImportRequest { FilePath = @"C:\imports\parts.xlsm" });
 
         Assert.True(csvResponse.Success);
         Assert.True(xlsxResponse.Success);
+        Assert.True(xlsmResponse.Success);
         Assert.Equal("csv-route", Assert.Single(csvResponse.Parts).RowId);
         Assert.Equal("xlsx-route", Assert.Single(xlsxResponse.Parts).RowId);
         Assert.Equal([@"C:\imports\parts.csv"], csvImportService.RequestedPaths);
-        Assert.Equal([@"C:\imports\parts.xlsx"], xlsxImportService.RequestedPaths);
+        Assert.Equal([@"C:\imports\parts.xlsx", @"C:\imports\parts.xlsm"], xlsxImportService.RequestedPaths);
     }
 
     [Fact]

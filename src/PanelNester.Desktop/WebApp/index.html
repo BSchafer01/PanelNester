@@ -227,9 +227,9 @@
 
         async function callFileDialogSeam() {
             await bridge.invoke("dialog.openFile", {
-                title: "Select a CSV or XLSX file",
+                title: "Select a CSV file or Excel Workbook",
                 filters: [
-                    { name: "Parts", extensions: [".csv", ".xlsx"] }
+                    { name: "Parts", extensions: [".csv", ".xlsx", ".xlsm"] }
                 ]
             });
         }

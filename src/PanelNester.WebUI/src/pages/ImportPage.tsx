@@ -596,10 +596,13 @@ export function ImportPage({
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const [pageSize, setPageSize] = useState<number>(defaultPageSize);
   const [currentPage, setCurrentPage] = useState(1);
+  const [bulkWorksheetGroupId, setBulkWorksheetGroupId] = useState('');
 
   const activeImportResponse = mappingSession?.preview ?? importResponse;
   const displayFilePath = mappingSession?.filePath ?? selectedFilePath;
   const hasPendingImportReview = Boolean(mappingSession);
+  const worksheetDrafts = mappingSession?.worksheets ?? [];
+  const selectedWorksheetDrafts = worksheetDrafts.filter((draft) => draft.selected);
   const showRowActions = !hasPendingImportReview && (canEditRows || canDeleteRows);
   const hasParts = activeImportResponse.parts.length > 0;
   const busy = importBusy || partMutationBusy;
@@ -611,6 +614,17 @@ export function ImportPage({
       })),
     [optimizationGroups],
   );
+  const worksheetOptimizationGroupOptions = useMemo(() => {
+    const options = new Map(
+      optimizationGroups.map((group) => [group.optimizationGroupId, group.name]),
+    );
+    for (const draft of worksheetDrafts) {
+      if (draft.selected) {
+        options.set(draft.optimizationGroupId, draft.optimizationGroupName);
+      }
+    }
+    return Array.from(options, ([value, label]) => ({ value, label }));
+  }, [optimizationGroups, worksheetDrafts]);
   const optimizationGroupByPartRowId = useMemo(() => {
     const ownership = new Map<string, string>();
     for (const group of optimizationGroups) {
@@ -781,14 +795,160 @@ export function ImportPage({
       )
     : false;
   const canPreviewMapping =
-    hasPendingImportReview && allRequiredFieldsMapped && !busy;
+    hasPendingImportReview &&
+    (mappingSession?.preview.columnMappings.length === 0 || allRequiredFieldsMapped) &&
+    (!mappingSession?.workbook || selectedWorksheetDrafts.length > 0) &&
+    !busy;
   const canFinalizeMapping =
     hasPendingImportReview &&
     !(mappingSession?.hasPendingChanges ?? true) &&
     allRequiredFieldsMapped &&
     unresolvedImportMaterials === 0 &&
     !hasInvalidNewMaterialDraft &&
+    (worksheetDrafts.length === 0 ||
+      (selectedWorksheetDrafts.length > 0 &&
+        selectedWorksheetDrafts.every((draft) => {
+          const materialMappings = new Map(
+            draft.options.materialMappings.map((mapping) => [
+              mapping.sourceMaterialName,
+              mapping.targetMaterialId ?? '',
+            ]),
+          );
+          const plannedMaterials = new Set(
+            draft.newMaterials.map((material) => material.sourceMaterialName),
+          );
+          return !draft.hasPendingChanges &&
+            requiredImportFieldNames.every((field) =>
+              draft.options.columnMappings.some(
+                (mapping) =>
+                  mapping.targetField === field && mapping.sourceColumn.trim().length > 0,
+              ),
+            ) &&
+            draft.preview.materialResolutions.every(
+              (resolution) =>
+                plannedMaterials.has(resolution.sourceMaterialName) ||
+                (materialMappings.get(resolution.sourceMaterialName) ??
+                  resolution.resolvedMaterialId ??
+                  '').trim().length > 0,
+            ) &&
+            draft.newMaterials.every(
+              (material) => validateMaterialDraft(material.material) === null,
+            );
+        }))) &&
     !busy;
+
+  const activateWorksheet = (worksheetName: string) => {
+    if (!mappingSession?.worksheets) {
+      return;
+    }
+
+    const draft = mappingSession.worksheets.find(
+      (item) => item.worksheet.worksheetName === worksheetName,
+    );
+    if (!draft) {
+      return;
+    }
+
+    onUpdateImportMappingSession({
+      ...mappingSession,
+      activeWorksheetName: worksheetName,
+      preview: draft.preview,
+      options: draft.options,
+      newMaterials: draft.newMaterials,
+      hasPendingChanges: draft.hasPendingChanges,
+    });
+  };
+
+  const setWorksheetSelected = (worksheetName: string, selected: boolean) => {
+    if (!mappingSession?.worksheets) {
+      return;
+    }
+
+    const worksheets = mappingSession.worksheets.map((draft) =>
+      draft.worksheet.worksheetName === worksheetName
+        ? { ...draft, selected }
+        : draft,
+    );
+    const nextActive = selected
+      ? worksheetName
+      : mappingSession.activeWorksheetName === worksheetName
+        ? worksheets.find((draft) => draft.selected)?.worksheet.worksheetName
+        : mappingSession.activeWorksheetName;
+    const activeDraft = worksheets.find(
+      (draft) => draft.worksheet.worksheetName === nextActive,
+    );
+    onUpdateImportMappingSession({
+      ...mappingSession,
+      worksheets,
+      activeWorksheetName: nextActive,
+      preview: activeDraft?.preview ?? mappingSession.preview,
+      options: activeDraft?.options ?? mappingSession.options,
+      newMaterials: activeDraft?.newMaterials ?? mappingSession.newMaterials,
+      hasPendingChanges: activeDraft?.hasPendingChanges ?? true,
+    });
+  };
+
+  const setAllWorksheetsSelected = (selected: boolean) => {
+    if (!mappingSession?.worksheets) {
+      return;
+    }
+
+    const worksheets = mappingSession.worksheets.map((draft) => ({ ...draft, selected }));
+    const activeDraft = selected ? worksheets[0] : undefined;
+    onUpdateImportMappingSession({
+      ...mappingSession,
+      worksheets,
+      activeWorksheetName: activeDraft?.worksheet.worksheetName,
+      preview: activeDraft?.preview ?? mappingSession.preview,
+      options: activeDraft?.options ?? mappingSession.options,
+      newMaterials: activeDraft?.newMaterials ?? mappingSession.newMaterials,
+      hasPendingChanges: activeDraft?.hasPendingChanges ?? true,
+    });
+  };
+
+  const assignWorksheetGroup = (worksheetName: string, optimizationGroupId: string) => {
+    if (!mappingSession?.worksheets) {
+      return;
+    }
+
+    const groupName = worksheetOptimizationGroupOptions.find(
+      (option) => option.value === optimizationGroupId,
+    )?.label ?? worksheetName;
+    onUpdateImportMappingSession({
+      ...mappingSession,
+      worksheets: mappingSession.worksheets.map((draft) =>
+        draft.worksheet.worksheetName === worksheetName
+          ? { ...draft, optimizationGroupId, optimizationGroupName: groupName }
+          : draft,
+      ),
+    });
+  };
+
+  const assignSelectedWorksheetsToGroup = () => {
+    if (!mappingSession?.worksheets || bulkWorksheetGroupId.length === 0) {
+      return;
+    }
+
+    const groupName = worksheetOptimizationGroupOptions.find(
+      (option) => option.value === bulkWorksheetGroupId,
+    )?.label;
+    if (!groupName) {
+      return;
+    }
+
+    onUpdateImportMappingSession({
+      ...mappingSession,
+      worksheets: mappingSession.worksheets.map((draft) =>
+        draft.selected
+          ? {
+              ...draft,
+              optimizationGroupId: bulkWorksheetGroupId,
+              optimizationGroupName: groupName,
+            }
+          : draft,
+      ),
+    });
+  };
 
   useEffect(() => {
     if (showAddRow && !hasPendingImportReview) {
@@ -1044,6 +1204,135 @@ export function ImportPage({
 
       {mappingSession ? (
         <section className="module-panel">
+          {mappingSession.workbook ? (
+            <article className="editor-card workbook-discovery">
+              <div className="section-header">
+                <div>
+                  <p className="eyebrow">Workbook discovery</p>
+                  <h3>Select Worksheets and assign Optimization Groups</h3>
+                </div>
+                <StatusPill
+                  label={`${selectedWorksheetDrafts.length} selected`}
+                  tone={selectedWorksheetDrafts.length > 0 ? 'ok' : 'warn'}
+                />
+              </div>
+              <p className="section-note">
+                Visible, nonempty Worksheets stay in Workbook order. Select only the Worksheets
+                to finalize; draft mappings are retained when a Worksheet is deselected.
+              </p>
+              {mappingSession.workbook.macrosPresent ? (
+                <p className="mapping-warning">
+                  Macros are not run. OptiFab reads worksheet values only.
+                </p>
+              ) : null}
+              <div className="button-row">
+                <button
+                  className="secondary-button"
+                  disabled={busy}
+                  onClick={() => setAllWorksheetsSelected(true)}
+                  type="button"
+                >
+                  Select all Worksheets
+                </button>
+                <button
+                  className="secondary-button"
+                  disabled={busy || selectedWorksheetDrafts.length === 0}
+                  onClick={() => setAllWorksheetsSelected(false)}
+                  type="button"
+                >
+                  Clear selection
+                </button>
+              </div>
+              <div className="button-row">
+                <label className="field">
+                  <span>Move selected Worksheets to</span>
+                  <select
+                    aria-label="Optimization Group for selected Worksheets"
+                    disabled={busy || selectedWorksheetDrafts.length === 0}
+                    onChange={(event) => setBulkWorksheetGroupId(event.target.value)}
+                    value={bulkWorksheetGroupId}
+                  >
+                    <option value="">Choose an Optimization Group</option>
+                    {worksheetOptimizationGroupOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  className="secondary-button"
+                  disabled={
+                    busy ||
+                    selectedWorksheetDrafts.length === 0 ||
+                    bulkWorksheetGroupId.length === 0
+                  }
+                  onClick={assignSelectedWorksheetsToGroup}
+                  type="button"
+                >
+                  Assign selected Worksheets
+                </button>
+              </div>
+              <div className="mapping-resolution-list">
+                {worksheetDrafts.map((draft) => (
+                  <div
+                    className="mapping-resolution-card"
+                    key={`${draft.worksheet.originalPosition}-${draft.worksheet.worksheetName}`}
+                  >
+                    <div className="mapping-resolution-card__header">
+                      <label className="checkbox-field">
+                        <input
+                          checked={draft.selected}
+                          disabled={busy}
+                          onChange={(event) =>
+                            setWorksheetSelected(
+                              draft.worksheet.worksheetName,
+                              event.target.checked,
+                            )
+                          }
+                          type="checkbox"
+                        />
+                        <span>
+                          {draft.worksheet.originalPosition}. {draft.worksheet.worksheetName}
+                        </span>
+                      </label>
+                      <button
+                        className="secondary-button"
+                        disabled={busy || !draft.selected}
+                        onClick={() => activateWorksheet(draft.worksheet.worksheetName)}
+                        type="button"
+                      >
+                        {mappingSession.activeWorksheetName === draft.worksheet.worksheetName
+                          ? 'Configuring'
+                          : 'Configure'}
+                      </button>
+                    </div>
+                    {draft.selected ? (
+                      <label className="field">
+                        <span>Optimization Group</span>
+                        <select
+                          disabled={busy}
+                          onChange={(event) =>
+                            assignWorksheetGroup(
+                              draft.worksheet.worksheetName,
+                              event.target.value,
+                            )
+                          }
+                          value={draft.optimizationGroupId}
+                        >
+                          {worksheetOptimizationGroupOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </article>
+          ) : null}
           <div className="module-panel__header">
             <div>
               <p className="eyebrow">Column Mapping</p>
@@ -2110,7 +2399,7 @@ export function ImportPage({
             <span>
               {mappingSession
                 ? 'Complete the field mapping and refresh preview to inspect incoming rows.'
-                : 'Choose a CSV or XLSX file to start an import review.'}
+                : 'Choose a CSV file or Excel Workbook to start an import review.'}
             </span>
           </div>
         )}

@@ -33,7 +33,7 @@ public sealed class FileImportDispatcher : IImportService
             return Task.FromResult(
                 PartRowValidator.CreateResponse(
                     [],
-                    [new ValidationError("unsupported-file-type", "Only .csv and .xlsx files are supported.")],
+                    [new ValidationError("unsupported-file-type", "Only .csv, .xlsx, and .xlsm files are supported.")],
                     []));
         }
 
@@ -54,6 +54,7 @@ public sealed class FileImportDispatcher : IImportService
         {
             ".csv" => _csvImportService,
             ".xlsx" => _xlsxImportService,
+            ".xlsm" => _xlsxImportService,
             _ => null
         };
     }
