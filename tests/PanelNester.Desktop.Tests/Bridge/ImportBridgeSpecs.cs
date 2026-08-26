@@ -14,6 +14,365 @@ namespace PanelNester.Desktop.Tests.Bridge;
 public sealed class ImportBridgeSpecs : IDisposable
 {
     [Fact]
+    public async Task Stock_length_csv_finalizes_its_synthetic_Worksheet_into_Required_Pieces()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var csvPath = Path.Combine(_workspacePath, "stock.csv");
+        await File.WriteAllTextAsync(
+            csvPath,
+            """
+            Quantity,Length,Extrusion,Part Name,Finish,Part Number
+            2,144,EX-7,Head,Satin,PN-1
+            3,144, ex-7 ,Head,satin,PN-1
+            """);
+        var dispatcher = CreateDispatcher();
+        const string sessionId = "stock-csv-session";
+
+        var started = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest
+            {
+                SessionId = sessionId,
+                ImportSourcePath = csvPath,
+                ProjectKind = ProjectKind.StockLength
+            });
+
+        var worksheet = Assert.Single(started.Workbook!.Worksheets);
+        Assert.Equal("stock.csv", worksheet.WorksheetName);
+
+        var options = new ImportOptions { ProjectKind = ProjectKind.StockLength };
+        var preview = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.PreviewImportSession,
+            new PreviewImportSessionRequest
+            {
+                SessionId = sessionId,
+                WorksheetName = worksheet.WorksheetName,
+                HeadingRange = worksheet.HeadingRange,
+                Options = options
+            });
+        Assert.True(preview.Success);
+        Assert.Equal(2, preview.RequiredPieces.Count);
+        Assert.Empty(preview.MaterialResolutions);
+
+        var finalized = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.FinalizeImportSession,
+            new FinalizeImportSessionRequest
+            {
+                SessionId = sessionId,
+                Project = new Project
+                {
+                    ProjectId = "stock-project",
+                    ProjectKind = ProjectKind.StockLength,
+                    State = new ProjectState
+                    {
+                        OptimizationGroups =
+                        [
+                            new OptimizationGroup
+                            {
+                                OptimizationGroupId = "stock-group",
+                                Name = "Main",
+                                StockLength = 120m
+                            }
+                        ]
+                    }
+                },
+                Worksheets =
+                [
+                    new ImportWorksheetSelection
+                    {
+                        WorksheetName = worksheet.WorksheetName,
+                        OriginalPosition = worksheet.OriginalPosition,
+                        HeadingRange = worksheet.HeadingRange,
+                        OptimizationGroupId = "stock-group",
+                        OptimizationGroupName = "Main",
+                        Options = options with
+                        {
+                            ColumnMappings = preview.ColumnMappings
+                                .Where(mapping => mapping.SourceColumn is not null)
+                                .Select(mapping => new ImportColumnMapping
+                                {
+                                    SourceColumn = mapping.SourceColumn!,
+                                    TargetField = mapping.TargetField
+                                })
+                                .ToArray()
+                        }
+                    }
+                ]
+            });
+
+        Assert.True(finalized.Success);
+        Assert.True(finalized.Finalized);
+        var group = Assert.Single(finalized.Project!.State.OptimizationGroups);
+        var piece = Assert.Single(group.RequiredPieces);
+        Assert.Equal(5, piece.Quantity);
+        Assert.Equal(144m, piece.Length);
+        Assert.Equal("EX-7", piece.ProfileNumber);
+        Assert.Equal("Satin", piece.Finish);
+        Assert.Equal(2, piece.SourceReferences.Count);
+        Assert.Empty(group.Parts);
+        Assert.Empty(finalized.Project.MaterialSnapshots);
+    }
+
+    [Fact]
+    public async Task Stock_length_csv_requires_exclusion_or_a_valid_Part_Override_before_finalization()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var csvPath = Path.Combine(_workspacePath, "stock-review.csv");
+        await File.WriteAllTextAsync(
+            csvPath,
+            """
+            Quantity,Length,Profile,Part Number
+            bad,12,EX-1,OMIT
+            1,10,EX-2,EDIT
+            """);
+        var dispatcher = CreateDispatcher();
+        const string sessionId = "stock-review-session";
+        var started = await DispatchAsync<ImportSessionResponse>(dispatcher, BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest
+            {
+                SessionId = sessionId,
+                ImportSourcePath = csvPath,
+                ProjectKind = ProjectKind.StockLength
+            });
+        var worksheet = Assert.Single(started.Workbook!.Worksheets);
+        var options = new ImportOptions { ProjectKind = ProjectKind.StockLength };
+        var preview = await DispatchAsync<ImportSessionResponse>(dispatcher, BridgeMessageTypes.PreviewImportSession,
+            new PreviewImportSessionRequest
+            {
+                SessionId = sessionId,
+                WorksheetName = worksheet.WorksheetName,
+                HeadingRange = worksheet.HeadingRange,
+                Options = options
+            });
+        Assert.False(preview.Success);
+        var invalid = preview.RequiredPieces[0];
+        var imported = preview.RequiredPieces[1];
+        var sourceReference = Assert.Single(invalid.SourceReferences);
+        var importedReference = Assert.Single(imported.SourceReferences);
+        var selection = new ImportWorksheetSelection
+        {
+            WorksheetName = worksheet.WorksheetName,
+            OriginalPosition = worksheet.OriginalPosition,
+            HeadingRange = worksheet.HeadingRange,
+            OptimizationGroupId = "stock-group",
+            OptimizationGroupName = "Main",
+            Options = options with
+            {
+                ColumnMappings = preview.ColumnMappings
+                    .Where(mapping => mapping.SourceColumn is not null)
+                    .Select(mapping => new ImportColumnMapping
+                    {
+                        SourceColumn = mapping.SourceColumn!,
+                        TargetField = mapping.TargetField
+                    })
+                    .ToArray()
+            },
+            ExcludedSourceRows =
+            [
+                new ExcludedSourceRow
+                {
+                    RowId = invalid.RequiredPieceId,
+                    SourceReference = sourceReference,
+                    OriginalValidationError = new SourceRowValidationError
+                    {
+                        Code = "invalid-quantity",
+                        Message = "Quantity must be an integer value."
+                    }
+                }
+            ],
+            PartOverrides =
+            [
+                new PartOverride
+                {
+                    RowId = imported.RequiredPieceId,
+                    ImportedRequiredPiece = imported,
+                    CurrentRequiredPiece = imported with
+                    {
+                        LengthText = "10 1/2",
+                        PartNumber = "EDITED"
+                    },
+                    SourceReferences = [importedReference]
+                }
+            ]
+        };
+
+        var finalized = await DispatchAsync<ImportSessionResponse>(dispatcher, BridgeMessageTypes.FinalizeImportSession,
+            new FinalizeImportSessionRequest
+            {
+                SessionId = sessionId,
+                Project = new Project
+                {
+                    ProjectId = "stock-review-project",
+                    ProjectKind = ProjectKind.StockLength,
+                    State = new ProjectState
+                    {
+                        OptimizationGroups =
+                        [
+                            new OptimizationGroup
+                            {
+                                OptimizationGroupId = "stock-group",
+                                Name = "Main",
+                                StockLength = 120m
+                            }
+                        ]
+                    }
+                },
+                Worksheets = [selection]
+            });
+
+        Assert.True(finalized.Success);
+        var piece = Assert.Single(Assert.Single(finalized.Project!.State.OptimizationGroups).RequiredPieces);
+        Assert.Equal(10.5m, piece.Length);
+        Assert.Equal("EDITED", piece.PartNumber);
+        var configuration = finalized.Project.State.ImportConfiguration!;
+        Assert.Single(configuration.PartOverrides);
+        Assert.Single(Assert.Single(configuration.Worksheets).ExcludedSourceRows);
+
+        const string reimportSessionId = "stock-review-reimport-session";
+        var restarted = await DispatchAsync<ImportSessionResponse>(dispatcher, BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest
+            {
+                SessionId = reimportSessionId,
+                ImportSourcePath = csvPath,
+                ProjectKind = ProjectKind.StockLength
+            });
+        var rediscoveredWorksheet = Assert.Single(restarted.Workbook!.Worksheets);
+        var repreview = await DispatchAsync<ImportSessionResponse>(dispatcher, BridgeMessageTypes.PreviewImportSession,
+            new PreviewImportSessionRequest
+            {
+                SessionId = reimportSessionId,
+                WorksheetName = rediscoveredWorksheet.WorksheetName,
+                HeadingRange = rediscoveredWorksheet.HeadingRange,
+                Options = options
+            });
+        var savedWorksheet = Assert.Single(configuration.Worksheets);
+        var reimported = await DispatchAsync<ImportSessionResponse>(dispatcher, BridgeMessageTypes.FinalizeImportSession,
+            new FinalizeImportSessionRequest
+            {
+                SessionId = reimportSessionId,
+                Project = finalized.Project,
+                ReplaceExistingImportSource = true,
+                Worksheets =
+                [
+                    new ImportWorksheetSelection
+                    {
+                        WorksheetName = rediscoveredWorksheet.WorksheetName,
+                        OriginalPosition = rediscoveredWorksheet.OriginalPosition,
+                        HeadingRange = rediscoveredWorksheet.HeadingRange,
+                        OptimizationGroupId = "stock-group",
+                        OptimizationGroupName = "Main",
+                        Options = options with
+                        {
+                            ColumnMappings = repreview.ColumnMappings
+                                .Where(mapping => mapping.SourceColumn is not null)
+                                .Select(mapping => new ImportColumnMapping
+                                {
+                                    SourceColumn = mapping.SourceColumn!,
+                                    TargetField = mapping.TargetField
+                                })
+                                .ToArray()
+                        },
+                        ExcludedSourceRows = savedWorksheet.ExcludedSourceRows,
+                        PartOverrides = configuration.PartOverrides
+                    }
+                ]
+            });
+
+        Assert.True(reimported.Success);
+        var reconciled = Assert.Single(Assert.Single(reimported.Project!.State.OptimizationGroups).RequiredPieces);
+        Assert.Equal(piece.RequiredPieceId, reconciled.RequiredPieceId);
+        Assert.Equal(10.5m, reconciled.Length);
+        Assert.Equal("EDITED", reconciled.PartNumber);
+    }
+
+    [Fact]
+    public async Task Stock_length_reimport_reconciles_an_override_recorded_after_duplicate_rows_merged()
+    {
+        var firstReference = new SourceReference
+        {
+            WorksheetName = "stock.csv", WorksheetPosition = 0, PhysicalRow = 2, SourceFingerprint = "ROW-1"
+        };
+        var secondReference = new SourceReference
+        {
+            WorksheetName = "stock.csv", WorksheetPosition = 0, PhysicalRow = 3, SourceFingerprint = "ROW-2"
+        };
+        var first = new RequiredPiece
+        {
+            RequiredPieceId = "required-1", Quantity = 2, Length = 10m, LengthText = "10",
+            ProfileNumber = "EX-1", IsManual = false, SourceReferences = [firstReference]
+        };
+        var second = first with
+        {
+            RequiredPieceId = "required-2", Quantity = 3, SourceReferences = [secondReference]
+        };
+        var merged = first with
+        {
+            Quantity = 5, QuantityText = "5", SourceReferences = [firstReference, secondReference]
+        };
+        var partOverride = new PartOverride
+        {
+            RowId = first.RequiredPieceId,
+            ImportedRequiredPiece = merged,
+            CurrentRequiredPiece = merged with { Quantity = 6, QuantityText = "6", LengthText = "10 1/2" },
+            SourceReferences = merged.SourceReferences
+        };
+        var response = new ImportResponse { Success = true, RequiredPieces = [first, second] };
+        var repository = new JsonMaterialRepository(Path.Combine(_workspacePath, "merged-override-materials.json"));
+
+        var applied = await ProjectImportFinalizer.ApplyPartOverridesAsync(
+            response,
+            [partOverride],
+            new PartEditorService(repository, new PartRowValidator()),
+            CancellationToken.None);
+
+        Assert.True(applied.Success);
+        var corrected = Assert.Single(applied.RequiredPieces);
+        Assert.Equal(first.RequiredPieceId, corrected.RequiredPieceId);
+        Assert.Equal(6, corrected.Quantity);
+        Assert.Equal(10.5m, corrected.Length);
+        Assert.Equal([firstReference, secondReference], corrected.SourceReferences);
+
+        var reconciled = ProjectImportFinalizer.ReconcilePartOverrides(
+            new ImportWorksheetSelection { PartOverrides = [partOverride] },
+            response,
+            applied);
+        Assert.Equal([firstReference, secondReference], Assert.Single(reconciled.PartOverrides).SourceReferences);
+    }
+
+    [Fact]
+    public void Stock_length_csv_requires_a_positive_Stock_Length_before_finalization()
+    {
+        var project = new Project
+        {
+            ProjectKind = ProjectKind.StockLength,
+            State = new ProjectState
+            {
+                OptimizationGroups =
+                [
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "stock-group", Name = "Main", StockLength = 0m
+                    }
+                ]
+            }
+        };
+        var selection = new ImportWorksheetSelection
+        {
+            WorksheetName = "stock.csv", OptimizationGroupId = "stock-group", OptimizationGroupName = "Main"
+        };
+
+        var exception = Assert.Throws<ImportSessionException>(() => ProjectImportFinalizer.FinalizeWorkbook(
+            project,
+            new ImportSourceMetadata { ImportSourcePath = "stock.csv" },
+            [new FinalizedWorksheetImport(selection, new ImportOptions { ProjectKind = ProjectKind.StockLength }, new ImportResponse { Success = true })]));
+
+        Assert.Equal("import-stock-length-required", exception.Code);
+    }
+
+    [Fact]
     public async Task Workbook_finalization_allows_an_unresolved_Material_when_all_matching_rows_are_ignored()
     {
         Directory.CreateDirectory(_workspacePath);

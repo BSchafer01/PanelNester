@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { RequiredPiecesPage } from '../src/pages/RequiredPiecesPage';
-import type { OptimizationGroup } from '../src/types/contracts';
+import type { ImportMappingSession, OptimizationGroup } from '../src/types/contracts';
 
 const emptyGroup: OptimizationGroup = {
   optimizationGroupId: 'frames',
@@ -178,5 +178,174 @@ describe('Stock-Length manual entry', () => {
     expect(screen.getByRole('option', { name: /nearest 1\/16/ })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: /nearest 1\/32/ })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: /nearest 1\/64/ })).toBeInTheDocument();
+  });
+
+  it('reviews a synthetic CSV Worksheet and excludes invalid Required Pieces before finalization', async () => {
+    const user = userEvent.setup();
+    const onUpdateImportMappingSession = vi.fn();
+    const onFinalizeImportMapping = vi.fn();
+    const requiredPiece = {
+      requiredPieceId: 'required-invalid',
+      quantity: 0,
+      quantityText: 'bad',
+      length: 12,
+      lengthText: '12',
+      profileNumber: 'EX-1',
+      partName: null,
+      finish: null,
+      partNumber: null,
+      isManual: false,
+      validationStatus: 'error' as const,
+      validationMessages: ['Quantity must be an integer value.'],
+      sourceReferences: [{
+        worksheetName: 'stock.csv',
+        worksheetPosition: 0,
+        physicalRow: 2,
+        sourceFingerprint: 'ABC',
+      }],
+    };
+    const preview = {
+      success: false,
+      filePath: 'F:\\stock.csv',
+      parts: [],
+      requiredPieces: [requiredPiece],
+      errors: [{ code: 'invalid-quantity', message: 'Quantity must be an integer value.', rowId: requiredPiece.requiredPieceId }],
+      warnings: [],
+      availableColumns: ['Qty', 'Length', 'Die'],
+      sourceColumns: [],
+      columnMappings: [
+        { targetField: 'Quantity' as const, sourceColumn: 'Qty' },
+        { targetField: 'Length' as const, sourceColumn: 'Length' },
+        { targetField: 'Profile Number' as const, sourceColumn: 'Die' },
+        { targetField: 'Part Name' as const, sourceColumn: null },
+        { targetField: 'Finish' as const, sourceColumn: null },
+        { targetField: 'Part Number' as const, sourceColumn: null },
+      ],
+      materialResolutions: [],
+      worksheet: {
+        worksheetName: 'stock.csv', originalPosition: 0, headingRange: 'R1C1:R1C3',
+        headingRangeDetectionStatus: 'none' as const, headingRangeCandidates: [], previewRows: [],
+      },
+    };
+    const mappingSession: ImportMappingSession = {
+      sessionId: 'stock-session', filePath: 'F:\\stock.csv', preview,
+      options: { projectKind: 'stockLength', columnMappings: [], materialMappings: [] },
+      newMaterials: [], hasPendingChanges: false, activeWorksheetName: 'stock.csv',
+      workbook: { initialWorksheetName: 'stock.csv', worksheets: [preview.worksheet!], macrosPresent: false },
+      worksheets: [{
+        worksheet: preview.worksheet!, selected: true, optimizationGroupId: '', optimizationGroupName: '',
+        preview, options: { projectKind: 'stockLength', columnMappings: [], materialMappings: [] },
+        newMaterials: [], hasPendingChanges: false, headingRange: 'R1C1:R1C3', headingRangeConfirmed: true,
+        excludedSourceRows: [], ignoredMaterialNames: [], partOverrides: [],
+      }],
+    };
+
+    const { rerender } = render(
+      <RequiredPiecesPage
+        busy={false}
+        inchDisplayFormat="decimal"
+        mappingSession={mappingSession}
+        onCancelImportMapping={vi.fn()}
+        onCreateOptimizationGroup={vi.fn()}
+        onCreateRequiredPiece={vi.fn()}
+        onDeleteRequiredPiece={vi.fn()}
+        onFinalizeImportMapping={onFinalizeImportMapping}
+        onImportFile={vi.fn()}
+        onInchDisplayFormatChange={vi.fn()}
+        onPreviewImportMapping={vi.fn()}
+        onUpdateImportMappingSession={onUpdateImportMappingSession}
+        onUpdateRequiredPiece={vi.fn()}
+        onUpdateStockLength={vi.fn()}
+        optimizationGroups={[emptyGroup]}
+      />,
+    );
+
+    expect(screen.getByRole('heading', { name: 'Import Stock-Length CSV' })).toBeInTheDocument();
+    expect(screen.queryByText('Material Resolution')).not.toBeInTheDocument();
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Optimization Group for stock.csv' }), 'frames');
+    expect(onUpdateImportMappingSession).toHaveBeenCalled();
+    const assigned = onUpdateImportMappingSession.mock.calls.at(-1)![0] as ImportMappingSession;
+    rerender(
+      <RequiredPiecesPage
+        busy={false} inchDisplayFormat="decimal" mappingSession={assigned}
+        onCancelImportMapping={vi.fn()} onCreateOptimizationGroup={vi.fn()} onCreateRequiredPiece={vi.fn()}
+        onDeleteRequiredPiece={vi.fn()} onFinalizeImportMapping={onFinalizeImportMapping} onImportFile={vi.fn()}
+        onInchDisplayFormatChange={vi.fn()} onPreviewImportMapping={vi.fn()}
+        onUpdateImportMappingSession={onUpdateImportMappingSession} onUpdateRequiredPiece={vi.fn()}
+        onUpdateStockLength={vi.fn()} optimizationGroups={[emptyGroup]}
+      />,
+    );
+    await user.click(screen.getByRole('button', { name: 'Exclude source row 2' }));
+    const excluded = onUpdateImportMappingSession.mock.calls.at(-1)![0] as ImportMappingSession;
+    rerender(
+      <RequiredPiecesPage
+        busy={false} inchDisplayFormat="decimal" mappingSession={excluded}
+        onCancelImportMapping={vi.fn()} onCreateOptimizationGroup={vi.fn()} onCreateRequiredPiece={vi.fn()}
+        onDeleteRequiredPiece={vi.fn()} onFinalizeImportMapping={onFinalizeImportMapping} onImportFile={vi.fn()}
+        onInchDisplayFormatChange={vi.fn()} onPreviewImportMapping={vi.fn()}
+        onUpdateImportMappingSession={onUpdateImportMappingSession} onUpdateRequiredPiece={vi.fn()}
+        onUpdateStockLength={vi.fn()} optimizationGroups={[emptyGroup]}
+      />,
+    );
+    await user.click(screen.getByRole('button', { name: 'Finalize CSV Import' }));
+    expect(onFinalizeImportMapping).toHaveBeenCalledOnce();
+  });
+
+  it('corrects an invalid imported Required Piece with a provenance-bound Part Override', async () => {
+    const user = userEvent.setup();
+    const onUpdateImportMappingSession = vi.fn();
+    const requiredPiece = {
+      requiredPieceId: 'required-invalid', quantity: 0, quantityText: 'bad', length: 12,
+      lengthText: '12', profileNumber: 'EX-1', partName: null, finish: null, partNumber: null,
+      isManual: false, validationStatus: 'error' as const,
+      validationMessages: ['Quantity must be an integer value.'],
+      sourceReferences: [{ worksheetName: 'stock.csv', worksheetPosition: 0, physicalRow: 2, sourceFingerprint: 'ABC' }],
+    };
+    const preview = {
+      success: false, filePath: 'F:\\stock.csv', parts: [], requiredPieces: [requiredPiece],
+      errors: [{ code: 'invalid-quantity', message: 'Quantity must be an integer value.', rowId: requiredPiece.requiredPieceId }],
+      warnings: [], availableColumns: ['Qty', 'Length', 'Die'], sourceColumns: [],
+      columnMappings: [
+        { targetField: 'Quantity' as const, sourceColumn: 'Qty' },
+        { targetField: 'Length' as const, sourceColumn: 'Length' },
+        { targetField: 'Profile Number' as const, sourceColumn: 'Die' },
+      ],
+      materialResolutions: [],
+      worksheet: { worksheetName: 'stock.csv', originalPosition: 0, headingRange: 'R1C1:R1C3', headingRangeDetectionStatus: 'none' as const, headingRangeCandidates: [], previewRows: [] },
+    };
+    const mappingSession: ImportMappingSession = {
+      sessionId: 'stock-session', filePath: 'F:\\stock.csv', preview,
+      options: { projectKind: 'stockLength', columnMappings: [], materialMappings: [] },
+      newMaterials: [], hasPendingChanges: false, activeWorksheetName: 'stock.csv',
+      workbook: { initialWorksheetName: 'stock.csv', worksheets: [preview.worksheet!], macrosPresent: false },
+      worksheets: [{
+        worksheet: preview.worksheet!, selected: true, optimizationGroupId: 'frames', optimizationGroupName: 'Frames',
+        preview, options: { projectKind: 'stockLength', columnMappings: [], materialMappings: [] },
+        newMaterials: [], hasPendingChanges: false, headingRange: 'R1C1:R1C3', headingRangeConfirmed: true,
+        excludedSourceRows: [], ignoredMaterialNames: [], partOverrides: [],
+      }],
+    };
+
+    render(
+      <RequiredPiecesPage
+        busy={false} inchDisplayFormat="decimal" mappingSession={mappingSession}
+        onCancelImportMapping={vi.fn()} onCreateOptimizationGroup={vi.fn()} onCreateRequiredPiece={vi.fn()}
+        onDeleteRequiredPiece={vi.fn()} onFinalizeImportMapping={vi.fn()} onImportFile={vi.fn()}
+        onInchDisplayFormatChange={vi.fn()} onPreviewImportMapping={vi.fn()}
+        onUpdateImportMappingSession={onUpdateImportMappingSession} onUpdateRequiredPiece={vi.fn()}
+        onUpdateStockLength={vi.fn()} optimizationGroups={[emptyGroup]}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Correct source row 2' }));
+    await user.clear(screen.getByRole('textbox', { name: 'Corrected Quantity' }));
+    await user.type(screen.getByRole('textbox', { name: 'Corrected Quantity' }), '3');
+    await user.click(screen.getByRole('button', { name: 'Save Correction' }));
+
+    const corrected = onUpdateImportMappingSession.mock.calls.at(-1)![0] as ImportMappingSession;
+    const partOverride = corrected.worksheets![0].partOverrides[0];
+    expect(partOverride.rowId).toBe(requiredPiece.requiredPieceId);
+    expect(partOverride.currentRequiredPiece?.quantityText).toBe('3');
+    expect(partOverride.sourceReferences).toEqual(requiredPiece.sourceReferences);
   });
 });

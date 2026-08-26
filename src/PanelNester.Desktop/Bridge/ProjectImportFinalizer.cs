@@ -15,6 +15,51 @@ internal static class ProjectImportFinalizer
         var current = response;
         foreach (var partOverride in partOverrides)
         {
+            var importedRequiredPiece = current.RequiredPieces.FirstOrDefault(piece =>
+                string.Equals(piece.RequiredPieceId, partOverride.RowId, StringComparison.Ordinal));
+            if (importedRequiredPiece is not null && partOverride.CurrentRequiredPiece is not null)
+            {
+                var matchingPieces = current.RequiredPieces
+                    .Where(piece => piece.SourceReferences.Any(reference =>
+                        partOverride.SourceReferences.Any(overrideReference =>
+                            reference.MatchesIdentity(overrideReference))))
+                    .ToArray();
+                if (partOverride.SourceReferences.Count == 0 ||
+                    !partOverride.SourceReferences.All(overrideReference =>
+                        matchingPieces.Any(piece => piece.SourceReferences.Any(reference =>
+                            reference.MatchesIdentity(overrideReference)))))
+                {
+                    continue;
+                }
+
+                var matchedIds = matchingPieces
+                    .Select(piece => piece.RequiredPieceId)
+                    .ToHashSet(StringComparer.Ordinal);
+                var importedSourceReferences = matchingPieces
+                    .SelectMany(piece => piece.SourceReferences)
+                    .ToArray();
+                var validatedPiece = ValidateRequiredPieceOverride(
+                    importedRequiredPiece with { SourceReferences = importedSourceReferences },
+                    partOverride.CurrentRequiredPiece,
+                    out var validationErrors);
+                var retainedErrors = current.Errors
+                    .Where(error => error.RowId is null || !matchedIds.Contains(error.RowId))
+                    .ToArray();
+                current = current with
+                {
+                    Success = retainedErrors.Length == 0 && validationErrors.Count == 0,
+                    RequiredPieces = current.RequiredPieces
+                        .Where(piece => !matchedIds.Contains(piece.RequiredPieceId) ||
+                            string.Equals(piece.RequiredPieceId, importedRequiredPiece.RequiredPieceId, StringComparison.Ordinal))
+                        .Select(piece => string.Equals(piece.RequiredPieceId, importedRequiredPiece.RequiredPieceId, StringComparison.Ordinal)
+                            ? validatedPiece
+                            : piece)
+                        .ToArray(),
+                    Errors = retainedErrors.Concat(validationErrors).ToArray()
+                };
+                continue;
+            }
+
             var imported = current.Parts.FirstOrDefault(part =>
                 string.Equals(part.RowId, partOverride.RowId, StringComparison.Ordinal));
             if (imported is null ||
@@ -65,9 +110,22 @@ internal static class ProjectImportFinalizer
     {
         var importedPartsById = importedResponse.Parts.ToDictionary(part => part.RowId, StringComparer.Ordinal);
         var partsById = validatedResponse.Parts.ToDictionary(part => part.RowId, StringComparer.Ordinal);
+        var importedPiecesById = importedResponse.RequiredPieces.ToDictionary(piece => piece.RequiredPieceId, StringComparer.Ordinal);
+        var piecesById = validatedResponse.RequiredPieces.ToDictionary(piece => piece.RequiredPieceId, StringComparer.Ordinal);
         return selection with
         {
             PartOverrides = selection.PartOverrides.Select(partOverride =>
+                importedPiecesById.TryGetValue(partOverride.RowId, out var importedPiece) &&
+                piecesById.TryGetValue(partOverride.RowId, out var currentPiece) &&
+                partOverride.SourceReferences.All(overrideReference =>
+                    currentPiece.SourceReferences.Any(reference => reference.MatchesIdentity(overrideReference)))
+                    ? partOverride with
+                    {
+                        ImportedRequiredPiece = partOverride.ImportedRequiredPiece ?? importedPiece,
+                        CurrentRequiredPiece = currentPiece,
+                        SourceReferences = currentPiece.SourceReferences
+                    }
+                    :
                 importedPartsById.TryGetValue(partOverride.RowId, out var importedValues) &&
                 partsById.TryGetValue(partOverride.RowId, out var currentValues)
                     ? partOverride with
@@ -79,12 +137,17 @@ internal static class ProjectImportFinalizer
                     : partOverride).ToArray(),
             ExcludedSourceRows = selection.ExcludedSourceRows.Select(excluded =>
             {
-                if (!importedPartsById.TryGetValue(excluded.RowId, out var importedValues))
+                var sourceReferences = importedPartsById.TryGetValue(excluded.RowId, out var importedValues)
+                    ? importedValues.SourceReferences
+                    : importedPiecesById.TryGetValue(excluded.RowId, out var importedPiece)
+                        ? importedPiece.SourceReferences
+                        : null;
+                if (sourceReferences is null)
                 {
                     return excluded;
                 }
 
-                var sourceReference = importedValues.SourceReferences.FirstOrDefault(reference =>
+                var sourceReference = sourceReferences.FirstOrDefault(reference =>
                     reference.MatchesIdentity(excluded.SourceReference));
                 var originalError = importedResponse.Errors.FirstOrDefault(error =>
                     string.Equals(error.RowId, excluded.RowId, StringComparison.Ordinal));
@@ -108,20 +171,23 @@ internal static class ProjectImportFinalizer
         ImportWorksheetSelection selection)
     {
         var partsById = response.Parts.ToDictionary(part => part.RowId, StringComparer.Ordinal);
+        var piecesById = response.RequiredPieces.ToDictionary(piece => piece.RequiredPieceId, StringComparer.Ordinal);
         var excludedIds = selection.ExcludedSourceRows
-            .Where(row => partsById.TryGetValue(row.RowId, out var part) &&
-                part.SourceReferences.Any(reference => reference.MatchesIdentity(row.SourceReference)))
+            .Where(row =>
+                (partsById.TryGetValue(row.RowId, out var part) &&
+                 part.SourceReferences.Any(reference => reference.MatchesIdentity(row.SourceReference))) ||
+                (piecesById.TryGetValue(row.RowId, out var piece) &&
+                 piece.SourceReferences.Any(reference => reference.MatchesIdentity(row.SourceReference))))
             .Select(row => row.RowId)
             .ToHashSet(StringComparer.Ordinal);
         var overrides = selection.PartOverrides
-            .Where(partOverride => partsById.TryGetValue(partOverride.RowId, out var part) &&
-                part.ValidationStatus != ValidationStatuses.Error &&
-                partOverride.SourceReferences.Count > 0 &&
-                partOverride.SourceReferences.All(overrideReference =>
-                    part.SourceReferences.Any(reference => reference.MatchesIdentity(overrideReference))))
+            .Where(partOverride => IsResolvedOverride(partOverride, partsById, piecesById))
             .ToDictionary(partOverride => partOverride.RowId, StringComparer.Ordinal);
         var parts = response.Parts
             .Where(part => !excludedIds.Contains(part.RowId))
+            .ToArray();
+        var requiredPieces = response.RequiredPieces
+            .Where(piece => !excludedIds.Contains(piece.RequiredPieceId))
             .ToArray();
         var resolvedIds = excludedIds.Concat(overrides.Keys).ToHashSet(StringComparer.Ordinal);
         var errors = response.Errors
@@ -134,8 +200,90 @@ internal static class ProjectImportFinalizer
         {
             Success = errors.Length == 0,
             Parts = parts,
+            RequiredPieces = requiredPieces,
             Errors = errors,
             Warnings = warnings
+        };
+    }
+
+    private static bool IsResolvedOverride(
+        PartOverride partOverride,
+        IReadOnlyDictionary<string, PartRow> partsById,
+        IReadOnlyDictionary<string, RequiredPiece> piecesById)
+    {
+        IReadOnlyList<SourceReference>? sourceReferences = null;
+        var validationStatus = ValidationStatuses.Error;
+        if (partsById.TryGetValue(partOverride.RowId, out var part))
+        {
+            sourceReferences = part.SourceReferences;
+            validationStatus = part.ValidationStatus;
+        }
+        else if (piecesById.TryGetValue(partOverride.RowId, out var piece))
+        {
+            sourceReferences = piece.SourceReferences;
+            validationStatus = piece.ValidationStatus;
+        }
+
+        return sourceReferences is { Count: > 0 } &&
+            validationStatus != ValidationStatuses.Error &&
+            partOverride.SourceReferences.Count > 0 &&
+            partOverride.SourceReferences.All(overrideReference =>
+                sourceReferences.Any(reference => reference.MatchesIdentity(overrideReference)));
+    }
+
+    private static RequiredPiece ValidateRequiredPieceOverride(
+        RequiredPiece imported,
+        RequiredPiece requested,
+        out IReadOnlyList<ValidationError> errors)
+    {
+        var messages = new List<string>();
+        var validationErrors = new List<ValidationError>();
+        var sourceReference = imported.SourceReferences.FirstOrDefault();
+        void Add(string code, string message)
+        {
+            messages.Add(message);
+            validationErrors.Add(new ValidationError(code, message, imported.RequiredPieceId, sourceReference));
+        }
+
+        var quantity = requested.Quantity;
+        var quantityText = requested.QuantityText?.Trim();
+        if (!string.IsNullOrWhiteSpace(quantityText) &&
+            !int.TryParse(quantityText, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out quantity))
+        {
+            Add("invalid-quantity", "Quantity must be an integer value.");
+        }
+        else if (quantity <= 0)
+        {
+            Add("quantity-out-of-range", "Quantity must be greater than zero.");
+        }
+
+        var length = requested.Length;
+        var lengthText = requested.LengthText?.Trim();
+        if (!string.IsNullOrWhiteSpace(lengthText) && !InchMeasurementParser.TryParse(lengthText, out length))
+        {
+            Add("invalid-length", "Length must be a decimal, fraction, or mixed-number inch value.");
+        }
+        else if (length <= 0)
+        {
+            Add("length-out-of-range", "Length must be greater than zero.");
+        }
+        if (string.IsNullOrWhiteSpace(requested.ProfileNumber)) Add("missing-profile-number", "Profile Number is required.");
+        errors = validationErrors;
+        return requested with
+        {
+            RequiredPieceId = imported.RequiredPieceId,
+            Quantity = quantity,
+            QuantityText = quantityText,
+            Length = length,
+            LengthText = lengthText,
+            ProfileNumber = requested.ProfileNumber.Trim(),
+            PartName = NormalizeOptional(requested.PartName),
+            Finish = NormalizeOptional(requested.Finish),
+            PartNumber = NormalizeOptional(requested.PartNumber),
+            IsManual = false,
+            ValidationStatus = messages.Count == 0 ? ValidationStatuses.Valid : ValidationStatuses.Error,
+            ValidationMessages = messages,
+            SourceReferences = imported.SourceReferences
         };
     }
 
@@ -178,6 +326,17 @@ internal static class ProjectImportFinalizer
             throw new ImportSessionException(
                 "import-optimization-group-required",
                 "Every selected Worksheet must belong to an Optimization Group.");
+        }
+
+        if (project.ProjectKind == ProjectKind.StockLength)
+        {
+            return FinalizeStockLength(
+                project,
+                importSource,
+                orderedImports,
+                replaceExistingImportSource,
+                reportProgress,
+                cancellationToken);
         }
 
         var selectedGroupIds = orderedImports
@@ -284,6 +443,186 @@ internal static class ProjectImportFinalizer
             }
         };
     }
+
+    private static Project FinalizeStockLength(
+        Project project,
+        ImportSourceMetadata importSource,
+        IReadOnlyList<FinalizedWorksheetImport> orderedImports,
+        bool replaceExistingImportSource,
+        Action<WorkbookImportPhase, string>? reportProgress,
+        CancellationToken cancellationToken)
+    {
+        var targetProject = PrepareImportSource(project, replaceExistingImportSource);
+        var selectedGroupIds = orderedImports
+            .Select(item => item.Selection.OptimizationGroupId)
+            .ToHashSet(StringComparer.Ordinal);
+        var groups = targetProject.State.OptimizationGroups
+            .OrderBy(group => group.Order)
+            .Select(group => selectedGroupIds.Contains(group.OptimizationGroupId)
+                ? ClearResults(group with
+                {
+                    RequiredPieces = group.RequiredPieces.Where(piece => piece.IsManual).ToArray()
+                })
+                : group)
+            .ToList();
+
+        reportProgress?.Invoke(WorkbookImportPhase.CombiningParts, "Combining Required Pieces");
+        foreach (var worksheetImport in orderedImports)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var selection = worksheetImport.Selection;
+            var groupIndex = groups.FindIndex(group => string.Equals(
+                group.OptimizationGroupId,
+                selection.OptimizationGroupId,
+                StringComparison.Ordinal));
+            if (groupIndex < 0)
+            {
+                throw new ImportSessionException(
+                    "import-optimization-group-not-found",
+                    $"Optimization Group '{selection.OptimizationGroupName}' must exist before importing Required Pieces.");
+            }
+
+            if (groups[groupIndex].StockLength is null or <= 0)
+            {
+                throw new ImportSessionException(
+                    "import-stock-length-required",
+                    $"Optimization Group '{groups[groupIndex].Name}' requires a positive Stock Length before finalization.");
+            }
+
+            groups[groupIndex] = ClearResults(groups[groupIndex] with
+            {
+                RequiredPieces = groups[groupIndex].RequiredPieces
+                    .Concat(worksheetImport.Response.RequiredPieces)
+                    .ToArray()
+            });
+        }
+
+        var normalizedGroups = groups
+            .Select(group =>
+            {
+                var pieces = CombineCompatibleImportedRequiredPieces(group.RequiredPieces, cancellationToken);
+                return group with
+                {
+                    RequiredPieces = pieces,
+                    StockGroups = BuildStockGroups(pieces)
+                };
+            })
+            .Select((group, order) => group with { Order = order })
+            .ToArray();
+        var configuration = new ImportConfiguration
+        {
+            Options = orderedImports[0].Options with { MaterialMappings = Array.Empty<ImportMaterialMapping>() },
+            PartOverrides = orderedImports.SelectMany(item => item.Selection.PartOverrides).ToArray(),
+            Worksheets = orderedImports.Select(item => new ImportWorksheetConfiguration
+            {
+                WorksheetName = item.Selection.WorksheetName,
+                OriginalPosition = item.Selection.OriginalPosition,
+                HeadingRange = item.Response.Worksheet?.HeadingRange ?? item.Selection.HeadingRange,
+                ColumnMappings = item.Response.ColumnMappings
+                    .Where(mapping => !string.IsNullOrWhiteSpace(mapping.SourceColumn))
+                    .Select(mapping => new ImportColumnMapping
+                    {
+                        SourceColumn = mapping.SourceColumn!,
+                        TargetField = mapping.TargetField
+                    })
+                    .ToArray(),
+                OptimizationGroupId = item.Selection.OptimizationGroupId,
+                ExcludedSourceRows = item.Selection.ExcludedSourceRows
+            }).ToArray()
+        };
+
+        reportProgress?.Invoke(WorkbookImportPhase.Finalizing, "Finalizing");
+        return targetProject with
+        {
+            MaterialSnapshots = Array.Empty<Material>(),
+            State = targetProject.State with
+            {
+                SourceFilePath = importSource.ImportSourcePath,
+                ImportSource = importSource,
+                ImportConfiguration = configuration,
+                Parts = Array.Empty<PartRow>(),
+                OptimizationGroups = normalizedGroups,
+                LastNestingResult = null,
+                LastBatchNestingResult = null
+            }
+        };
+    }
+
+    private static IReadOnlyList<RequiredPiece> CombineCompatibleImportedRequiredPieces(
+        IReadOnlyList<RequiredPiece> pieces,
+        CancellationToken cancellationToken)
+    {
+        var combined = new List<RequiredPiece>(pieces.Count);
+        var importedIndexes = new Dictionary<ImportedRequiredPieceCompatibilityKey, int>();
+        foreach (var piece in pieces)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (piece.IsManual || piece.Quantity <= 0 || piece.Length <= 0 ||
+                string.Equals(piece.ValidationStatus, ValidationStatuses.Error, StringComparison.Ordinal))
+            {
+                combined.Add(piece);
+                continue;
+            }
+
+            var key = new ImportedRequiredPieceCompatibilityKey(
+                piece.Length,
+                NormalizeCompatibility(piece.ProfileNumber),
+                NormalizeCompatibility(piece.PartName),
+                NormalizeCompatibility(piece.Finish),
+                NormalizeCompatibility(piece.PartNumber));
+            if (!importedIndexes.TryGetValue(key, out var index))
+            {
+                importedIndexes[key] = combined.Count;
+                combined.Add(piece with
+                {
+                    ProfileNumber = piece.ProfileNumber.Trim(),
+                    PartName = NormalizeOptional(piece.PartName),
+                    Finish = NormalizeOptional(piece.Finish),
+                    PartNumber = NormalizeOptional(piece.PartNumber)
+                });
+                continue;
+            }
+
+            var existing = combined[index];
+            var quantity = checked(existing.Quantity + piece.Quantity);
+            combined[index] = existing with
+            {
+                Quantity = quantity,
+                QuantityText = quantity.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                SourceReferences = existing.SourceReferences.Concat(piece.SourceReferences).ToArray()
+            };
+        }
+
+        return combined;
+    }
+
+    private static IReadOnlyList<StockGroup> BuildStockGroups(IReadOnlyList<RequiredPiece> pieces) =>
+        pieces
+            .GroupBy(
+                piece => (Profile: NormalizeCompatibility(piece.ProfileNumber), Finish: NormalizeCompatibility(piece.Finish)))
+            .Select(group => new StockGroup
+            {
+                ProfileNumber = group.First().ProfileNumber,
+                Finish = group.First().Finish,
+                RequiredPieceIds = group.Select(piece => piece.RequiredPieceId).ToArray()
+            })
+            .ToArray();
+
+    private static string NormalizeCompatibility(string? value) =>
+        value?.Trim().ToUpperInvariant() ?? string.Empty;
+
+    private static string? NormalizeOptional(string? value)
+    {
+        var trimmed = value?.Trim();
+        return string.IsNullOrWhiteSpace(trimmed) ? null : trimmed;
+    }
+
+    private readonly record struct ImportedRequiredPieceCompatibilityKey(
+        decimal Length,
+        string ProfileNumber,
+        string PartName,
+        string Finish,
+        string PartNumber);
 
     public static Project Finalize(
         Project project,

@@ -286,7 +286,7 @@ public static class DesktopBridgeRegistration
                 try
                 {
                     var result = await importSessions
-                        .BeginAsync(request.SessionId, importSourcePath, cancellationToken)
+                        .BeginAsync(request.SessionId, importSourcePath, request.ProjectKind, cancellationToken)
                         .ConfigureAwait(false);
                     return BuildImportSessionResponse(request.SessionId, result, ImportSessionPhase.Reading);
                 }
@@ -451,6 +451,7 @@ public static class DesktopBridgeRegistration
                                 selection.WorksheetName);
                             var worksheetOptions = (selection.Options ?? new ImportOptions()) with
                             {
+                                ProjectKind = request.Project.ProjectKind,
                                 MaterialMappings = workbookPreparation.Options.MaterialMappings
                             };
 
@@ -521,7 +522,11 @@ public static class DesktopBridgeRegistration
                         var combinedResult = CombineWorksheetImports(
                             workbookImportSource!,
                             worksheetImports,
-                            workbookProject.State.Parts);
+                            workbookProject.State.Parts,
+                            workbookProject.State.OptimizationGroups
+                                .SelectMany(group => group.RequiredPieces)
+                                .Where(piece => !piece.IsManual)
+                                .ToArray());
                         finalization.CancellationToken.ThrowIfCancellationRequested();
                         var finalProgress = finalization.GetProgress();
                         combinedResult = combinedResult with
@@ -2285,15 +2290,16 @@ public static class DesktopBridgeRegistration
     private static string BuildImportFileMessage(ImportResponse response, string? filePath)
     {
         var fileName = string.IsNullOrWhiteSpace(filePath) ? "selected file" : Path.GetFileName(filePath);
+        var importedRowCount = response.Parts.Count + response.RequiredPieces.Count;
 
         if (response.Success)
         {
-            return $"Imported {response.Parts.Count} row(s) from '{fileName}'.";
+            return $"Imported {importedRowCount} row(s) from '{fileName}'.";
         }
 
-        if (response.Parts.Count > 0)
+        if (importedRowCount > 0)
         {
-            return $"Imported {response.Parts.Count} row(s) from '{fileName}' with {response.Errors.Count} error(s) and {response.Warnings.Count} warning(s).";
+            return $"Imported {importedRowCount} row(s) from '{fileName}' with {response.Errors.Count} error(s) and {response.Warnings.Count} warning(s).";
         }
 
         return GetFirstErrorMessage(response.Errors, $"Import failed for '{fileName}'.");
@@ -2325,6 +2331,7 @@ public static class DesktopBridgeRegistration
             null,
             BuildImportFileMessage(response, result.ImportSource.ImportSourcePath))
         {
+            RequiredPieces = response.RequiredPieces,
             Workbook = result.Workbook,
             SourceColumns = response.SourceColumns,
             Worksheet = response.Worksheet,
@@ -2402,7 +2409,8 @@ public static class DesktopBridgeRegistration
     private static ImportSessionResult CombineWorksheetImports(
         ImportSourceMetadata importSource,
         IReadOnlyList<FinalizedWorksheetImport> worksheetImports,
-        IReadOnlyList<PartRow> combinedParts)
+        IReadOnlyList<PartRow> combinedParts,
+        IReadOnlyList<RequiredPiece> combinedRequiredPieces)
     {
         var responses = worksheetImports.Select(item => item.Response).ToArray();
         return new ImportSessionResult(
@@ -2411,6 +2419,7 @@ public static class DesktopBridgeRegistration
             {
                 Success = responses.All(response => response.Success),
                 Parts = combinedParts,
+                RequiredPieces = combinedRequiredPieces,
                 Errors = responses.SelectMany(response => response.Errors).ToArray(),
                 Warnings = responses.SelectMany(response => response.Warnings).ToArray(),
                 AvailableColumns = responses.FirstOrDefault()?.AvailableColumns ?? Array.Empty<string>(),
@@ -2439,8 +2448,9 @@ public static class DesktopBridgeRegistration
                 {
                     WorksheetName = response.Worksheet.WorksheetName,
                     OriginalPosition = response.Worksheet.OriginalPosition,
-                    SourceRowCount = response.Parts.Sum(part => part.SourceReferences.Count),
-                    ImportedPartCount = response.Parts.Count,
+                    SourceRowCount = response.Parts.Sum(part => part.SourceReferences.Count) +
+                        response.RequiredPieces.Sum(piece => piece.SourceReferences.Count),
+                    ImportedPartCount = response.Parts.Count + response.RequiredPieces.Count,
                     IssueCount = response.Errors.Count + response.Warnings.Count
                 }
             ]
@@ -2456,8 +2466,9 @@ public static class DesktopBridgeRegistration
             WorksheetName = item.Selection.WorksheetName,
             OriginalPosition = item.Selection.OriginalPosition,
             SourceRowCount = item.Response.Parts.Sum(part => part.SourceReferences.Count) +
+                item.Response.RequiredPieces.Sum(piece => piece.SourceReferences.Count) +
                 item.Selection.ExcludedSourceRows.Count,
-            ImportedPartCount = item.Response.Parts.Count,
+            ImportedPartCount = item.Response.Parts.Count + item.Response.RequiredPieces.Count,
             ExcludedRowCount = item.Selection.ExcludedSourceRows.Count,
             IssueCount = item.Response.Errors.Count + item.Response.Warnings.Count
         }).ToArray();
@@ -2473,6 +2484,7 @@ public static class DesktopBridgeRegistration
                 group => group.Key,
                 group => group.Sum(item =>
                     item.Response.Parts.Sum(part => part.SourceReferences.Count) +
+                    item.Response.RequiredPieces.Sum(piece => piece.SourceReferences.Count) +
                     item.Selection.ExcludedSourceRows.Count),
                 StringComparer.Ordinal);
 
@@ -2482,7 +2494,9 @@ public static class DesktopBridgeRegistration
             {
                 var positions = positionsByGroup[group.OptimizationGroupId];
                 var combinedPartCount = group.Parts.Count(part =>
-                    !part.IsManual && part.SourceReferences.Any(reference => positions.Contains(reference.WorksheetPosition)));
+                    !part.IsManual && part.SourceReferences.Any(reference => positions.Contains(reference.WorksheetPosition))) +
+                    group.RequiredPieces.Count(piece =>
+                        !piece.IsManual && piece.SourceReferences.Any(reference => positions.Contains(reference.WorksheetPosition)));
                 var sourceRowCount = sourceRowsByGroup[group.OptimizationGroupId];
                 return new ImportOptimizationGroupPreviewSummary
                 {

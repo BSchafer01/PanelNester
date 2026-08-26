@@ -152,8 +152,10 @@ export interface SourceReference extends WorksheetRowLocation {
 
 export interface PartOverride {
   rowId: string;
-  importedValues: PartRow;
-  currentValues: PartRow;
+  importedValues?: PartRow;
+  currentValues?: PartRow;
+  importedRequiredPiece?: RequiredPiece | null;
+  currentRequiredPiece?: RequiredPiece | null;
   sourceReferences: SourceReference[];
 }
 
@@ -161,7 +163,7 @@ export interface ExcludedSourceRow {
   rowId: string;
   sourceReference: SourceReference;
   originalValidationError: ValidationError;
-  sourceRow: PartRow;
+  sourceRow?: PartRow;
 }
 
 export interface PersistedExcludedSourceRow
@@ -191,6 +193,10 @@ export const optionalImportFieldNames = [
 export const importFieldNames = [
   ...requiredImportFieldNames,
   ...optionalImportFieldNames,
+  'Profile Number',
+  'Part Name',
+  'Finish',
+  'Part Number',
 ] as const;
 
 export type ImportFieldName = (typeof importFieldNames)[number];
@@ -215,6 +221,7 @@ export interface ImportMaterialMapping {
 }
 
 export interface ImportOptions {
+  projectKind?: ProjectKind;
   columnMappings: ImportColumnMapping[];
   materialMappings: ImportMaterialMapping[];
 }
@@ -235,6 +242,7 @@ export interface ImportMaterialResolution {
 export interface ImportResponse {
   success: boolean;
   parts: PartRow[];
+  requiredPieces?: RequiredPiece[];
   errors: ValidationError[];
   warnings: ValidationWarning[];
   availableColumns: string[];
@@ -363,6 +371,7 @@ export type ImportSessionPhase =
 export interface BeginImportSessionRequest {
   sessionId: string;
   importSourcePath?: string | null;
+  projectKind?: ProjectKind;
 }
 
 export interface PreviewImportSessionRequest {
@@ -643,12 +652,16 @@ export interface OptimizationGroupChange {
 export interface RequiredPiece {
   requiredPieceId: string;
   quantity: number;
+  quantityText?: string | null;
   length: number;
+  lengthText?: string | null;
   profileNumber: string;
   partName?: string | null;
   finish?: string | null;
   partNumber?: string | null;
   isManual: boolean;
+  validationStatus?: ValidationStatus;
+  validationMessages?: string[];
   sourceReferences: SourceReference[];
 }
 
@@ -1397,6 +1410,7 @@ export const defaultExtrusionLayoutState: ExtrusionLayoutState = {
 export const emptyImportResponse: ImportResponse = {
   success: false,
   parts: [],
+  requiredPieces: [],
   errors: [],
   warnings: [],
     availableColumns: [],

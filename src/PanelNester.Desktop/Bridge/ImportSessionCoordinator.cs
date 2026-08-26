@@ -27,6 +27,7 @@ internal sealed class ImportSessionCoordinator
     public async Task<ImportSessionResult> BeginAsync(
         string sessionId,
         string importSourcePath,
+        ProjectKind projectKind,
         CancellationToken cancellationToken)
     {
         ValidateSessionId(sessionId);
@@ -38,7 +39,7 @@ internal sealed class ImportSessionCoordinator
         }
 
         var normalizedPath = Path.GetFullPath(importSourcePath.Trim());
-        var session = new ImportSessionSnapshot(normalizedPath, Path.GetExtension(normalizedPath));
+        var session = new ImportSessionSnapshot(normalizedPath, Path.GetExtension(normalizedPath), projectKind);
         if (!_sessions.TryAdd(sessionId, session))
         {
             session.Release();
@@ -112,10 +113,14 @@ internal sealed class ImportSessionCoordinator
         var session = GetSession(sessionId);
         try
         {
+            var effectiveOptions = (options ?? new ImportOptions()) with
+            {
+                ProjectKind = session.ProjectKind
+            };
             session.ReportWorksheetProgress(worksheetName);
-            var response = await ImportSnapshotAsync(session, options, worksheetName, headingRange, cancellationToken).ConfigureAwait(false);
+            var response = await ImportSnapshotAsync(session, effectiveOptions, worksheetName, headingRange, cancellationToken).ConfigureAwait(false);
             session.ReportProgress(WorkbookImportPhase.Validating, "Validating");
-            session.RecordWorksheetPreview(worksheetName, options, newMaterials, response);
+            session.RecordWorksheetPreview(worksheetName, effectiveOptions, newMaterials, response);
             return new ImportSessionResult(session.ImportSource, response);
         }
         catch
@@ -186,7 +191,7 @@ internal sealed class ImportSessionCoordinator
                 var request = new ImportRequest
                 {
                     FilePath = snapshotPath,
-                    Options = options ?? new ImportOptions(),
+                    Options = (options ?? new ImportOptions()) with { ProjectKind = session.ProjectKind },
                     WorksheetName = worksheetName,
                     HeadingRange = headingRange
                 };
@@ -223,10 +228,29 @@ internal sealed class ImportSessionCoordinator
         }
     }
 
-    private static async Task<WorkbookDiscovery?> DiscoverWorkbookAsync(
+    private async Task<WorkbookDiscovery?> DiscoverWorkbookAsync(
         ImportSessionSnapshot session,
         CancellationToken cancellationToken)
     {
+        if (string.Equals(session.Extension, ".csv", StringComparison.OrdinalIgnoreCase) &&
+            session.ProjectKind == ProjectKind.StockLength)
+        {
+            var response = await ImportSnapshotFileAsync(
+                    session,
+                    new ImportOptions { ProjectKind = ProjectKind.StockLength },
+                    null,
+                    null,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            return response.Worksheet is null
+                ? null
+                : new WorkbookDiscovery
+                {
+                    InitialWorksheetName = response.Worksheet.WorksheetName,
+                    Worksheets = [response.Worksheet]
+                };
+        }
+
         if (!string.Equals(session.Extension, ".xlsx", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(session.Extension, ".xlsm", StringComparison.OrdinalIgnoreCase))
         {
@@ -269,6 +293,13 @@ internal sealed class ImportSessionCoordinator
                 {
                     WorksheetName = worksheetName
                 }).ToArray()
+            }).ToArray(),
+            RequiredPieces = response.RequiredPieces.Select(piece => piece with
+            {
+                SourceReferences = piece.SourceReferences.Select(reference => reference with
+                {
+                    WorksheetName = worksheetName
+                }).ToArray()
             }).ToArray()
         };
     }
@@ -304,7 +335,10 @@ internal sealed class ImportSessionCoordinator
         }
     }
 
-    internal sealed class ImportSessionSnapshot(string importSourcePath, string extension)
+    internal sealed class ImportSessionSnapshot(
+        string importSourcePath,
+        string extension,
+        ProjectKind projectKind = ProjectKind.Sheet)
     {
         private readonly object _gate = new();
         private CancellationTokenSource? _operationCancellation;
@@ -317,6 +351,8 @@ internal sealed class ImportSessionCoordinator
         public string ImportSourcePath { get; } = importSourcePath;
 
         public string Extension { get; } = extension;
+
+        public ProjectKind ProjectKind { get; } = projectKind;
 
         private WorkbookDiscovery? _workbook;
         private WorkbookPreflightAssessment? _preflight;
@@ -563,7 +599,7 @@ internal sealed class ImportSessionCoordinator
                 var worksheet = response.Worksheet;
                 if (worksheet is null ||
                     string.IsNullOrWhiteSpace(worksheet.HeadingRange) ||
-                    !HasAllRequiredMappings(response.ColumnMappings))
+                    !HasAllRequiredMappings(response.ColumnMappings, options?.ProjectKind ?? ProjectKind))
                 {
                     return;
                 }
@@ -583,10 +619,11 @@ internal sealed class ImportSessionCoordinator
                         (mapping.TargetField, mapping.SourceColumn))),
                     materialResolutions,
                     response.Errors,
-                    response.Parts.ToDictionary(
-                        part => part.RowId,
-                        part => part.SourceReferences,
-                        StringComparer.Ordinal),
+                    response.Parts
+                        .Select(part => (Id: part.RowId, part.SourceReferences))
+                        .Concat(response.RequiredPieces.Select(piece =>
+                            (Id: piece.RequiredPieceId, piece.SourceReferences)))
+                        .ToDictionary(item => item.Id, item => item.SourceReferences, StringComparer.Ordinal),
                     response.Parts.ToDictionary(
                         part => part.RowId,
                         part => part.MaterialName,
@@ -715,13 +752,14 @@ internal sealed class ImportSessionCoordinator
         }
 
         private static bool HasAllRequiredMappings(
-            IReadOnlyList<ImportFieldMappingStatus> mappings)
+            IReadOnlyList<ImportFieldMappingStatus> mappings,
+            ProjectKind projectKind)
         {
             var mappedFields = mappings
                 .Where(mapping => !string.IsNullOrWhiteSpace(mapping.SourceColumn))
                 .Select(mapping => mapping.TargetField)
                 .ToHashSet(StringComparer.Ordinal);
-            return ImportFieldNames.Required.All(mappedFields.Contains);
+            return ImportFieldNames.RequiredFor(projectKind).All(mappedFields.Contains);
         }
 
         private static string BuildColumnMappingSignature(

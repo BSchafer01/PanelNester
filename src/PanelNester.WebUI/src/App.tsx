@@ -108,7 +108,7 @@ declare global {
 const importFileDialogTimeoutMs = 300000;
 const importBridgeTimeoutMs = 120000;
 const nestingBridgeTimeoutMs = 300000;
-const currentProjectVersion = 6;
+const currentProjectVersion = 7;
 
 interface AppState {
   activeRoute: AppRoute;
@@ -795,6 +795,7 @@ function pickImportFilePath(response: ImportFileResponse, fallbackFilePath?: str
 function normalizeImportResponse(response: {
   success?: boolean;
   parts?: ImportResponse['parts'];
+  requiredPieces?: ImportResponse['requiredPieces'];
   errors?: ImportResponse['errors'];
   warnings?: ImportResponse['warnings'];
   availableColumns?: string[];
@@ -806,6 +807,7 @@ function normalizeImportResponse(response: {
   return {
     success: response.success === true,
     parts: Array.isArray(response.parts) ? response.parts : [],
+    requiredPieces: Array.isArray(response.requiredPieces) ? response.requiredPieces : [],
     errors: Array.isArray(response.errors) ? response.errors : [],
     warnings: Array.isArray(response.warnings) ? response.warnings : [],
     availableColumns: Array.isArray(response.availableColumns)
@@ -3380,7 +3382,11 @@ export default function App() {
         });
         const started = normalizeImportSessionResponse(
           await trackImportOperation(sessionId, () =>
-            hostBridge.beginImportSession({ sessionId, importSourcePath: selectedFilePath })),
+            hostBridge.beginImportSession({
+              sessionId,
+              importSourcePath: selectedFilePath,
+              projectKind: state.projectKind,
+            })),
           sessionId,
         );
         if (activeImportSessionIdRef.current !== sessionId) {
@@ -3432,6 +3438,11 @@ export default function App() {
           await trackImportOperation(sessionId, () =>
             hostBridge.previewImportSession({
               sessionId,
+              options: {
+                projectKind: state.projectKind,
+                columnMappings: [],
+                materialMappings: [],
+              },
               worksheetName: initialWorksheet?.worksheetName ?? null,
               headingRange: initialWorksheet?.headingRange ?? null,
             })),
@@ -4844,9 +4855,11 @@ export default function App() {
     case 'import':
       content = state.projectKind === 'stockLength' ? (
         <RequiredPiecesPage
-          busy={state.projectBusy}
+          busy={state.projectBusy || state.importBusy}
           inchDisplayFormat={state.projectSettings.inchDisplayFormat}
+          mappingSession={state.importMappingSession}
           message={state.projectMessage}
+          onCancelImportMapping={cancelImportMapping}
           onCreateOptimizationGroup={(name, stockLength) =>
             updateOptimizationGroups({ type: 'create', name, stockLength })
           }
@@ -4858,6 +4871,8 @@ export default function App() {
               requiredPieceId,
             })
           }
+          onFinalizeImportMapping={finalizeImportMapping}
+          onImportFile={importFile}
           onInchDisplayFormatChange={(inchDisplayFormat: InchDisplayFormat) =>
             dispatch({
               type: 'project-settings-changed',
@@ -4865,6 +4880,8 @@ export default function App() {
               message: 'Length display changed. Save the project to persist this preference.',
             })
           }
+          onPreviewImportMapping={previewImportMapping}
+          onUpdateImportMappingSession={updateImportMappingSession}
           onUpdateRequiredPiece={updateRequiredPieces}
           onUpdateStockLength={(optimizationGroupId, stockLength) =>
             updateOptimizationGroups({

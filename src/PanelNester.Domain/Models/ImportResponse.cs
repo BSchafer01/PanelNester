@@ -6,6 +6,8 @@ public sealed record ImportResponse
 
     public IReadOnlyList<PartRow> Parts { get; init; } = Array.Empty<PartRow>();
 
+    public IReadOnlyList<RequiredPiece> RequiredPieces { get; init; } = Array.Empty<RequiredPiece>();
+
     public IReadOnlyList<ValidationError> Errors { get; init; } = Array.Empty<ValidationError>();
 
     public IReadOnlyList<ValidationWarning> Warnings { get; init; } = Array.Empty<ValidationWarning>();

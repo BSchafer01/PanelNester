@@ -78,6 +78,13 @@ public sealed class CsvImportService : IImportService
                     {
                         WorksheetName = worksheetName
                     }).ToArray()
+                }).ToArray(),
+                RequiredPieces = response.RequiredPieces.Select(piece => piece with
+                {
+                    SourceReferences = piece.SourceReferences.Select(reference => reference with
+                    {
+                        WorksheetName = worksheetName
+                    }).ToArray()
                 }).ToArray()
             };
         }
@@ -96,6 +103,11 @@ public sealed class CsvImportService : IImportService
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(reader);
+
+        if (options?.ProjectKind == ProjectKind.StockLength)
+        {
+            return await ImportStockLengthAsync(reader, options, cancellationToken).ConfigureAwait(false);
+        }
 
         var errors = new List<ValidationError>();
         var warnings = new List<ValidationWarning>();
@@ -216,6 +228,176 @@ public sealed class CsvImportService : IImportService
         return materials
             .GroupBy(material => material.Name, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+    }
+
+    private async Task<ImportResponse> ImportStockLengthAsync(
+        TextReader reader,
+        ImportOptions options,
+        CancellationToken cancellationToken)
+    {
+        var errors = new List<ValidationError>();
+        var warnings = new List<ValidationWarning>();
+        var pieces = new List<RequiredPiece>();
+        var availableColumns = Array.Empty<string>();
+        IReadOnlyList<ImportFieldMappingStatus> columnMappings = Array.Empty<ImportFieldMappingStatus>();
+        var configuration = new CsvConfiguration(CultureInfo.InvariantCulture)
+        {
+            BadDataFound = null,
+            DetectDelimiter = false,
+            HeaderValidated = null,
+            MissingFieldFound = null,
+            PrepareHeaderForMatch = args => args.Header,
+            TrimOptions = TrimOptions.Trim
+        };
+
+        try
+        {
+            using var csv = new CsvReader(reader, configuration);
+            if (!await csv.ReadAsync().ConfigureAwait(false))
+            {
+                return new ImportResponse
+                {
+                    Errors = [new ValidationError("empty-file", "CSV file is empty.")]
+                };
+            }
+
+            csv.ReadHeader();
+            availableColumns = csv.HeaderRecord ?? Array.Empty<string>();
+            var columnPlan = _mappingResolver.ResolveColumns(availableColumns, options, errors);
+            columnMappings = columnPlan.FieldMappings;
+            if (!columnPlan.HasAllRequiredFields)
+            {
+                return new ImportResponse
+                {
+                    AvailableColumns = availableColumns,
+                    ColumnMappings = columnMappings,
+                    Errors = errors
+                };
+            }
+
+            var rowIndex = 0;
+            while (await csv.ReadAsync().ConfigureAwait(false))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                rowIndex++;
+                var record = csv.Parser.Record ?? Array.Empty<string>();
+                var fingerprint = Fingerprint(record);
+                var sourceReference = new SourceReference
+                {
+                    WorksheetName = "CSV",
+                    WorksheetPosition = 0,
+                    PhysicalRow = csv.Parser.Row,
+                    SourceFingerprint = fingerprint
+                };
+                var pieceId = CreateRequiredPieceId(sourceReference);
+                var rowErrors = new List<string>();
+                var quantityText = GetRequiredField(csv, columnPlan, ImportFieldNames.Quantity);
+                var lengthText = GetRequiredField(csv, columnPlan, ImportFieldNames.Length);
+                var profileNumber = GetRequiredField(csv, columnPlan, ImportFieldNames.ProfileNumber).Trim();
+
+                if (!int.TryParse(quantityText.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var quantity))
+                {
+                    AddStockError("invalid-quantity", "Quantity must be an integer value.", pieceId, sourceReference, rowErrors, errors);
+                }
+                else if (quantity <= 0)
+                {
+                    AddStockError("quantity-out-of-range", "Quantity must be greater than zero.", pieceId, sourceReference, rowErrors, errors);
+                }
+
+                if (!InchMeasurementParser.TryParse(lengthText, out var length))
+                {
+                    AddStockError("invalid-length", "Length must be a decimal, fraction, or mixed-number inch value.", pieceId, sourceReference, rowErrors, errors);
+                }
+                else if (length <= 0)
+                {
+                    AddStockError("length-out-of-range", "Length must be greater than zero.", pieceId, sourceReference, rowErrors, errors);
+                }
+
+                if (string.IsNullOrWhiteSpace(profileNumber))
+                {
+                    AddStockError("missing-profile-number", "Profile Number is required.", pieceId, sourceReference, rowErrors, errors);
+                }
+
+                pieces.Add(new RequiredPiece
+                {
+                    RequiredPieceId = pieceId,
+                    Quantity = quantity,
+                    QuantityText = quantityText.Trim(),
+                    Length = length,
+                    LengthText = lengthText.Trim(),
+                    ProfileNumber = profileNumber,
+                    PartName = GetOptionalField(csv, columnPlan, ImportFieldNames.PartName),
+                    Finish = GetOptionalField(csv, columnPlan, ImportFieldNames.Finish),
+                    PartNumber = GetOptionalField(csv, columnPlan, ImportFieldNames.PartNumber),
+                    IsManual = false,
+                    ValidationStatus = rowErrors.Count == 0 ? ValidationStatuses.Valid : ValidationStatuses.Error,
+                    ValidationMessages = rowErrors,
+                    SourceReferences = [sourceReference]
+                });
+            }
+
+            if (rowIndex == 0)
+            {
+                warnings.Add(new ValidationWarning("no-data-rows", "CSV header was present, but no data rows were found."));
+            }
+        }
+        catch (ReaderException exception)
+        {
+            errors.Add(new ValidationError("csv-read-failed", exception.Message));
+        }
+        catch (IOException exception)
+        {
+            errors.Add(new ValidationError("file-read-failed", exception.Message));
+        }
+
+        return new ImportResponse
+        {
+            Success = errors.Count == 0,
+            RequiredPieces = pieces,
+            Errors = errors,
+            Warnings = warnings,
+            AvailableColumns = availableColumns,
+            ColumnMappings = columnMappings
+        };
+    }
+
+    private static string GetRequiredField(
+        CsvReader csv,
+        ColumnMappingPlan plan,
+        string field) =>
+        csv.GetField(plan.FieldToSource[field]) ?? string.Empty;
+
+    private static string? GetOptionalField(
+        CsvReader csv,
+        ColumnMappingPlan plan,
+        string field)
+    {
+        if (!plan.FieldToSource.TryGetValue(field, out var sourceColumn))
+        {
+            return null;
+        }
+
+        var value = csv.GetField(sourceColumn)?.Trim();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    private static void AddStockError(
+        string code,
+        string message,
+        string rowId,
+        SourceReference sourceReference,
+        ICollection<string> rowErrors,
+        ICollection<ValidationError> errors)
+    {
+        rowErrors.Add(message);
+        errors.Add(new ValidationError(code, message, rowId, sourceReference));
+    }
+
+    private static string CreateRequiredPieceId(SourceReference sourceReference)
+    {
+        var identity = $"{sourceReference.WorksheetPosition}\u001f{sourceReference.PhysicalRow}\u001f{sourceReference.SourceFingerprint}";
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
+        return $"required-{hash[..24].ToLowerInvariant()}";
     }
 
     private static string Fingerprint(IEnumerable<string?> values)

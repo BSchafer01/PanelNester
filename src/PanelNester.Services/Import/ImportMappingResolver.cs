@@ -80,6 +80,37 @@ internal sealed class ImportMappingResolver
                 "col",
                 "colno",
                 "colnum"
+            ],
+            [ImportFieldNames.ProfileNumber] =
+            [
+                "profile",
+                "profilenumber",
+                "profileno",
+                "die",
+                "dienumber",
+                "dieno",
+                "extrusion",
+                "extrusionnumber",
+                "extrusionno"
+            ],
+            [ImportFieldNames.PartName] =
+            [
+                "partname",
+                "piecename",
+                "description"
+            ],
+            [ImportFieldNames.Finish] =
+            [
+                "finish",
+                "color",
+                "colour"
+            ],
+            [ImportFieldNames.PartNumber] =
+            [
+                "partnumber",
+                "partno",
+                "itemnumber",
+                "itemno"
             ]
         };
 
@@ -122,6 +153,9 @@ internal sealed class ImportMappingResolver
         var explicitTargets = new HashSet<string>(StringComparer.Ordinal);
         var explicitlyAssignedSources = new HashSet<string>(StringComparer.Ordinal);
 
+        var projectKind = options?.ProjectKind ?? ProjectKind.Sheet;
+        var supportedFields = ImportFieldNames.AllFor(projectKind);
+
         foreach (var mapping in options?.ColumnMappings ?? [])
         {
             var sourceColumn = mapping.SourceColumn?.Trim() ?? string.Empty;
@@ -133,7 +167,7 @@ internal sealed class ImportMappingResolver
                 continue;
             }
 
-            if (!ImportFieldNames.All.Contains(targetField, StringComparer.Ordinal))
+            if (!supportedFields.Contains(targetField, StringComparer.Ordinal))
             {
                 errors.Add(new ValidationError("unknown-target-field", $"'{targetField}' is not a supported import field."));
                 continue;
@@ -167,11 +201,11 @@ internal sealed class ImportMappingResolver
         }
 
         var resolvedSources = explicitMappings.Values.ToHashSet(StringComparer.Ordinal);
-        var fieldMappings = new List<ImportFieldMappingStatus>(ImportFieldNames.All.Count);
+        var fieldMappings = new List<ImportFieldMappingStatus>(supportedFields.Count);
         var fieldToSource = new Dictionary<string, string>(StringComparer.Ordinal);
         var hasAllRequiredFields = true;
 
-        foreach (var field in ImportFieldNames.Required)
+        foreach (var field in ImportFieldNames.RequiredFor(projectKind))
         {
             ResolveFieldMapping(
                 field,
@@ -184,10 +218,11 @@ internal sealed class ImportMappingResolver
                 fieldMappings,
                 fieldToSource,
                 errors,
+                projectKind == ProjectKind.StockLength,
                 ref hasAllRequiredFields);
         }
 
-        foreach (var field in ImportFieldNames.Optional)
+        foreach (var field in ImportFieldNames.OptionalFor(projectKind))
         {
             ResolveFieldMapping(
                 field,
@@ -200,6 +235,7 @@ internal sealed class ImportMappingResolver
                 fieldMappings,
                 fieldToSource,
                 errors,
+                projectKind == ProjectKind.StockLength,
                 ref hasAllRequiredFields);
         }
 
@@ -295,7 +331,7 @@ internal sealed class ImportMappingResolver
             : (null, false);
     }
 
-    internal static string? RecognizeHeading(string value)
+    internal static string? RecognizeHeading(string value, ProjectKind projectKind = ProjectKind.Sheet)
     {
         var normalized = Normalize(value);
         if (normalized.Length == 0)
@@ -303,7 +339,7 @@ internal sealed class ImportMappingResolver
             return null;
         }
 
-        foreach (var field in ImportFieldNames.All)
+        foreach (var field in ImportFieldNames.AllFor(projectKind))
         {
             if (Normalize(field) == normalized ||
                 SuggestedHeaderAliases[field].Contains(normalized, StringComparer.Ordinal))
@@ -344,6 +380,7 @@ internal sealed class ImportMappingResolver
         ICollection<ImportFieldMappingStatus> fieldMappings,
         IDictionary<string, string> fieldToSource,
         ICollection<ValidationError> errors,
+        bool autoMapAliases,
         ref bool hasAllRequiredFields)
     {
         explicitMappings.TryGetValue(field, out var sourceColumn);
@@ -351,13 +388,15 @@ internal sealed class ImportMappingResolver
         var recognizedSources = sourceColumns
             .Where(column =>
                 !resolvedSources.Contains(column.Identifier) &&
-                string.Equals(RecognizeHeading(column.Heading), field, StringComparison.Ordinal))
+                string.Equals(RecognizeHeading(
+                    column.Heading,
+                    autoMapAliases ? ProjectKind.StockLength : ProjectKind.Sheet), field, StringComparison.Ordinal))
             .ToArray();
 
         if (sourceColumn is null &&
             !explicitTargets.Contains(field) &&
             recognizedSources.Length == 1 &&
-            string.Equals(recognizedSources[0].Heading.Trim(), field, StringComparison.Ordinal))
+            (autoMapAliases || string.Equals(recognizedSources[0].Heading.Trim(), field, StringComparison.Ordinal)))
         {
             sourceColumn = recognizedSources[0].Identifier;
         }

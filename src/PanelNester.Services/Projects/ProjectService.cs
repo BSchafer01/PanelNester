@@ -256,6 +256,7 @@ public sealed class ProjectService : IProjectService
                 }
 
                 var piece = validation.Piece!;
+                RequiredPiece? importedPieceForOverride = null;
                 if (change.Type == RequiredPieceChangeType.Create)
                 {
                     piece = piece with { RequiredPieceId = CreateUniqueRequiredPieceId(groups) };
@@ -271,7 +272,23 @@ public sealed class ProjectService : IProjectService
                         break;
                     }
 
-                    piece = piece with { RequiredPieceId = change.RequiredPieceId! };
+                    var existingPiece = groups[sourceGroupIndex].RequiredPieces.First(item =>
+                        item.RequiredPieceId == change.RequiredPieceId);
+                    if (!existingPiece.IsManual && sourceGroupIndex != groupIndex)
+                    {
+                        result = Failure(
+                            "required-piece-import-group-fixed",
+                            "Imported Required Pieces move with their Worksheet and cannot be moved individually.");
+                        break;
+                    }
+
+                    piece = piece with
+                    {
+                        RequiredPieceId = change.RequiredPieceId!,
+                        IsManual = existingPiece.IsManual,
+                        SourceReferences = existingPiece.SourceReferences
+                    };
+                    importedPieceForOverride = existingPiece.IsManual ? null : existingPiece;
                     if (sourceGroupIndex == groupIndex)
                     {
                         var pieceIndex = pieces.FindIndex(item => item.RequiredPieceId == change.RequiredPieceId);
@@ -294,7 +311,19 @@ public sealed class ProjectService : IProjectService
                 {
                     RequiredPieces = pieces
                 }));
-                result = Success(ApplyOptimizationGroups(normalizedProject, groups));
+                var updatedProject = ApplyOptimizationGroups(normalizedProject, groups);
+                if (change.Type == RequiredPieceChangeType.Update &&
+                    !piece.IsManual &&
+                    normalizedProject.State.ImportConfiguration is not null)
+                {
+                    updatedProject = RecordRequiredPieceOverride(
+                        updatedProject,
+                        normalizedProject.State.ImportConfiguration,
+                        change.RequiredPieceId!,
+                        importedPieceForOverride!,
+                        piece);
+                }
+                result = Success(updatedProject);
                 break;
             case RequiredPieceChangeType.Delete:
                 var removed = pieces.RemoveAll(item => item.RequiredPieceId == change.RequiredPieceId);
@@ -316,6 +345,36 @@ public sealed class ProjectService : IProjectService
         }
 
         return Task.FromResult(result);
+    }
+
+    private static Project RecordRequiredPieceOverride(
+        Project project,
+        ImportConfiguration configuration,
+        string requiredPieceId,
+        RequiredPiece importedPiece,
+        RequiredPiece currentPiece)
+    {
+        var existingOverride = configuration.PartOverrides.FirstOrDefault(item =>
+            string.Equals(item.RowId, requiredPieceId, StringComparison.Ordinal));
+        importedPiece = existingOverride?.ImportedRequiredPiece ?? importedPiece;
+        var partOverride = new PartOverride
+        {
+            RowId = requiredPieceId,
+            ImportedRequiredPiece = importedPiece,
+            CurrentRequiredPiece = currentPiece,
+            SourceReferences = currentPiece.SourceReferences
+        };
+        var overrides = configuration.PartOverrides
+            .Where(item => !string.Equals(item.RowId, requiredPieceId, StringComparison.Ordinal))
+            .Append(partOverride)
+            .ToArray();
+        return project with
+        {
+            State = project.State with
+            {
+                ImportConfiguration = configuration with { PartOverrides = overrides }
+            }
+        };
     }
 
     private ProjectOperationResult CreateOptimizationGroup(
@@ -588,47 +647,7 @@ public sealed class ProjectService : IProjectService
 
     private static bool TryParsePositiveInches(string? text, out decimal value)
     {
-        value = 0m;
-        var normalized = text?.Trim();
-        if (string.IsNullOrWhiteSpace(normalized))
-        {
-            return false;
-        }
-
-        if (decimal.TryParse(normalized, NumberStyles.Number, CultureInfo.InvariantCulture, out value))
-        {
-            return value > 0;
-        }
-
-        var terms = normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (terms.Length is < 1 or > 2)
-        {
-            return false;
-        }
-
-        decimal whole = 0m;
-        var fractionText = terms[0];
-        if (terms.Length == 2)
-        {
-            if (!decimal.TryParse(terms[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out whole) || whole < 0)
-            {
-                return false;
-            }
-
-            fractionText = terms[1];
-        }
-
-        var fraction = fractionText.Split('/', StringSplitOptions.TrimEntries);
-        if (fraction.Length != 2 ||
-            !decimal.TryParse(fraction[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var numerator) ||
-            !decimal.TryParse(fraction[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var denominator) ||
-            numerator < 0 || denominator <= 0 || numerator >= denominator)
-        {
-            return false;
-        }
-
-        value = whole + (numerator / denominator);
-        return value > 0;
+        return InchMeasurementParser.TryParse(text, out value) && value > 0;
     }
 
     private static OptimizationGroup NormalizeStockGroup(OptimizationGroup group)

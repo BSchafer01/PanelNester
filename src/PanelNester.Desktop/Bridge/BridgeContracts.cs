@@ -350,6 +350,8 @@ public sealed record BeginImportSessionRequest
     public string SessionId { get; init; } = string.Empty;
 
     public string? ImportSourcePath { get; init; }
+
+    public ProjectKind ProjectKind { get; init; } = ProjectKind.Sheet;
 }
 
 public sealed record PreviewImportSessionRequest
@@ -446,6 +448,8 @@ public sealed record ImportSessionResponse(
     BridgeError? Error,
     string? Message)
 {
+    public IReadOnlyList<RequiredPiece> RequiredPieces { get; init; } = Array.Empty<RequiredPiece>();
+
     public WorkbookDiscovery? Workbook { get; init; }
 
     public IReadOnlyList<ImportSourceColumn> SourceColumns { get; init; } = Array.Empty<ImportSourceColumn>();

@@ -47,6 +47,10 @@ public sealed record PartOverride
 
     public PartRow CurrentValues { get; init; } = new();
 
+    public RequiredPiece? ImportedRequiredPiece { get; init; }
+
+    public RequiredPiece? CurrentRequiredPiece { get; init; }
+
     public IReadOnlyList<SourceReference> SourceReferences { get; init; } =
         Array.Empty<SourceReference>();
 }

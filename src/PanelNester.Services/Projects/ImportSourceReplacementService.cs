@@ -26,12 +26,20 @@ public static class ImportSourceReplacementService
             .Select(group =>
             {
                 var manualParts = group.Parts.Where(part => part.IsManual).ToArray();
-                return manualParts.Length == group.Parts.Count
+                var manualRequiredPieces = group.RequiredPieces.Where(piece => piece.IsManual).ToArray();
+                return manualParts.Length == group.Parts.Count &&
+                       manualRequiredPieces.Length == group.RequiredPieces.Count
                     ? group
-                    : ClearResults(group with { Parts = manualParts });
+                    : ClearResults(group with
+                    {
+                        Parts = manualParts,
+                        RequiredPieces = manualRequiredPieces,
+                        StockGroups = Array.Empty<StockGroup>()
+                    });
             })
             .Where(group =>
                 group.Parts.Count > 0 ||
+                group.RequiredPieces.Count > 0 ||
                 group.Origin != OptimizationGroupOrigin.ImportSource)
             .Select((group, order) => group with { Order = order })
             .ToArray();

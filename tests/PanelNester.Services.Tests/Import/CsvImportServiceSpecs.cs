@@ -11,6 +11,38 @@ public sealed class CsvImportServiceSpecs
     private static readonly HashSet<string> KnownMaterials = ["Demo Material"];
 
     [Fact]
+    public async Task Stock_length_csv_recognizes_profile_aliases_and_normalizes_required_piece_values()
+    {
+        var service = new CsvImportService();
+        var csv = """
+            Qty,Length,Die,Part Name,Finish,Part Number
+            2,10 1/2,  DIE-42  ,,,BUSINESS-7
+            """;
+
+        var response = await service.ImportAsync(
+            new StringReader(csv),
+            new ImportOptions { ProjectKind = ProjectKind.StockLength });
+
+        Assert.True(response.Success);
+        var piece = Assert.Single(response.RequiredPieces);
+        Assert.Equal(2, piece.Quantity);
+        Assert.Equal(10.5m, piece.Length);
+        Assert.Equal("DIE-42", piece.ProfileNumber);
+        Assert.Null(piece.PartName);
+        Assert.Null(piece.Finish);
+        Assert.Equal("BUSINESS-7", piece.PartNumber);
+        Assert.False(piece.IsManual);
+        Assert.NotEqual(piece.PartNumber, piece.RequiredPieceId);
+        var sourceReference = Assert.Single(piece.SourceReferences);
+        Assert.Equal(2, sourceReference.PhysicalRow);
+        Assert.False(string.IsNullOrWhiteSpace(sourceReference.SourceFingerprint));
+        Assert.Contains(response.ColumnMappings, mapping =>
+            mapping.TargetField == ImportFieldNames.ProfileNumber &&
+            mapping.SourceColumn == "Die");
+        Assert.Empty(response.MaterialResolutions);
+    }
+
+    [Fact]
     public void Required_headers_are_exact_but_column_order_is_not()
     {
         string[] shuffledHeaders = ["Material", "Quantity", "Id", "Width", "Length"];

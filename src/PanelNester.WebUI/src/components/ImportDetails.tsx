@@ -20,8 +20,31 @@ function displayImportedValue(value: string | number | null | undefined): string
 }
 
 function describePartOverride(partOverride: PartOverride): string {
+  if (partOverride.importedRequiredPiece && partOverride.currentRequiredPiece) {
+    const imported = partOverride.importedRequiredPiece;
+    const current = partOverride.currentRequiredPiece;
+    const changes = [
+      ['Quantity', imported.quantityText ?? imported.quantity, current.quantityText ?? current.quantity],
+      ['Length', imported.lengthText ?? imported.length, current.lengthText ?? current.length],
+      ['Profile Number', imported.profileNumber, current.profileNumber],
+      ['Part Name', imported.partName, current.partName],
+      ['Finish', imported.finish, current.finish],
+      ['Part Number', imported.partNumber, current.partNumber],
+    ]
+      .filter(([, before, after]) => before !== after)
+      .map(([label, before, after]) =>
+        `${label}: ${displayImportedValue(before)} → ${displayImportedValue(after)}`);
+    const sources = partOverride.sourceReferences
+      .map((reference) => `${reference.worksheetName}!${reference.physicalRow}`)
+      .join(', ');
+    return `${current.profileNumber || partOverride.rowId}: ${changes.join('; ') || 'No value changes recorded'} (${sources})`;
+  }
+
   const imported = partOverride.importedValues;
   const current = partOverride.currentValues;
+  if (!imported || !current) {
+    return `${partOverride.rowId}: No value changes recorded`;
+  }
   const changes = [
     ['Part ID', imported.importedId, current.importedId],
     ['Length', imported.lengthText ?? imported.length, current.lengthText ?? current.length],
@@ -56,7 +79,12 @@ export function ImportDetails({
       (reference) =>
         `${part.importedId || part.rowId}: ${reference.worksheetName}!${reference.physicalRow} (${reference.sourceFingerprint})`,
     ),
-  );
+  ).concat(optimizationGroups.flatMap((group) => (group.requiredPieces ?? [])
+    .filter((piece) => !piece.isManual)
+    .flatMap((piece) => piece.sourceReferences.map(
+      (reference) =>
+        `${piece.profileNumber || piece.requiredPieceId}: ${reference.worksheetName}!${reference.physicalRow} (${reference.sourceFingerprint})`,
+    ))));
 
   return (
     <details className="import-details">

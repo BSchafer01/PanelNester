@@ -261,7 +261,7 @@ export function restoreExcludedSourceRow(
   rowId: string,
 ): ImportWorksheetDraft {
   const excluded = draft.excludedSourceRows.find((item) => item.rowId === rowId);
-  if (!excluded) {
+  if (!excluded?.sourceRow) {
     return draft;
   }
 
@@ -520,7 +520,7 @@ function restoreIgnoredMaterialRows(
 ): ImportWorksheetDraft {
   const restored = draft.excludedSourceRows.filter(
     (row) => row.originalValidationError.code === 'ignored-material' &&
-      row.sourceRow.materialName === sourceMaterialName,
+      row.sourceRow?.materialName === sourceMaterialName,
   );
   if (restored.length === 0 && !draft.ignoredMaterialNames.includes(sourceMaterialName)) {
     return draft;
@@ -530,7 +530,10 @@ function restoreIgnoredMaterialRows(
     ...draft,
     preview: {
       ...draft.preview,
-      parts: [...draft.preview.parts, ...restored.map((row) => row.sourceRow)],
+      parts: [
+        ...draft.preview.parts,
+        ...restored.flatMap((row) => row.sourceRow ? [row.sourceRow] : []),
+      ],
     },
     excludedSourceRows: draft.excludedSourceRows.filter((row) => !restored.includes(row)),
     ignoredMaterialNames: draft.ignoredMaterialNames.filter(

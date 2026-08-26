@@ -166,6 +166,123 @@ public sealed class StockLengthProjectSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Stock_length_import_configuration_overrides_exclusions_and_provenance_survive_save_without_csv_contents()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var filePath = Path.Combine(_workspacePath, "imported-stock.pnest");
+        var sourceReference = new SourceReference
+        {
+            WorksheetName = "stock.csv",
+            WorksheetPosition = 0,
+            PhysicalRow = 2,
+            SourceFingerprint = "FINGERPRINT-2"
+        };
+        var imported = new RequiredPiece
+        {
+            RequiredPieceId = "required-stable",
+            Quantity = 2,
+            QuantityText = "2",
+            Length = 10.5m,
+            LengthText = "10 1/2",
+            ProfileNumber = "EX-7",
+            PartNumber = "PN-7",
+            IsManual = false,
+            SourceReferences = [sourceReference]
+        };
+        var current = imported with { Length = 11m, LengthText = "11" };
+        var project = new Project
+        {
+            ProjectId = "stock-import-project",
+            ProjectKind = ProjectKind.StockLength,
+            State = new ProjectState
+            {
+                SourceFilePath = "C:\\imports\\stock.csv",
+                ImportSource = new ImportSourceMetadata
+                {
+                    ImportSourcePath = "C:\\imports\\stock.csv",
+                    ContentFingerprint = "CSV-CONTENT-FINGERPRINT",
+                    ContentLength = 99,
+                    SnapshotCapturedAtUtc = DateTime.UtcNow
+                },
+                ImportConfiguration = new ImportConfiguration
+                {
+                    Options = new ImportOptions
+                    {
+                        ProjectKind = ProjectKind.StockLength,
+                        ColumnMappings =
+                        [
+                            new ImportColumnMapping { SourceColumn = "Qty", TargetField = ImportFieldNames.Quantity },
+                            new ImportColumnMapping { SourceColumn = "Length", TargetField = ImportFieldNames.Length },
+                            new ImportColumnMapping { SourceColumn = "Die", TargetField = ImportFieldNames.ProfileNumber }
+                        ]
+                    },
+                    Worksheets =
+                    [
+                        new ImportWorksheetConfiguration
+                        {
+                            WorksheetName = "stock.csv",
+                            OriginalPosition = 0,
+                            HeadingRange = "R1C1:R1C3",
+                            OptimizationGroupId = "group-1",
+                            ExcludedSourceRows =
+                            [
+                                new ExcludedSourceRow
+                                {
+                                    RowId = "required-excluded",
+                                    SourceReference = sourceReference with { PhysicalRow = 3, SourceFingerprint = "FINGERPRINT-3" },
+                                    OriginalValidationError = new SourceRowValidationError
+                                    {
+                                        Code = "invalid-quantity",
+                                        Message = "Quantity must be an integer value."
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    PartOverrides =
+                    [
+                        new PartOverride
+                        {
+                            RowId = imported.RequiredPieceId,
+                            ImportedRequiredPiece = imported,
+                            CurrentRequiredPiece = current,
+                            SourceReferences = [sourceReference]
+                        }
+                    ]
+                },
+                OptimizationGroups =
+                [
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "group-1",
+                        Name = "Main",
+                        StockLength = 120m,
+                        RequiredPieces = [current]
+                    }
+                ]
+            }
+        };
+        var service = new ProjectService(new EmptyMaterialService());
+
+        var saved = await service.SaveAsync(project, filePath);
+        var reopened = await service.LoadAsync(filePath);
+
+        Assert.True(saved.Success);
+        Assert.True(reopened.Success);
+        var configuration = reopened.Project!.State.ImportConfiguration!;
+        Assert.Equal(ProjectKind.StockLength, configuration.Options.ProjectKind);
+        Assert.Equal("Die", configuration.Options.ColumnMappings[2].SourceColumn);
+        Assert.Single(configuration.PartOverrides);
+        Assert.Equal(11m, configuration.PartOverrides[0].CurrentRequiredPiece!.Length);
+        Assert.Single(Assert.Single(configuration.Worksheets).ExcludedSourceRows);
+        var piece = Assert.Single(Assert.Single(reopened.Project.State.OptimizationGroups).RequiredPieces);
+        Assert.Equal("required-stable", piece.RequiredPieceId);
+        Assert.Equal("FINGERPRINT-2", Assert.Single(piece.SourceReferences).SourceFingerprint);
+        var bytes = await File.ReadAllBytesAsync(filePath);
+        Assert.DoesNotContain("2,10 1/2,EX-7", System.Text.Encoding.UTF8.GetString(bytes));
+    }
+
+    [Fact]
     public async Task Manual_required_piece_can_be_edited_moved_once_and_deleted()
     {
         var ids = new Queue<string>(["project-1", "group-a", "group-b", "piece-1"]);
@@ -214,6 +331,72 @@ public sealed class StockLengthProjectSpecs : IDisposable
 
         Assert.True(deleted.Success);
         Assert.All(deleted.Project!.State.OptimizationGroups, group => Assert.Empty(group.RequiredPieces));
+    }
+
+    [Fact]
+    public async Task Editing_an_imported_Required_Piece_preserves_identity_and_records_a_Part_Override()
+    {
+        var sourceReference = new SourceReference
+        {
+            WorksheetName = "stock.csv",
+            WorksheetPosition = 0,
+            PhysicalRow = 2,
+            SourceFingerprint = "ROW-FINGERPRINT"
+        };
+        var imported = new RequiredPiece
+        {
+            RequiredPieceId = "required-imported",
+            Quantity = 1,
+            Length = 10m,
+            ProfileNumber = "EX-1",
+            PartNumber = "PN-1",
+            IsManual = false,
+            SourceReferences = [sourceReference]
+        };
+        var project = new Project
+        {
+            ProjectId = "stock-project",
+            ProjectKind = ProjectKind.StockLength,
+            State = new ProjectState
+            {
+                ImportConfiguration = new ImportConfiguration
+                {
+                    Options = new ImportOptions { ProjectKind = ProjectKind.StockLength }
+                },
+                OptimizationGroups =
+                [
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "group-1",
+                        Name = "Main",
+                        StockLength = 120m,
+                        RequiredPieces = [imported]
+                    }
+                ]
+            }
+        };
+        var service = new ProjectService(new EmptyMaterialService());
+
+        var updated = await service.UpdateRequiredPiecesAsync(project, new RequiredPieceChange
+        {
+            Type = RequiredPieceChangeType.Update,
+            OptimizationGroupId = "group-1",
+            RequiredPieceId = imported.RequiredPieceId,
+            Quantity = "2",
+            Length = "11",
+            ProfileNumber = "EX-1",
+            PartNumber = "PN-EDITED"
+        });
+
+        Assert.True(updated.Success);
+        var piece = Assert.Single(Assert.Single(updated.Project!.State.OptimizationGroups).RequiredPieces);
+        Assert.Equal("required-imported", piece.RequiredPieceId);
+        Assert.False(piece.IsManual);
+        Assert.Equal(sourceReference, Assert.Single(piece.SourceReferences));
+        var partOverride = Assert.Single(updated.Project.State.ImportConfiguration!.PartOverrides);
+        Assert.Equal(imported, partOverride.ImportedRequiredPiece);
+        Assert.Equal(piece, partOverride.CurrentRequiredPiece);
+        Assert.Equal([sourceReference], partOverride.SourceReferences);
     }
 
     [Fact]
