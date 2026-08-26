@@ -1,9 +1,30 @@
 namespace PanelNester.Domain.Models;
 
-public abstract record ValidationIssue(string Code, string Message, string? RowId = null);
+public sealed record ValidationLocation
+{
+    public string WorksheetName { get; init; } = string.Empty;
 
-public sealed record ValidationError(string Code, string Message, string? RowId = null)
-    : ValidationIssue(Code, Message, RowId);
+    public int WorksheetPosition { get; init; }
 
-public sealed record ValidationWarning(string Code, string Message, string? RowId = null)
-    : ValidationIssue(Code, Message, RowId);
+    public int PhysicalRow { get; init; }
+}
+
+public abstract record ValidationIssue(
+    string Code,
+    string Message,
+    string? RowId = null,
+    ValidationLocation? Location = null);
+
+public sealed record ValidationError(
+    string Code,
+    string Message,
+    string? RowId = null,
+    ValidationLocation? Location = null)
+    : ValidationIssue(Code, Message, RowId, Location);
+
+public sealed record ValidationWarning(
+    string Code,
+    string Message,
+    string? RowId = null,
+    ValidationLocation? Location = null)
+    : ValidationIssue(Code, Message, RowId, Location);

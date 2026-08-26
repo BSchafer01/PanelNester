@@ -479,19 +479,24 @@ public static class DesktopBridgeRegistration
                                 worksheetResult.Response));
                         }
 
-                        var combinedResult = CombineWorksheetImports(
-                            workbookImportSource!,
-                            worksheetImports);
                         var workbookProject = ProjectImportFinalizer.FinalizeWorkbook(
                             request.Project,
-                            combinedResult.ImportSource,
+                            workbookImportSource!,
                             worksheetImports);
+                        var previewSummary = BuildWorkbookPreviewSummary(
+                            worksheetImports,
+                            workbookProject.State.OptimizationGroups);
+                        var combinedResult = CombineWorksheetImports(
+                            workbookImportSource!,
+                            worksheetImports,
+                            workbookProject.State.Parts);
                         return BuildImportSessionResponse(
                             request.SessionId,
                             combinedResult,
                             ImportSessionPhase.Finalized,
                             workbookProject,
-                            finalized: true);
+                            finalized: true,
+                            previewSummary: previewSummary);
                     }
 
                     var importPreparation = await PrepareImportOptionsAsync(
@@ -2185,7 +2190,8 @@ public static class DesktopBridgeRegistration
         ImportSessionResult result,
         ImportSessionPhase phase,
         Project? project = null,
-        bool finalized = false)
+        bool finalized = false,
+        ImportPreviewSummary? previewSummary = null)
     {
         var response = result.Response;
         return new ImportSessionResponse(
@@ -2207,7 +2213,8 @@ public static class DesktopBridgeRegistration
         {
             Workbook = result.Workbook,
             SourceColumns = response.SourceColumns,
-            Worksheet = response.Worksheet
+            Worksheet = response.Worksheet,
+            PreviewSummary = previewSummary ?? BuildWorksheetPreviewSummary(response)
         };
     }
 
@@ -2278,7 +2285,8 @@ public static class DesktopBridgeRegistration
 
     private static ImportSessionResult CombineWorksheetImports(
         ImportSourceMetadata importSource,
-        IReadOnlyList<FinalizedWorksheetImport> worksheetImports)
+        IReadOnlyList<FinalizedWorksheetImport> worksheetImports,
+        IReadOnlyList<PartRow> combinedParts)
     {
         var responses = worksheetImports.Select(item => item.Response).ToArray();
         return new ImportSessionResult(
@@ -2286,7 +2294,7 @@ public static class DesktopBridgeRegistration
             new ImportResponse
             {
                 Success = responses.All(response => response.Success),
-                Parts = responses.SelectMany(response => response.Parts).ToArray(),
+                Parts = combinedParts,
                 Errors = responses.SelectMany(response => response.Errors).ToArray(),
                 Warnings = responses.SelectMany(response => response.Warnings).ToArray(),
                 AvailableColumns = responses.FirstOrDefault()?.AvailableColumns ?? Array.Empty<string>(),
@@ -2298,6 +2306,80 @@ public static class DesktopBridgeRegistration
                     .Select(group => group.First())
                     .ToArray()
             });
+    }
+
+    private static ImportPreviewSummary? BuildWorksheetPreviewSummary(ImportResponse response)
+    {
+        if (response.Worksheet is null)
+        {
+            return null;
+        }
+
+        return new ImportPreviewSummary
+        {
+            Worksheets =
+            [
+                new ImportWorksheetPreviewSummary
+                {
+                    WorksheetName = response.Worksheet.WorksheetName,
+                    OriginalPosition = response.Worksheet.OriginalPosition,
+                    SourceRowCount = response.Parts.Sum(part => part.SourceReferences.Count),
+                    ImportedPartCount = response.Parts.Count,
+                    IssueCount = response.Errors.Count + response.Warnings.Count
+                }
+            ]
+        };
+    }
+
+    private static ImportPreviewSummary BuildWorkbookPreviewSummary(
+        IReadOnlyList<FinalizedWorksheetImport> worksheetImports,
+        IReadOnlyList<OptimizationGroup> optimizationGroups)
+    {
+        var worksheetSummaries = worksheetImports.Select(item => new ImportWorksheetPreviewSummary
+        {
+            WorksheetName = item.Selection.WorksheetName,
+            OriginalPosition = item.Selection.OriginalPosition,
+            SourceRowCount = item.Response.Parts.Sum(part => part.SourceReferences.Count),
+            ImportedPartCount = item.Response.Parts.Count,
+            IssueCount = item.Response.Errors.Count + item.Response.Warnings.Count
+        }).ToArray();
+        var positionsByGroup = worksheetImports
+            .GroupBy(item => item.Selection.OptimizationGroupId, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(item => item.Selection.OriginalPosition).ToHashSet(),
+                StringComparer.Ordinal);
+        var sourceRowsByGroup = worksheetImports
+            .GroupBy(item => item.Selection.OptimizationGroupId, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Sum(item => item.Response.Parts.Sum(part => part.SourceReferences.Count)),
+                StringComparer.Ordinal);
+
+        var groupSummaries = optimizationGroups
+            .Where(group => positionsByGroup.ContainsKey(group.OptimizationGroupId))
+            .Select(group =>
+            {
+                var positions = positionsByGroup[group.OptimizationGroupId];
+                var combinedPartCount = group.Parts.Count(part =>
+                    !part.IsManual && part.SourceReferences.Any(reference => positions.Contains(reference.WorksheetPosition)));
+                var sourceRowCount = sourceRowsByGroup[group.OptimizationGroupId];
+                return new ImportOptimizationGroupPreviewSummary
+                {
+                    OptimizationGroupId = group.OptimizationGroupId,
+                    Name = group.Name,
+                    SourceRowCount = sourceRowCount,
+                    CombinedPartCount = combinedPartCount,
+                    MergedRowCount = Math.Max(0, sourceRowCount - combinedPartCount)
+                };
+            })
+            .ToArray();
+
+        return new ImportPreviewSummary
+        {
+            Worksheets = worksheetSummaries,
+            OptimizationGroups = groupSummaries
+        };
     }
 
     private static string GetFirstErrorCode(IReadOnlyList<ValidationError> errors, string fallbackCode) =>

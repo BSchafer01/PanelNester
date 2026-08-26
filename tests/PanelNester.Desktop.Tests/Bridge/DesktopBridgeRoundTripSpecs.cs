@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json;
+using ClosedXML.Excel;
 using PanelNester.Desktop.Bridge;
 using PanelNester.Domain.Contracts;
 using PanelNester.Domain.Models;
@@ -13,7 +14,7 @@ namespace PanelNester.Desktop.Tests.Bridge;
 
 public sealed class DesktopBridgeRoundTripSpecs : IDisposable
 {
-    private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions SerializerOptions = BridgeJson.SerializerOptions;
     private readonly string _workspacePath = Path.Combine(Path.GetTempPath(), $"PanelNester.DesktopBridgeRoundTripSpecs.{Guid.NewGuid():N}");
 
     [Fact]
@@ -280,6 +281,129 @@ public sealed class DesktopBridgeRoundTripSpecs : IDisposable
         });
     }
 
+    [Fact]
+    public async Task Multi_Worksheet_import_round_trips_through_save_reopen_grouped_optimization_and_provenance()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "multi-worksheet.xlsx");
+        var projectPath = Path.Combine(_workspacePath, "multi-worksheet.pnest");
+        var repository = new JsonMaterialRepository(Path.Combine(_workspacePath, "multi-worksheet-materials.json"));
+        var materialService = new MaterialService(repository);
+        Assert.Contains(await materialService.ListAsync(), material => material.Name == DemoMaterialCatalog.Phase1.Name);
+
+        using (var workbook = new XLWorkbook())
+        {
+            WriteWorksheet(workbook.AddWorksheet("East"), "P-001", 1);
+            WriteWorksheet(workbook.AddWorksheet("West"), "P-001", 2);
+            WriteWorksheet(workbook.AddWorksheet("Service"), "P-002", 1);
+            workbook.SaveAs(workbookPath);
+        }
+
+        var nestingService = new ShelfNestingService();
+        var validator = new PartRowValidator();
+        var dispatcher = DesktopBridgeRegistration.CreateDefault(
+            new StubFileDialogService(workbookPath),
+            materialService,
+            new ProjectService(materialService, idGenerator: () => "multi-worksheet-project"),
+            new FileImportDispatcher(
+                new CsvImportService(repository, validator),
+                new XlsxImportService(repository, validator)),
+            new PartEditorService(repository, validator),
+            nestingService,
+            new BatchNestingService(nestingService, () => "multi-worksheet-run"),
+            new ReportDataService(),
+            new QuestPdfReportExporter(),
+            new ClosedXmlExcelReportExporter(),
+            () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true));
+
+        const string sessionId = "multi-worksheet-round-trip";
+        var begun = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest { SessionId = sessionId, ImportSourcePath = workbookPath });
+        Assert.True(begun.Success);
+
+        var finalized = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.FinalizeImportSession,
+            new FinalizeImportSessionRequest
+            {
+                SessionId = sessionId,
+                Project = new Project
+                {
+                    ProjectId = "multi-worksheet-project",
+                    Metadata = new ProjectMetadata { ProjectName = "Multi Worksheet" }
+                },
+                Worksheets =
+                [
+                    SelectWorksheet("East", 1, "facades", "Facades"),
+                    SelectWorksheet("West", 2, "facades", "Facades"),
+                    SelectWorksheet("Service", 3, "service", "Service")
+                ]
+            });
+        Assert.True(finalized.Success);
+
+        var saved = await DispatchAsync<SaveProjectResponse>(
+            dispatcher,
+            BridgeMessageTypes.SaveProject,
+            new SaveProjectRequest(finalized.Project!, projectPath));
+        Assert.True(saved.Success);
+
+        var reopened = await DispatchAsync<OpenProjectResponse>(
+            dispatcher,
+            BridgeMessageTypes.OpenProject,
+            new OpenProjectRequest(projectPath));
+        Assert.True(reopened.Success);
+        var project = Assert.IsType<Project>(reopened.Project);
+        Assert.Equal(3, project.State.ImportConfiguration?.Worksheets.Count);
+        Assert.Equal(["East", "West", "Service"],
+            project.State.ImportConfiguration?.Worksheets.Select(worksheet => worksheet.WorksheetName));
+        Assert.All(project.State.ImportConfiguration!.Worksheets, worksheet =>
+        {
+            Assert.Equal("A1:E1", worksheet.HeadingRange);
+            Assert.Equal(5, worksheet.ColumnMappings.Count);
+            Assert.False(string.IsNullOrWhiteSpace(worksheet.OptimizationGroupId));
+        });
+        var materialResolution = Assert.Single(project.State.ImportConfiguration.Options.MaterialMappings);
+        Assert.Equal(DemoMaterialCatalog.Phase1.Name, materialResolution.SourceMaterialName);
+        Assert.Equal(DemoMaterialCatalog.Phase1.MaterialId, materialResolution.TargetMaterialId);
+        Assert.DoesNotContain(
+            typeof(ProjectState).GetProperties(),
+            property => property.PropertyType == typeof(byte[]));
+
+        var facades = Assert.Single(
+            project.State.OptimizationGroups,
+            group => group.OptimizationGroupId == "facades");
+        var combined = Assert.Single(facades.Parts);
+        Assert.Equal(3, combined.Quantity);
+        Assert.Equal(
+            ["East!2", "West!2"],
+            combined.SourceReferences.Select(reference => $"{reference.WorksheetName}!{reference.PhysicalRow}"));
+
+        var run = await DispatchAsync<BatchNestResponse>(
+            dispatcher,
+            BridgeMessageTypes.RunBatchNesting,
+            new BatchNestRequest
+            {
+                OptimizationGroups = project.State.OptimizationGroups.Select(group => new OptimizationGroupNestRequest
+                {
+                    OptimizationGroupId = group.OptimizationGroupId,
+                    Name = group.Name,
+                    Order = group.Order,
+                    OwnedPartRowIds = group.Parts.Select(part => part.RowId).ToArray(),
+                    Parts = group.Parts
+                }).ToArray(),
+                Materials = project.MaterialSnapshots,
+                KerfWidth = project.Settings.KerfWidth
+            });
+        Assert.True(run.Success);
+        Assert.Equal(["facades", "service"],
+            run.OptimizationGroupResults.Select(group => group.OptimizationGroupId));
+        Assert.All(run.OptimizationGroupResults, group =>
+            Assert.All(group.MaterialResults.SelectMany(material => material.Result.Placements), placement =>
+                Assert.StartsWith(group.OptimizationResultId, placement.PlacementId, StringComparison.Ordinal)));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_workspacePath))
@@ -330,6 +454,34 @@ public sealed class DesktopBridgeRoundTripSpecs : IDisposable
                 }
             ]
         };
+
+    private static ImportWorksheetSelection SelectWorksheet(
+        string worksheetName,
+        int originalPosition,
+        string optimizationGroupId,
+        string optimizationGroupName) =>
+        new()
+        {
+            WorksheetName = worksheetName,
+            OriginalPosition = originalPosition,
+            OptimizationGroupId = optimizationGroupId,
+            OptimizationGroupName = optimizationGroupName
+        };
+
+    private static void WriteWorksheet(IXLWorksheet worksheet, string partId, int quantity)
+    {
+        string[] headings = ["Id", "Length", "Width", "Quantity", "Material"];
+        for (var column = 0; column < headings.Length; column++)
+        {
+            worksheet.Cell(1, column + 1).Value = headings[column];
+        }
+
+        worksheet.Cell(2, 1).Value = partId;
+        worksheet.Cell(2, 2).Value = 20;
+        worksheet.Cell(2, 3).Value = 10;
+        worksheet.Cell(2, 4).Value = quantity;
+        worksheet.Cell(2, 5).Value = DemoMaterialCatalog.Phase1.Name;
+    }
 
     private sealed class StubFileDialogService(string filePath) : IFileDialogService
     {

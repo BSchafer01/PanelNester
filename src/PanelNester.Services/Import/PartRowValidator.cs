@@ -58,6 +58,7 @@ public sealed class PartRowValidator
         var rowId = string.IsNullOrWhiteSpace(update.RowId)
             ? $"row-{rowIndex}"
             : update.RowId.Trim();
+        var location = CreateValidationLocation(update.SourceReferences.FirstOrDefault());
         var rowErrors = new List<string>();
         var rowWarnings = new List<string>();
 
@@ -68,43 +69,43 @@ public sealed class PartRowValidator
         var materialName = update.MaterialName?.Trim() ?? string.Empty;
         var group = NormalizeOptional(update.Group);
         var sheetNumber = NormalizeOptional(update.SheetNumber);
-        var rowNumber = ParseOptionalPositiveInt(update.RowNumber, "Row Number", "row-number", rowId, rowErrors, errors);
-        var columnNumber = ParseOptionalPositiveInt(update.ColumnNumber, "Column Number", "column-number", rowId, rowErrors, errors);
+        var rowNumber = ParseOptionalPositiveInt(update.RowNumber, "Row Number", "row-number", rowId, location, rowErrors, errors);
+        var columnNumber = ParseOptionalPositiveInt(update.ColumnNumber, "Column Number", "column-number", rowId, location, rowErrors, errors);
 
         if (string.IsNullOrWhiteSpace(importedId))
         {
-            AddError("missing-id", "Id is required.", rowId, rowErrors, errors);
+            AddError("missing-id", "Id is required.", rowId, location, rowErrors, errors);
         }
         else if (!seenIds.Add(importedId))
         {
-            AddWarning("duplicate-id", $"Duplicate Id '{importedId}' found.", rowId, rowWarnings, warnings);
+            AddWarning("duplicate-id", $"Duplicate Id '{importedId}' found.", rowId, location, rowWarnings, warnings);
         }
 
         if (!TryParseDecimal(lengthText, out var length))
         {
-            AddError("invalid-length", "Length must be a decimal value.", rowId, rowErrors, errors);
+            AddError("invalid-length", "Length must be a decimal value.", rowId, location, rowErrors, errors);
         }
         else if (length <= 0)
         {
-            AddError("length-out-of-range", "Length must be greater than zero.", rowId, rowErrors, errors);
+            AddError("length-out-of-range", "Length must be greater than zero.", rowId, location, rowErrors, errors);
         }
 
         if (!TryParseDecimal(widthText, out var width))
         {
-            AddError("invalid-width", "Width must be a decimal value.", rowId, rowErrors, errors);
+            AddError("invalid-width", "Width must be a decimal value.", rowId, location, rowErrors, errors);
         }
         else if (width <= 0)
         {
-            AddError("width-out-of-range", "Width must be greater than zero.", rowId, rowErrors, errors);
+            AddError("width-out-of-range", "Width must be greater than zero.", rowId, location, rowErrors, errors);
         }
 
         if (!TryParseInt(quantityText, out var quantity))
         {
-            AddError("invalid-quantity", "Quantity must be an integer value.", rowId, rowErrors, errors);
+            AddError("invalid-quantity", "Quantity must be an integer value.", rowId, location, rowErrors, errors);
         }
         else if (quantity <= 0)
         {
-            AddError("quantity-out-of-range", "Quantity must be greater than zero.", rowId, rowErrors, errors);
+            AddError("quantity-out-of-range", "Quantity must be greater than zero.", rowId, location, rowErrors, errors);
         }
         else if (quantity > LargeQuantityWarningThreshold)
         {
@@ -112,13 +113,14 @@ public sealed class PartRowValidator
                 "quantity-large",
                 $"Quantity '{quantity}' is very large and may increase nesting time.",
                 rowId,
+                location,
                 rowWarnings,
                 warnings);
         }
 
         if (string.IsNullOrWhiteSpace(materialName))
         {
-            AddError("missing-material", "Material is required.", rowId, rowErrors, errors);
+            AddError("missing-material", "Material is required.", rowId, location, rowErrors, errors);
         }
         else if (!knownMaterials.ContainsKey(materialName))
         {
@@ -126,6 +128,7 @@ public sealed class PartRowValidator
                 "material-not-found",
                 $"Material '{materialName}' was not found in the material library.",
                 rowId,
+                location,
                 rowErrors,
                 errors);
         }
@@ -163,22 +166,24 @@ public sealed class PartRowValidator
         string code,
         string message,
         string rowId,
+        ValidationLocation? location,
         ICollection<string> rowMessages,
         ICollection<ValidationError> errors)
     {
         rowMessages.Add(message);
-        errors.Add(new ValidationError(code, message, rowId));
+        errors.Add(new ValidationError(code, message, rowId, location));
     }
 
     private static void AddWarning(
         string code,
         string message,
         string rowId,
+        ValidationLocation? location,
         ICollection<string> rowMessages,
         ICollection<ValidationWarning> warnings)
     {
         rowMessages.Add(message);
-        warnings.Add(new ValidationWarning(code, message, rowId));
+        warnings.Add(new ValidationWarning(code, message, rowId, location));
     }
 
     private static bool TryParseDecimal(string rawValue, out decimal value) =>
@@ -192,6 +197,7 @@ public sealed class PartRowValidator
         string label,
         string codePrefix,
         string rowId,
+        ValidationLocation? location,
         ICollection<string> rowErrors,
         ICollection<ValidationError> errors)
     {
@@ -203,18 +209,28 @@ public sealed class PartRowValidator
 
         if (!TryParseInt(text, out var value))
         {
-            AddError($"invalid-{codePrefix}", $"{label} must be an integer value.", rowId, rowErrors, errors);
+            AddError($"invalid-{codePrefix}", $"{label} must be an integer value.", rowId, location, rowErrors, errors);
             return null;
         }
 
         if (value <= 0)
         {
-            AddError($"{codePrefix}-out-of-range", $"{label} must be greater than zero.", rowId, rowErrors, errors);
+            AddError($"{codePrefix}-out-of-range", $"{label} must be greater than zero.", rowId, location, rowErrors, errors);
             return null;
         }
 
         return value;
     }
+
+    private static ValidationLocation? CreateValidationLocation(SourceReference? sourceReference) =>
+        sourceReference is null
+            ? null
+            : new ValidationLocation
+            {
+                WorksheetName = sourceReference.WorksheetName,
+                WorksheetPosition = sourceReference.WorksheetPosition,
+                PhysicalRow = sourceReference.PhysicalRow
+            };
 
     private static string? NormalizeOptional(string? value)
     {

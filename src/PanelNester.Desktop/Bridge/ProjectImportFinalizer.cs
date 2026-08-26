@@ -39,7 +39,6 @@ internal static class ProjectImportFinalizer
                 "Every selected Worksheet must belong to an Optimization Group.");
         }
 
-        var allParts = orderedImports.SelectMany(item => item.Response.Parts).ToArray();
         var groups = project.State.OptimizationGroups
             .OrderBy(group => group.Order)
             .Select(group => UpdateParts(
@@ -74,11 +73,31 @@ internal static class ProjectImportFinalizer
         }
 
         var normalizedGroups = groups
+            .Select(group => UpdateParts(group, CombineCompatibleImportedParts(group.Parts)))
             .Select((group, order) => group with { Order = order })
+            .ToArray();
+        var allParts = normalizedGroups
+            .SelectMany(group => group.Parts)
+            .Where(part => !part.IsManual)
+            .ToArray();
+        var resolvedMaterialMappings = orderedImports
+            .SelectMany(item => item.Response.MaterialResolutions)
+            .Where(resolution =>
+                !string.IsNullOrWhiteSpace(resolution.SourceMaterialName) &&
+                !string.IsNullOrWhiteSpace(resolution.ResolvedMaterialId))
+            .GroupBy(resolution => resolution.SourceMaterialName.Trim(), StringComparer.Ordinal)
+            .Select(group => new ImportMaterialMapping
+            {
+                SourceMaterialName = group.Key,
+                TargetMaterialId = group.First().ResolvedMaterialId
+            })
             .ToArray();
         var configuration = new ImportConfiguration
         {
-            Options = orderedImports[0].Options,
+            Options = orderedImports[0].Options with
+            {
+                MaterialMappings = resolvedMaterialMappings
+            },
             Worksheets = orderedImports.Select(item => new ImportWorksheetConfiguration
             {
                 WorksheetName = item.Selection.WorksheetName,
@@ -247,6 +266,60 @@ internal static class ProjectImportFinalizer
             LastBatchNestingResult = null,
             ResultStatus = OptimizationResultStatus.None
         };
+
+    private static IReadOnlyList<PartRow> CombineCompatibleImportedParts(
+        IReadOnlyList<PartRow> parts)
+    {
+        var combined = new List<PartRow>(parts.Count);
+        var indexByKey = new Dictionary<ImportedPartCompatibilityKey, int>();
+        foreach (var part in parts)
+        {
+            if (part.IsManual ||
+                part.Quantity <= 0 ||
+                string.Equals(part.ValidationStatus, ValidationStatuses.Error, StringComparison.Ordinal))
+            {
+                combined.Add(part);
+                continue;
+            }
+
+            var key = new ImportedPartCompatibilityKey(
+                part.ImportedId,
+                part.Length,
+                part.Width,
+                part.MaterialName,
+                part.Group,
+                part.SheetNumber,
+                part.RowNumber,
+                part.ColumnNumber);
+            if (!indexByKey.TryGetValue(key, out var existingIndex))
+            {
+                indexByKey[key] = combined.Count;
+                combined.Add(part);
+                continue;
+            }
+
+            var existing = combined[existingIndex];
+            var quantity = checked(existing.Quantity + part.Quantity);
+            combined[existingIndex] = existing with
+            {
+                Quantity = quantity,
+                QuantityText = quantity.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                SourceReferences = existing.SourceReferences.Concat(part.SourceReferences).ToArray()
+            };
+        }
+
+        return combined;
+    }
+
+    private readonly record struct ImportedPartCompatibilityKey(
+        string ImportedId,
+        decimal Length,
+        decimal Width,
+        string MaterialName,
+        string? PartGroup,
+        string? SheetNumber,
+        int? RowNumber,
+        int? ColumnNumber);
 
     private static string MakeUniqueGroupName(
         string requestedName,

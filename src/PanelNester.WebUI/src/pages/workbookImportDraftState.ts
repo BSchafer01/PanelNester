@@ -4,10 +4,71 @@ import type {
   ImportMaterialMapping,
   ImportNewMaterialRequest,
   ImportOptions,
+  ImportPreviewSummary,
   ImportSourceColumn,
   ImportWorksheetDraft,
   WorkbookDiscovery,
 } from '../types/contracts';
+
+export function summarizeWorkbookPreview(
+  drafts: ImportWorksheetDraft[],
+): ImportPreviewSummary {
+  const selected = drafts.filter((draft) => draft.selected);
+  const worksheets = selected.map((draft) => ({
+    worksheetName: draft.worksheet.worksheetName,
+    originalPosition: draft.worksheet.originalPosition,
+    sourceRowCount: draft.preview.parts.reduce(
+      (count, part) => count + Math.max(1, part.sourceReferences?.length ?? 0),
+      0,
+    ),
+    importedPartCount: draft.preview.parts.length,
+    issueCount: draft.preview.errors.length + draft.preview.warnings.length,
+  }));
+  const groupedDrafts = new Map<string, ImportWorksheetDraft[]>();
+  for (const draft of selected) {
+    groupedDrafts.set(draft.optimizationGroupId, [
+      ...(groupedDrafts.get(draft.optimizationGroupId) ?? []),
+      draft,
+    ]);
+  }
+
+  const optimizationGroups = Array.from(groupedDrafts, ([optimizationGroupId, groupDrafts]) => {
+    const parts = groupDrafts.flatMap((draft) => draft.preview.parts);
+    const sourceRowCount = parts.reduce(
+      (count, part) => count + Math.max(1, part.sourceReferences?.length ?? 0),
+      0,
+    );
+    const compatibleKeys = new Set<string>();
+    let unmergeablePartCount = 0;
+    for (const part of parts) {
+      if (part.validationStatus === 'error' || part.isManual) {
+        unmergeablePartCount += 1;
+        continue;
+      }
+
+      compatibleKeys.add(JSON.stringify([
+        part.importedId,
+        part.materialName,
+        part.length,
+        part.width,
+        part.group ?? null,
+        part.sheetNumber ?? null,
+        part.rowNumber ?? null,
+        part.columnNumber ?? null,
+      ]));
+    }
+    const combinedPartCount = compatibleKeys.size + unmergeablePartCount;
+    return {
+      optimizationGroupId,
+      name: groupDrafts[0]?.optimizationGroupName ?? optimizationGroupId,
+      sourceRowCount,
+      combinedPartCount,
+      mergedRowCount: Math.max(0, sourceRowCount - combinedPartCount),
+    };
+  });
+
+  return { worksheets, optimizationGroups };
+}
 
 export function createWorkbookWorksheetDrafts(
   sessionId: string,

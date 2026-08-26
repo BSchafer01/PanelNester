@@ -11,6 +11,7 @@ import {
   headingRangeFromPreviewCells,
   setWorkbookWorksheetSelected,
   summarizeHighConfidenceHeadingRanges,
+  summarizeWorkbookPreview,
   synchronizeWorkbookMaterialResolution,
   type BulkHeadingRangeConfirmationSummary,
   type WorksheetDraftOperationResult,
@@ -180,6 +181,17 @@ function createDraft(
     rowNumber: '',
     columnNumber: '',
   };
+}
+
+function formatSourceReferences(part: PartRow): string {
+  const references = part.sourceReferences ?? [];
+  if (references.length === 0) {
+    return part.isManual ? 'Manual' : '—';
+  }
+
+  return references
+    .map((reference) => `${reference.worksheetName}!${reference.physicalRow}`)
+    .join(', ');
 }
 
 function compareStrings(left: string, right: string): number {
@@ -662,6 +674,10 @@ export function ImportPage({
   const hasPendingImportReview = Boolean(mappingSession);
   const worksheetDrafts = mappingSession?.worksheets ?? [];
   const selectedWorksheetDrafts = worksheetDrafts.filter((draft) => draft.selected);
+  const workbookPreviewSummary = useMemo(
+    () => summarizeWorkbookPreview(worksheetDrafts),
+    [worksheetDrafts],
+  );
   const activeWorksheetDraft = worksheetDrafts.find(
     (draft) => draft.worksheet.worksheetName === mappingSession?.activeWorksheetName,
   );
@@ -882,6 +898,7 @@ export function ImportPage({
             draft.newMaterials.map((material) => material.sourceMaterialName),
           );
           return !draft.hasPendingChanges &&
+            draft.preview.errors.length === 0 &&
             requiredImportFieldNames.every((field) =>
               draft.options.columnMappings.some(
                 (mapping) =>
@@ -1754,6 +1771,46 @@ export function ImportPage({
                   </div>
                 ))}
               </div>
+              {selectedWorksheetDrafts.length > 0 ? (
+                <div className="import-review-grid">
+                  <article className="editor-card">
+                    <div className="section-header">
+                      <div>
+                        <p className="eyebrow">Worksheet outcomes</p>
+                        <h3>Rows and issues</h3>
+                      </div>
+                    </div>
+                    <div className="mapping-resolution-list">
+                      {workbookPreviewSummary.worksheets.map((worksheet) => (
+                        <div className="mapping-resolution-card" key={worksheet.originalPosition}>
+                          <strong>{worksheet.worksheetName}</strong>
+                          <span>
+                            {worksheet.sourceRowCount} source row(s) · {worksheet.importedPartCount} imported part(s) · {worksheet.issueCount} issue(s)
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </article>
+                  <article className="editor-card">
+                    <div className="section-header">
+                      <div>
+                        <p className="eyebrow">Optimization Group outcomes</p>
+                        <h3>Combined parts</h3>
+                      </div>
+                    </div>
+                    <div className="mapping-resolution-list">
+                      {workbookPreviewSummary.optimizationGroups.map((group) => (
+                        <div className="mapping-resolution-card" key={group.optimizationGroupId}>
+                          <strong>{group.name}</strong>
+                          <span>
+                            {group.combinedPartCount} combined part(s) from {group.sourceRowCount} source row(s) · {group.mergedRowCount} row(s) merged
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </article>
+                </div>
+              ) : null}
             </article>
           ) : null}
           <div className="module-panel__header">
@@ -2551,6 +2608,7 @@ export function ImportPage({
                 <thead>
                   <tr>
                     <th>Row</th>
+                    <th>Source</th>
                     <th>Part reference</th>
                     <th>Length</th>
                     <th>Width</th>
@@ -2585,6 +2643,9 @@ export function ImportPage({
                               </span>
                             </div>
                           </div>
+                        </td>
+                        <td title={formatSourceReferences(part)}>
+                          {formatSourceReferences(part)}
                         </td>
                         <td className="module-table__part">
                           {isEditing ? (

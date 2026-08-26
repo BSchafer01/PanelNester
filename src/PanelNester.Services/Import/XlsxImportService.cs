@@ -210,7 +210,7 @@ public sealed class XlsxImportService : IImportService
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                if (IsBlankRequiredRow(row, headerMap, columnPlan.FieldToSource))
+                if (IsBlankTableRegionRow(row, firstHeadingColumn, lastHeadingColumn))
                 {
                     continue;
                 }
@@ -304,10 +304,10 @@ public sealed class XlsxImportService : IImportService
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonicalRow)));
     }
 
-    private static bool IsBlankRequiredRow(
+    private static bool IsBlankTableRegionRow(
         IXLRow row,
-        IReadOnlyDictionary<string, int> headerMap,
-        IReadOnlyDictionary<string, string> fieldToSource) =>
-        ImportFieldNames.Required.All(field =>
-            string.IsNullOrWhiteSpace(GetCellText(row.Cell(headerMap[fieldToSource[field]]))));
+        int firstHeadingColumn,
+        int lastHeadingColumn) =>
+        Enumerable.Range(firstHeadingColumn, lastHeadingColumn - firstHeadingColumn + 1)
+            .All(columnNumber => string.IsNullOrWhiteSpace(GetCellText(row.Cell(columnNumber))));
 }

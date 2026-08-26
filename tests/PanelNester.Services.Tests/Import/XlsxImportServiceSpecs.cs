@@ -516,6 +516,54 @@ public sealed class XlsxImportServiceSpecs : IDisposable
         Assert.Equal(3, xlsxResponse.Parts[2].Quantity);
     }
 
+    [Fact]
+    public async Task Excel_import_reads_the_Table_Region_and_reports_physical_Worksheet_locations()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var xlsxPath = Path.Combine(_workspacePath, "table-region.xlsx");
+        using (var workbook = new XLWorkbook())
+        {
+            var sheet = workbook.AddWorksheet("Parts East");
+            string[] headings =
+                ["Id", "Length", "Width", "Quantity", "Material", "Group", "Sheet Number"];
+            for (var column = 0; column < headings.Length; column++)
+            {
+                sheet.Cell(2, column + 2).Value = headings[column];
+            }
+
+            WritePart(sheet, 3, 2, "P-001", 24, 12, 2, "Demo Material", "A", "S1");
+            sheet.Cell(4, 1).Value = "outside the Heading Range";
+            sheet.Cell(5, 7).Value = "A";
+            WritePart(sheet, 6, 2, "P-001", 24, 12, 3, "Demo Material", "A", "S1");
+            WritePart(sheet, 7, 2, "P-001", 24, 12, 4, "Demo Material", "B", "S1");
+            WritePart(sheet, 8, 2, "P-001", 24, 12, 5, "Demo Material", "A", "S2");
+            workbook.SaveAs(xlsxPath);
+        }
+
+        var response = await new XlsxImportService().ImportAsync(new ImportRequest
+        {
+            FilePath = xlsxPath,
+            WorksheetName = "Parts East",
+            HeadingRange = "B2:H2"
+        });
+
+        Assert.False(response.Success);
+        Assert.Equal(4, response.Parts.Count);
+        Assert.Equal(5, response.Parts[0].Quantity);
+        Assert.Equal([3, 6], response.Parts[0].SourceReferences.Select(reference => reference.PhysicalRow));
+        Assert.Equal("B", response.Parts[2].Group);
+        Assert.Equal("S2", response.Parts[3].SheetNumber);
+
+        var invalidSourceRow = response.Parts[1];
+        Assert.Equal(5, Assert.Single(invalidSourceRow.SourceReferences).PhysicalRow);
+        Assert.All(response.Errors.Where(error => error.RowId == invalidSourceRow.RowId), error =>
+        {
+            Assert.Equal("Parts East", error.Location?.WorksheetName);
+            Assert.Equal(1, error.Location?.WorksheetPosition);
+            Assert.Equal(5, error.Location?.PhysicalRow);
+        });
+    }
+
     private static ImportResponse WithoutSourceIdentity(ImportResponse response) =>
         response with
         {
@@ -523,6 +571,8 @@ public sealed class XlsxImportServiceSpecs : IDisposable
             AvailableColumns = Array.Empty<string>(),
             SourceColumns = Array.Empty<ImportSourceColumn>(),
             ColumnMappings = Array.Empty<ImportFieldMappingStatus>(),
+            Errors = response.Errors.Select(error => error with { Location = null }).ToArray(),
+            Warnings = response.Warnings.Select(warning => warning with { Location = null }).ToArray(),
             Parts = response.Parts.Select(part => part with
             {
                 SourceReferences = Array.Empty<SourceReference>()
@@ -542,6 +592,27 @@ public sealed class XlsxImportServiceSpecs : IDisposable
         worksheet.Cell(2, 3).Value = 10;
         worksheet.Cell(2, 4).Value = 1;
         worksheet.Cell(2, 5).Value = "Demo Material";
+    }
+
+    private static void WritePart(
+        IXLWorksheet worksheet,
+        int row,
+        int firstColumn,
+        string id,
+        decimal length,
+        decimal width,
+        int quantity,
+        string material,
+        string group,
+        string sheetNumber)
+    {
+        worksheet.Cell(row, firstColumn).Value = id;
+        worksheet.Cell(row, firstColumn + 1).Value = length;
+        worksheet.Cell(row, firstColumn + 2).Value = width;
+        worksheet.Cell(row, firstColumn + 3).Value = quantity;
+        worksheet.Cell(row, firstColumn + 4).Value = material;
+        worksheet.Cell(row, firstColumn + 5).Value = group;
+        worksheet.Cell(row, firstColumn + 6).Value = sheetNumber;
     }
 
     public void Dispose()

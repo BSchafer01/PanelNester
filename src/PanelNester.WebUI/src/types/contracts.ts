@@ -103,12 +103,20 @@ export interface ValidationError {
   code: string;
   message: string;
   rowId?: string;
+  location?: ValidationLocation | null;
 }
 
 export interface ValidationWarning {
   code: string;
   message: string;
   rowId?: string;
+  location?: ValidationLocation | null;
+}
+
+export interface ValidationLocation {
+  worksheetName: string;
+  worksheetPosition: number;
+  physicalRow: number;
 }
 
 export type ValidationStatus = 'valid' | 'warning' | 'error';
@@ -342,6 +350,28 @@ export interface ImportSessionResponse extends ImportFileResponse {
   finalized: boolean;
   project?: ProjectRecord | null;
   workbook?: WorkbookDiscovery | null;
+  previewSummary?: ImportPreviewSummary | null;
+}
+
+export interface ImportPreviewSummary {
+  worksheets: ImportWorksheetPreviewSummary[];
+  optimizationGroups: ImportOptimizationGroupPreviewSummary[];
+}
+
+export interface ImportWorksheetPreviewSummary {
+  worksheetName: string;
+  originalPosition: number;
+  sourceRowCount: number;
+  importedPartCount: number;
+  issueCount: number;
+}
+
+export interface ImportOptimizationGroupPreviewSummary {
+  optimizationGroupId: string;
+  name: string;
+  sourceRowCount: number;
+  combinedPartCount: number;
+  mergedRowCount: number;
 }
 
 export interface CancelImportSessionResponse {

@@ -416,6 +416,8 @@ public sealed record ImportSessionResponse(
 
     public ImportWorksheetDescriptor? Worksheet { get; init; }
 
+    public ImportPreviewSummary? PreviewSummary { get; init; }
+
     public static ImportSessionResponse Failure(
         string sessionId,
         string? importSourcePath,

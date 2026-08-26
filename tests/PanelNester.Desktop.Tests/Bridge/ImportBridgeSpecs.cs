@@ -128,6 +128,102 @@ public sealed class ImportBridgeSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Excel_session_combines_only_compatible_rows_within_each_Optimization_Group_and_summarizes_the_result()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "combined-worksheets.xlsx");
+        using (var workbook = new XLWorkbook())
+        {
+            var first = workbook.AddWorksheet("First");
+            WriteWorkbookWorksheet(first, "P-001", "Demo Material");
+            first.Cell("F1").Value = "Group";
+            first.Cell("F2").Value = "A";
+
+            var second = workbook.AddWorksheet("Second");
+            WriteWorkbookWorksheet(second, "P-001", "Demo Material");
+            second.Cell("D2").Value = 2;
+            second.Cell("F1").Value = "Group";
+            second.Cell("F2").Value = "A";
+            second.Cell("A3").Value = "P-001";
+            second.Cell("B3").Value = 20;
+            second.Cell("C3").Value = 10;
+            second.Cell("D3").Value = 4;
+            second.Cell("E3").Value = "Demo Material";
+            second.Cell("F3").Value = "B";
+
+            var third = workbook.AddWorksheet("Third");
+            WriteWorkbookWorksheet(third, "P-002", "Demo Material");
+            workbook.SaveAs(workbookPath);
+        }
+
+        var dispatcher = CreateDispatcher();
+        const string sessionId = "combined-worksheets-session";
+        var started = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest { SessionId = sessionId, ImportSourcePath = workbookPath });
+        Assert.True(started.Success);
+
+        var finalized = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.FinalizeImportSession,
+            new FinalizeImportSessionRequest
+            {
+                SessionId = sessionId,
+                Project = new Project { ProjectId = "combined-worksheet-project" },
+                Worksheets =
+                [
+                    new ImportWorksheetSelection
+                    {
+                        WorksheetName = "First",
+                        OriginalPosition = 1,
+                        OptimizationGroupId = "combined",
+                        OptimizationGroupName = "Combined"
+                    },
+                    new ImportWorksheetSelection
+                    {
+                        WorksheetName = "Second",
+                        OriginalPosition = 2,
+                        OptimizationGroupId = "combined",
+                        OptimizationGroupName = "Combined"
+                    },
+                    new ImportWorksheetSelection
+                    {
+                        WorksheetName = "Third",
+                        OriginalPosition = 3,
+                        OptimizationGroupId = "isolated",
+                        OptimizationGroupName = "Isolated"
+                    }
+                ]
+            });
+
+        Assert.True(finalized.Success);
+        var project = Assert.IsType<Project>(finalized.Project);
+        var combinedGroup = Assert.Single(
+            project.State.OptimizationGroups,
+            group => group.OptimizationGroupId == "combined");
+        Assert.Equal(2, combinedGroup.Parts.Count);
+        var mergedPart = Assert.Single(combinedGroup.Parts, part => part.Group == "A");
+        Assert.Equal(3, mergedPart.Quantity);
+        Assert.Equal(
+            ["First!2", "Second!2"],
+            mergedPart.SourceReferences.Select(reference => $"{reference.WorksheetName}!{reference.PhysicalRow}"));
+        Assert.Equal("B", Assert.Single(combinedGroup.Parts, part => part.Group == "B").Group);
+        Assert.Single(
+            project.State.OptimizationGroups,
+            group => group.OptimizationGroupId == "isolated");
+
+        var summary = Assert.IsType<ImportPreviewSummary>(finalized.PreviewSummary);
+        Assert.Equal(
+            [("First", 1, 0), ("Second", 2, 1), ("Third", 1, 0)],
+            summary.Worksheets.Select(item => (item.WorksheetName, item.SourceRowCount, item.IssueCount)));
+        Assert.Equal(
+            [("combined", 3, 2, 1), ("isolated", 1, 1, 0)],
+            summary.OptimizationGroups.Select(item =>
+                (item.OptimizationGroupId, item.SourceRowCount, item.CombinedPartCount, item.MergedRowCount)));
+    }
+
+    [Fact]
     public async Task Excel_session_previews_and_persists_the_explicit_A1_Heading_Range()
     {
         Directory.CreateDirectory(_workspacePath);
