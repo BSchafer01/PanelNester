@@ -72,6 +72,7 @@ internal sealed class ImportSessionCoordinator
     public async Task<ImportSessionResult> PreviewAsync(
         string sessionId,
         ImportOptions? options,
+        IReadOnlyList<ImportNewMaterialRequest> newMaterials,
         string? worksheetName,
         string? headingRange,
         CancellationToken cancellationToken)
@@ -80,7 +81,7 @@ internal sealed class ImportSessionCoordinator
         try
         {
             var response = await ImportSnapshotAsync(session, options, worksheetName, headingRange, cancellationToken).ConfigureAwait(false);
-            session.RecordWorksheetPreview(worksheetName, response);
+            session.RecordWorksheetPreview(worksheetName, options, newMaterials, response);
             return new ImportSessionResult(session.ImportSource, response);
         }
         catch
@@ -320,7 +321,11 @@ internal sealed class ImportSessionCoordinator
             }
         }
 
-        public void RecordWorksheetPreview(string? requestedWorksheetName, ImportResponse response)
+        public void RecordWorksheetPreview(
+            string? requestedWorksheetName,
+            ImportOptions? options,
+            IReadOnlyList<ImportNewMaterialRequest> newMaterials,
+            ImportResponse response)
         {
             lock (_gate)
             {
@@ -336,25 +341,38 @@ internal sealed class ImportSessionCoordinator
                 {
                     return;
                 }
+                var materialResolutions = BuildReadyMaterialResolutions(
+                    response,
+                    newMaterials);
+                if (materialResolutions is null)
+                {
+                    return;
+                }
 
                 _readyWorksheetPreviews[worksheet.WorksheetName] = new ReadyWorksheetPreview(
                     worksheet.WorksheetName,
                     worksheet.OriginalPosition,
                     worksheet.HeadingRange,
-                    BuildColumnMappingSignature(response.ColumnMappings));
+                    BuildColumnMappingSignature(response.ColumnMappings.Select(mapping =>
+                        (mapping.TargetField, mapping.SourceColumn))),
+                    materialResolutions);
             }
         }
 
-        public void EnsureWorksheetReady(ImportWorksheetSelection selection)
+        public void EnsureWorksheetReady(
+            ImportWorksheetSelection selection,
+            IReadOnlyList<ImportNewMaterialRequest> newMaterials)
         {
             lock (_gate)
             {
                 var mappingSignature = BuildColumnMappingSignature(
-                    selection.Options?.ColumnMappings ?? Array.Empty<ImportColumnMapping>());
+                    (selection.Options?.ColumnMappings ?? Array.Empty<ImportColumnMapping>())
+                        .Select(mapping => (mapping.TargetField, (string?)mapping.SourceColumn)));
                 if (!_readyWorksheetPreviews.TryGetValue(selection.WorksheetName, out var preview) ||
                     preview.OriginalPosition != selection.OriginalPosition ||
                     !string.Equals(preview.HeadingRange, selection.HeadingRange, StringComparison.OrdinalIgnoreCase) ||
-                    !string.Equals(preview.ColumnMappingSignature, mappingSignature, StringComparison.Ordinal))
+                    !string.Equals(preview.ColumnMappingSignature, mappingSignature, StringComparison.Ordinal) ||
+                    !MaterialResolutionsMatch(preview.MaterialResolutions, selection.Options, newMaterials))
                 {
                     throw new ImportSessionException(
                         "import-worksheet-not-ready",
@@ -433,30 +451,138 @@ internal sealed class ImportSessionCoordinator
         }
 
         private static string BuildColumnMappingSignature(
-            IEnumerable<ImportFieldMappingStatus> mappings) =>
-            string.Join(
-                '\u001f',
-                mappings
-                    .Where(mapping => !string.IsNullOrWhiteSpace(mapping.SourceColumn))
-                    .Select(mapping => $"{mapping.TargetField}\u001e{mapping.SourceColumn!.Trim()}")
-                    .OrderBy(value => value, StringComparer.Ordinal));
-
-        private static string BuildColumnMappingSignature(
-            IEnumerable<ImportColumnMapping> mappings) =>
+            IEnumerable<(string TargetField, string? SourceColumn)> mappings) =>
             string.Join(
                 '\u001f',
                 mappings
                     .Where(mapping =>
                         !string.IsNullOrWhiteSpace(mapping.TargetField) &&
                         !string.IsNullOrWhiteSpace(mapping.SourceColumn))
-                    .Select(mapping => $"{mapping.TargetField.Trim()}\u001e{mapping.SourceColumn.Trim()}")
+                    .Select(mapping => $"{mapping.TargetField.Trim()}\u001e{mapping.SourceColumn!.Trim()}")
                     .OrderBy(value => value, StringComparer.Ordinal));
+
+        private static IReadOnlyList<ReadyMaterialResolution>? BuildReadyMaterialResolutions(
+            ImportResponse response,
+            IReadOnlyList<ImportNewMaterialRequest> newMaterials)
+        {
+            var hasMaterialErrors = false;
+            foreach (var error in response.Errors)
+            {
+                if (!string.Equals(error.Code, "material-not-found", StringComparison.Ordinal))
+                {
+                    return null;
+                }
+
+                hasMaterialErrors = true;
+            }
+
+            var plannedMaterials = newMaterials
+                .Where(material =>
+                    !string.IsNullOrWhiteSpace(material.SourceMaterialName) &&
+                    material.Material is not null)
+                .GroupBy(material => material.SourceMaterialName.Trim(), StringComparer.Ordinal)
+                .ToDictionary(group => group.Key, group => group.First().Material!, StringComparer.Ordinal);
+            var ready = new List<ReadyMaterialResolution>();
+            var hasUnresolvedResolution = false;
+            foreach (var resolution in response.MaterialResolutions)
+            {
+                var sourceName = resolution.SourceMaterialName.Trim();
+                if (!string.IsNullOrWhiteSpace(resolution.ResolvedMaterialId))
+                {
+                    ready.Add(new ReadyMaterialResolution(
+                        sourceName,
+                        "resolved",
+                        resolution.ResolvedMaterialId));
+                    continue;
+                }
+
+                if (plannedMaterials.TryGetValue(sourceName, out var plannedMaterial))
+                {
+                    hasUnresolvedResolution = true;
+                    ready.Add(new ReadyMaterialResolution(
+                        sourceName,
+                        "new",
+                        SerializeMaterialDefinition(plannedMaterial)));
+                    continue;
+                }
+
+                return null;
+            }
+
+            if (hasMaterialErrors && !hasUnresolvedResolution)
+            {
+                return null;
+            }
+
+            return ready;
+        }
+
+        private static bool MaterialResolutionsMatch(
+            IReadOnlyList<ReadyMaterialResolution> previewResolutions,
+            ImportOptions? options,
+            IReadOnlyList<ImportNewMaterialRequest> newMaterials)
+        {
+            var explicitMappings = (options?.MaterialMappings ?? Array.Empty<ImportMaterialMapping>())
+                .Where(mapping =>
+                    !string.IsNullOrWhiteSpace(mapping.SourceMaterialName) &&
+                    !string.IsNullOrWhiteSpace(mapping.TargetMaterialId))
+                .GroupBy(mapping => mapping.SourceMaterialName.Trim(), StringComparer.Ordinal)
+                .ToDictionary(group => group.Key, group => group.First().TargetMaterialId!, StringComparer.Ordinal);
+            var plannedMaterials = newMaterials
+                .Where(material =>
+                    !string.IsNullOrWhiteSpace(material.SourceMaterialName) &&
+                    material.Material is not null)
+                .GroupBy(material => material.SourceMaterialName.Trim(), StringComparer.Ordinal)
+                .ToDictionary(group => group.Key, group => group.First().Material!, StringComparer.Ordinal);
+
+            foreach (var preview in previewResolutions)
+            {
+                if (explicitMappings.TryGetValue(preview.SourceMaterialName, out var targetMaterialId))
+                {
+                    if (preview.Kind != "resolved" ||
+                        !string.Equals(preview.Value, targetMaterialId, StringComparison.Ordinal))
+                    {
+                        return false;
+                    }
+                    continue;
+                }
+
+                if (plannedMaterials.TryGetValue(preview.SourceMaterialName, out var plannedMaterial))
+                {
+                    if (preview.Kind != "new" ||
+                        !string.Equals(
+                            preview.Value,
+                            SerializeMaterialDefinition(plannedMaterial),
+                            StringComparison.Ordinal))
+                    {
+                        return false;
+                    }
+                    continue;
+                }
+
+                if (preview.Kind != "resolved")
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static string SerializeMaterialDefinition(Material material) =>
+            System.Text.Json.JsonSerializer.Serialize(material, BridgeJson.SerializerOptions);
 
         private sealed record ReadyWorksheetPreview(
             string WorksheetName,
             int OriginalPosition,
             string HeadingRange,
-            string ColumnMappingSignature);
+            string ColumnMappingSignature,
+            IReadOnlyList<ReadyMaterialResolution> MaterialResolutions);
+
+        private sealed record ReadyMaterialResolution(
+            string SourceMaterialName,
+            string Kind,
+            string? Value);
     }
 
     internal sealed class ImportSessionFinalization : IDisposable
@@ -496,10 +622,12 @@ internal sealed class ImportSessionCoordinator
             return new ImportSessionResult(_session.ImportSource, response);
         }
 
-        public void EnsureWorksheetReady(ImportWorksheetSelection selection)
+        public void EnsureWorksheetReady(
+            ImportWorksheetSelection selection,
+            IReadOnlyList<ImportNewMaterialRequest> newMaterials)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            _session.EnsureWorksheetReady(selection);
+            _session.EnsureWorksheetReady(selection, newMaterials);
         }
 
         public void Dispose()

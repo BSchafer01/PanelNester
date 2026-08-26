@@ -325,6 +325,7 @@ public static class DesktopBridgeRegistration
                         .PreviewAsync(
                             request.SessionId,
                             request.Options,
+                            request.NewMaterials,
                             request.WorksheetName,
                             request.HeadingRange,
                             cancellationToken)
@@ -392,10 +393,6 @@ public static class DesktopBridgeRegistration
                         var orderedSelections = request.Worksheets
                             .OrderBy(selection => selection.OriginalPosition)
                             .ToArray();
-                        foreach (var selection in orderedSelections)
-                        {
-                            finalization.EnsureWorksheetReady(selection);
-                        }
                         var conflictingMaterialLabel = FindConflictingMaterialResolution(
                             orderedSelections,
                             request.NewMaterials);
@@ -407,6 +404,10 @@ public static class DesktopBridgeRegistration
                                 ImportSessionPhase.Failed,
                                 "import-material-resolution-conflict",
                                 $"Material label '{conflictingMaterialLabel}' has conflicting resolutions across the Workbook.");
+                        }
+                        foreach (var selection in orderedSelections)
+                        {
+                            finalization.EnsureWorksheetReady(selection, request.NewMaterials);
                         }
 
                         var workbookPreparation = await PrepareImportOptionsAsync(

@@ -3474,6 +3474,7 @@ export default function App() {
               await hostBridge.previewImportSession({
                 sessionId: session.sessionId,
                 options: session.options,
+                newMaterials: session.newMaterials,
                 worksheetName: session.activeWorksheetName ?? null,
                 headingRange:
                   session.worksheets?.find(

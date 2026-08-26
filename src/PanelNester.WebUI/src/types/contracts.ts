@@ -313,6 +313,7 @@ export interface BeginImportSessionRequest {
 export interface PreviewImportSessionRequest {
   sessionId: string;
   options?: ImportOptions | null;
+  newMaterials?: ImportNewMaterialRequest[];
   worksheetName?: string | null;
   headingRange?: string | null;
 }

@@ -58,7 +58,7 @@ public sealed class PartRowValidator
         var rowId = string.IsNullOrWhiteSpace(update.RowId)
             ? $"row-{rowIndex}"
             : update.RowId.Trim();
-        var location = CreateValidationLocation(update.SourceReferences.FirstOrDefault());
+        WorksheetRowLocation? location = update.SourceReferences.FirstOrDefault();
         var rowErrors = new List<string>();
         var rowWarnings = new List<string>();
 
@@ -221,9 +221,6 @@ public sealed class PartRowValidator
 
         return value;
     }
-
-    private static WorksheetRowLocation? CreateValidationLocation(SourceReference? sourceReference) =>
-        sourceReference;
 
     private static string? NormalizeOptional(string? value)
     {

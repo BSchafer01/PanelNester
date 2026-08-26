@@ -383,6 +383,106 @@ public sealed class ImportBridgeSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Excel_session_rejects_a_Material_Resolution_changed_after_preview()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "changed-material-resolution.xlsx");
+        WriteWorkbook(workbookPath, "Demo Material");
+        var dispatcher = CreateDispatcher();
+        const string sessionId = "changed-material-resolution-session";
+        var started = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest { SessionId = sessionId, ImportSourcePath = workbookPath });
+        Assert.True(started.Success);
+        var selection = await PreviewWorksheetSelectionAsync(
+            dispatcher, sessionId, "Parts", 1, "parts", "Parts");
+
+        var finalized = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.FinalizeImportSession,
+            new FinalizeImportSessionRequest
+            {
+                SessionId = sessionId,
+                Project = new Project { ProjectId = "changed-material-resolution-project" },
+                Worksheets =
+                [
+                    selection with
+                    {
+                        Options = selection.Options! with
+                        {
+                            MaterialMappings =
+                            [
+                                new ImportMaterialMapping
+                                {
+                                    SourceMaterialName = "Demo Material",
+                                    TargetMaterialId = "different-material"
+                                }
+                            ]
+                        }
+                    }
+                ]
+            });
+
+        Assert.False(finalized.Success);
+        Assert.Equal("import-worksheet-not-ready", finalized.Error?.Code);
+    }
+
+    [Fact]
+    public async Task Excel_session_accepts_an_unresolved_preview_only_with_the_same_staged_new_Material()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "staged-new-material.xlsx");
+        WriteWorkbook(workbookPath, "New Workbook Material");
+        var dispatcher = CreateDispatcher();
+        const string sessionId = "staged-new-material-session";
+        var stagedMaterial = new ImportNewMaterialRequest
+        {
+            SourceMaterialName = "New Workbook Material",
+            Material = new Material
+            {
+                Name = "Created Workbook Material",
+                SheetLength = 96,
+                SheetWidth = 48,
+                AllowRotation = true
+            }
+        };
+        var started = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest { SessionId = sessionId, ImportSourcePath = workbookPath });
+        Assert.True(started.Success);
+        var preview = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.PreviewImportSession,
+            new PreviewImportSessionRequest
+            {
+                SessionId = sessionId,
+                WorksheetName = "Parts",
+                HeadingRange = "A1:E1",
+                Options = RequiredWorkbookOptions(),
+                NewMaterials = [stagedMaterial]
+            });
+        Assert.False(preview.Success);
+        Assert.All(preview.Errors, error => Assert.Equal("material-not-found", error.Code));
+        var selection = SelectionFromPreview(preview, "parts", "Parts", RequiredWorkbookOptions());
+
+        var finalized = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.FinalizeImportSession,
+            new FinalizeImportSessionRequest
+            {
+                SessionId = sessionId,
+                Project = new Project { ProjectId = "staged-new-material-project" },
+                NewMaterials = [stagedMaterial],
+                Worksheets = [selection]
+            });
+
+        Assert.True(finalized.Success);
+        Assert.Equal("Created Workbook Material", Assert.Single(finalized.Parts).MaterialName);
+    }
+
+    [Fact]
     public async Task Excel_session_rejects_conflicting_Workbook_wide_Material_Resolutions()
     {
         Directory.CreateDirectory(_workspacePath);

@@ -341,6 +341,9 @@ public sealed record PreviewImportSessionRequest
 
     public ImportOptions? Options { get; init; }
 
+    public IReadOnlyList<ImportNewMaterialRequest> NewMaterials { get; init; } =
+        Array.Empty<ImportNewMaterialRequest>();
+
     public string? WorksheetName { get; init; }
 
     public string? HeadingRange { get; init; }
