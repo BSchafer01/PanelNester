@@ -6,7 +6,7 @@ using PanelNester.Domain.Models;
 
 namespace PanelNester.Services.Import;
 
-public sealed class XlsxImportService : IImportService
+public sealed class XlsxImportService : IImportService, IWorkbookImportProgressService
 {
     private readonly IReadOnlyList<Material> _fallbackMaterials;
     private readonly ImportMappingResolver _mappingResolver;
@@ -42,7 +42,21 @@ public sealed class XlsxImportService : IImportService
         _progress = progress;
     }
 
-    public async Task<ImportResponse> ImportAsync(ImportRequest request, CancellationToken cancellationToken = default)
+    public Task<ImportResponse> ImportAsync(
+        ImportRequest request,
+        CancellationToken cancellationToken = default) =>
+        ImportWithProgressAsync(request, _progress, cancellationToken);
+
+    public Task<ImportResponse> ImportAsync(
+        ImportRequest request,
+        IProgress<WorkbookImportProgress> progress,
+        CancellationToken cancellationToken = default) =>
+        ImportWithProgressAsync(request, progress, cancellationToken);
+
+    private async Task<ImportResponse> ImportWithProgressAsync(
+        ImportRequest request,
+        IProgress<WorkbookImportProgress>? progress,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -108,7 +122,7 @@ public sealed class XlsxImportService : IImportService
                 []);
         }
 
-        _progress?.Report(new WorkbookImportProgress
+        progress?.Report(new WorkbookImportProgress
         {
             Phase = WorkbookImportPhase.Preflight,
             Label = "Checking Workbook safety",
@@ -120,7 +134,7 @@ public sealed class XlsxImportService : IImportService
 
         try
         {
-            _progress?.Report(new WorkbookImportProgress
+            progress?.Report(new WorkbookImportProgress
             {
                 Phase = WorkbookImportPhase.OpeningWorkbook,
                 Label = "Opening workbook",
@@ -155,7 +169,7 @@ public sealed class XlsxImportService : IImportService
                 .OrderBy(sheet => sheet.Position)
                 .TakeWhile(sheet => sheet.Position != worksheet.Position)
                 .Count() + 1;
-            _progress?.Report(new WorkbookImportProgress
+            progress?.Report(new WorkbookImportProgress
             {
                 Phase = WorkbookImportPhase.ReadingWorksheet,
                 Label = $"Reading Worksheet {visibleWorksheetNumber} of {visibleWorksheets}",
@@ -353,7 +367,7 @@ public sealed class XlsxImportService : IImportService
             }
 
             cancellationToken.ThrowIfCancellationRequested();
-            _progress?.Report(new WorkbookImportProgress
+            progress?.Report(new WorkbookImportProgress
             {
                 Phase = WorkbookImportPhase.Validating,
                 Label = "Validating",
@@ -362,7 +376,7 @@ public sealed class XlsxImportService : IImportService
             });
             var materialPlan = _mappingResolver.ResolveMaterials(rowUpdates, knownMaterials, request.Options, errors);
             cancellationToken.ThrowIfCancellationRequested();
-            _progress?.Report(new WorkbookImportProgress
+            progress?.Report(new WorkbookImportProgress
             {
                 Phase = WorkbookImportPhase.CombiningParts,
                 Label = "Combining parts",

@@ -3,7 +3,7 @@ using PanelNester.Domain.Models;
 
 namespace PanelNester.Services.Import;
 
-public sealed class FileImportDispatcher : IImportService
+public sealed class FileImportDispatcher : IImportService, IWorkbookImportProgressService
 {
     private readonly IImportService _csvImportService;
     private readonly IImportService _xlsxImportService;
@@ -45,6 +45,19 @@ public sealed class FileImportDispatcher : IImportService
         ImportOptions? options = null,
         CancellationToken cancellationToken = default) =>
         _csvImportService.ImportAsync(reader, options, cancellationToken);
+
+    public Task<ImportResponse> ImportAsync(
+        ImportRequest request,
+        IProgress<WorkbookImportProgress> progress,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(progress);
+        var importService = ResolveByExtension(request.FilePath);
+        return importService is IWorkbookImportProgressService workbookService
+            ? workbookService.ImportAsync(request, progress, cancellationToken)
+            : ImportAsync(request, cancellationToken);
+    }
 
     private IImportService? ResolveByExtension(string filePath)
     {

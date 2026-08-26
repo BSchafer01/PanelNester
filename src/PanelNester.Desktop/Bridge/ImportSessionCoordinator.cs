@@ -181,15 +181,22 @@ internal sealed class ImportSessionCoordinator
         var response = await WithSnapshotFileAsync(
             session,
             operationToken,
-            snapshotPath => _importService.ImportAsync(
-                new ImportRequest
+            snapshotPath =>
+            {
+                var request = new ImportRequest
                 {
                     FilePath = snapshotPath,
                     Options = options ?? new ImportOptions(),
                     WorksheetName = worksheetName,
                     HeadingRange = headingRange
-                },
-                operationToken)).ConfigureAwait(false);
+                };
+                return _importService is IWorkbookImportProgressService progressService
+                    ? progressService.ImportAsync(
+                        request,
+                        new InlineProgress<WorkbookImportProgress>(session.ReportImportServiceProgress),
+                        operationToken)
+                    : _importService.ImportAsync(request, operationToken);
+            }).ConfigureAwait(false);
 
         return RestoreImportSourceIdentity(session, response);
     }
@@ -476,6 +483,26 @@ internal sealed class ImportSessionCoordinator
                 index >= 0 ? index + 1 : null,
                 worksheets.Count > 0 ? worksheets.Count : null,
                 worksheetName);
+        }
+
+        public void ReportImportServiceProgress(WorkbookImportProgress progress)
+        {
+            if (progress.Phase != WorkbookImportPhase.Validating)
+            {
+                return;
+            }
+
+            WorkbookImportProgress? current;
+            lock (_gate)
+            {
+                current = _progress;
+            }
+            ReportProgress(
+                WorkbookImportPhase.Validating,
+                progress.Label,
+                current?.Current,
+                current?.Total,
+                progress.WorksheetName ?? current?.WorksheetName);
         }
 
         public void ReportProgress(
@@ -923,4 +950,9 @@ internal sealed record ImportSessionProgressSnapshot(
 internal sealed class ImportSessionException(string code, string message) : Exception(message)
 {
     public string Code { get; } = code;
+}
+
+internal sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
+{
+    public void Report(T value) => report(value);
 }

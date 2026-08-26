@@ -15,10 +15,11 @@ try
 
     await RunImportProfileAsync("large", quick ? 10_000 : 75_000, 5, 1);
     await RunImportProfileAsync("wide", quick ? 500 : 5_000, quick ? 50 : 200, 1);
-    await RunManyWorksheetProfileAsync(
+    await RunImportProfileAsync(
         "many-worksheets",
-        worksheetCount: quick ? 25 : 200,
-        rowsPerWorksheet: quick ? 20 : 100);
+        rows: quick ? 20 : 100,
+        columns: 5,
+        worksheetCount: quick ? 25 : 200);
     await RunCompressedProfileAsync("highly-compressed", quick ? 16 : 128, quick ? 1 : 1);
     await RunCompressedProfileAsync("pathological", quick ? 32 : 600, 0);
 }
@@ -77,9 +78,6 @@ async Task RunImportProfileAsync(
     });
 }
 
-Task RunManyWorksheetProfileAsync(string name, int worksheetCount, int rowsPerWorksheet) =>
-    RunImportProfileAsync(name, rowsPerWorksheet, columns: 5, worksheetCount);
-
 async Task RunCompressedProfileAsync(string name, int repeatedMiB, int randomMiB)
 {
     var path = Path.Combine(root, $"{name}.xlsx");
@@ -106,10 +104,21 @@ async Task RunCompressedProfileAsync(string name, int repeatedMiB, int randomMiB
         }
     }
 
-    await MeasureAsync(name, path, cancellationToken =>
+    await MeasureAsync(name, path, async cancellationToken =>
     {
-        WorkbookPackagePreflight.Inspect(path, cancellationToken: cancellationToken);
-        return Task.CompletedTask;
+        var response = await new XlsxImportService(DemoMaterialCatalog.All).ImportAsync(
+            new ImportRequest { FilePath = path, WorksheetName = "Parts" },
+            cancellationToken);
+        var safetyError = response.Errors.FirstOrDefault(error =>
+            error.Code == "workbook-safety-ceiling-exceeded");
+        if (safetyError is not null)
+        {
+            throw new WorkbookSafetyException(safetyError.Message);
+        }
+        if (!response.Success)
+        {
+            throw new InvalidOperationException(response.Errors.First().Message);
+        }
     });
 }
 

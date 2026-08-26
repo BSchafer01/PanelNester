@@ -460,12 +460,6 @@ public static class DesktopBridgeRegistration
                                     selection.WorksheetName,
                                     selection.HeadingRange)
                                 .ConfigureAwait(false);
-                            finalization.ReportProgress(
-                                WorkbookImportPhase.Validating,
-                                "Validating",
-                                selectionIndex + 1,
-                                orderedSelections.Length,
-                                selection.WorksheetName);
                             var importedWorksheet = worksheetResult.Response.Worksheet;
                             var normalizedSelection = importedWorksheet is null
                                 ? selection
