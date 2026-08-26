@@ -76,7 +76,7 @@ internal static class ProjectImportFinalizer
             .Select(group => UpdateParts(group, CombineCompatibleImportedParts(group.Parts)))
             .Select((group, order) => group with { Order = order })
             .ToArray();
-        var allParts = normalizedGroups
+        var importedParts = normalizedGroups
             .SelectMany(group => group.Parts)
             .Where(part => !part.IsManual)
             .ToArray();
@@ -124,7 +124,7 @@ internal static class ProjectImportFinalizer
                 SourceFilePath = importSource.ImportSourcePath,
                 ImportSource = importSource,
                 ImportConfiguration = configuration,
-                Parts = allParts,
+                Parts = importedParts,
                 OptimizationGroups = normalizedGroups,
                 LastNestingResult = compatibilityGroup?.LastNestingResult,
                 LastBatchNestingResult = compatibilityGroup?.LastBatchNestingResult

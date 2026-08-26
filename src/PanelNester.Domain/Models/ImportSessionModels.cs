@@ -90,13 +90,17 @@ public sealed record WorkbookDiscovery
     public bool MacrosPresent { get; init; }
 }
 
-public sealed record SourceReference
+public record WorksheetRowLocation
 {
     public string WorksheetName { get; init; } = string.Empty;
 
     public int WorksheetPosition { get; init; }
 
     public int PhysicalRow { get; init; }
+}
+
+public sealed record SourceReference : WorksheetRowLocation
+{
 
     public string SourceFingerprint { get; init; } = string.Empty;
 }

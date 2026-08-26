@@ -103,17 +103,17 @@ export interface ValidationError {
   code: string;
   message: string;
   rowId?: string;
-  location?: ValidationLocation | null;
+  location?: WorksheetRowLocation | null;
 }
 
 export interface ValidationWarning {
   code: string;
   message: string;
   rowId?: string;
-  location?: ValidationLocation | null;
+  location?: WorksheetRowLocation | null;
 }
 
-export interface ValidationLocation {
+export interface WorksheetRowLocation {
   worksheetName: string;
   worksheetPosition: number;
   physicalRow: number;
@@ -141,10 +141,7 @@ export interface PartRow {
   sourceReferences?: SourceReference[];
 }
 
-export interface SourceReference {
-  worksheetName: string;
-  worksheetPosition: number;
-  physicalRow: number;
+export interface SourceReference extends WorksheetRowLocation {
   sourceFingerprint: string;
 }
 

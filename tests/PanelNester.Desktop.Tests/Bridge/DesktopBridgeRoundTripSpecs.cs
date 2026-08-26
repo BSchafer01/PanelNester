@@ -322,6 +322,9 @@ public sealed class DesktopBridgeRoundTripSpecs : IDisposable
             BridgeMessageTypes.BeginImportSession,
             new BeginImportSessionRequest { SessionId = sessionId, ImportSourcePath = workbookPath });
         Assert.True(begun.Success);
+        var east = await PreviewWorksheetAsync(dispatcher, sessionId, "East", 1, "facades", "Facades");
+        var west = await PreviewWorksheetAsync(dispatcher, sessionId, "West", 2, "facades", "Facades");
+        var service = await PreviewWorksheetAsync(dispatcher, sessionId, "Service", 3, "service", "Service");
 
         var finalized = await DispatchAsync<ImportSessionResponse>(
             dispatcher,
@@ -336,9 +339,9 @@ public sealed class DesktopBridgeRoundTripSpecs : IDisposable
                 },
                 Worksheets =
                 [
-                    SelectWorksheet("East", 1, "facades", "Facades"),
-                    SelectWorksheet("West", 2, "facades", "Facades"),
-                    SelectWorksheet("Service", 3, "service", "Service")
+                    east,
+                    west,
+                    service
                 ]
             });
         Assert.True(finalized.Success);
@@ -455,18 +458,47 @@ public sealed class DesktopBridgeRoundTripSpecs : IDisposable
             ]
         };
 
-    private static ImportWorksheetSelection SelectWorksheet(
+    private static async Task<ImportWorksheetSelection> PreviewWorksheetAsync(
+        BridgeMessageDispatcher dispatcher,
+        string sessionId,
         string worksheetName,
         int originalPosition,
         string optimizationGroupId,
-        string optimizationGroupName) =>
-        new()
+        string optimizationGroupName)
+    {
+        var options = new ImportOptions
+        {
+            ColumnMappings =
+            [
+                new ImportColumnMapping { SourceColumn = "A", TargetField = ImportFieldNames.Id },
+                new ImportColumnMapping { SourceColumn = "B", TargetField = ImportFieldNames.Length },
+                new ImportColumnMapping { SourceColumn = "C", TargetField = ImportFieldNames.Width },
+                new ImportColumnMapping { SourceColumn = "D", TargetField = ImportFieldNames.Quantity },
+                new ImportColumnMapping { SourceColumn = "E", TargetField = ImportFieldNames.Material }
+            ]
+        };
+        var preview = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.PreviewImportSession,
+            new PreviewImportSessionRequest
+            {
+                SessionId = sessionId,
+                WorksheetName = worksheetName,
+                HeadingRange = "A1:E1",
+                Options = options
+            });
+        Assert.True(preview.Success);
+        Assert.Equal(originalPosition, preview.Worksheet?.OriginalPosition);
+        return new ImportWorksheetSelection
         {
             WorksheetName = worksheetName,
             OriginalPosition = originalPosition,
+            HeadingRange = "A1:E1",
+            Options = options,
             OptimizationGroupId = optimizationGroupId,
             OptimizationGroupName = optimizationGroupName
         };
+    }
 
     private static void WriteWorksheet(IXLWorksheet worksheet, string partId, int quantity)
     {

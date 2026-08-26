@@ -79,6 +79,10 @@ public sealed class ImportBridgeSpecs : IDisposable
         Assert.Contains(
             preview.ColumnMappings,
             mapping => mapping.TargetField == ImportFieldNames.Id && mapping.SourceColumn == "A");
+        var firstSelection = await PreviewWorksheetSelectionAsync(
+            dispatcher, sessionId, "First", 1, "combined", "Combined");
+        var thirdSelection = await PreviewWorksheetSelectionAsync(
+            dispatcher, sessionId, "Third", 3, "combined", "Combined");
 
         var finalized = await DispatchAsync<ImportSessionResponse>(
             dispatcher,
@@ -89,20 +93,8 @@ public sealed class ImportBridgeSpecs : IDisposable
                 Project = new Project { ProjectId = "worksheet-project" },
                 Worksheets =
                 [
-                    new ImportWorksheetSelection
-                    {
-                        WorksheetName = "Third",
-                        OriginalPosition = 3,
-                        OptimizationGroupId = "combined",
-                        OptimizationGroupName = "Combined"
-                    },
-                    new ImportWorksheetSelection
-                    {
-                        WorksheetName = "First",
-                        OriginalPosition = 1,
-                        OptimizationGroupId = "combined",
-                        OptimizationGroupName = "Combined"
-                    }
+                    thirdSelection,
+                    firstSelection
                 ]
             });
 
@@ -163,6 +155,12 @@ public sealed class ImportBridgeSpecs : IDisposable
             BridgeMessageTypes.BeginImportSession,
             new BeginImportSessionRequest { SessionId = sessionId, ImportSourcePath = workbookPath });
         Assert.True(started.Success);
+        var firstSelection = await PreviewWorksheetSelectionAsync(
+            dispatcher, sessionId, "First", 1, "combined", "Combined", "A1:F1");
+        var secondSelection = await PreviewWorksheetSelectionAsync(
+            dispatcher, sessionId, "Second", 2, "combined", "Combined", "A1:F1");
+        var thirdSelection = await PreviewWorksheetSelectionAsync(
+            dispatcher, sessionId, "Third", 3, "isolated", "Isolated");
 
         var finalized = await DispatchAsync<ImportSessionResponse>(
             dispatcher,
@@ -173,27 +171,9 @@ public sealed class ImportBridgeSpecs : IDisposable
                 Project = new Project { ProjectId = "combined-worksheet-project" },
                 Worksheets =
                 [
-                    new ImportWorksheetSelection
-                    {
-                        WorksheetName = "First",
-                        OriginalPosition = 1,
-                        OptimizationGroupId = "combined",
-                        OptimizationGroupName = "Combined"
-                    },
-                    new ImportWorksheetSelection
-                    {
-                        WorksheetName = "Second",
-                        OriginalPosition = 2,
-                        OptimizationGroupId = "combined",
-                        OptimizationGroupName = "Combined"
-                    },
-                    new ImportWorksheetSelection
-                    {
-                        WorksheetName = "Third",
-                        OriginalPosition = 3,
-                        OptimizationGroupId = "isolated",
-                        OptimizationGroupName = "Isolated"
-                    }
+                    firstSelection,
+                    secondSelection,
+                    thirdSelection
                 ]
             });
 
@@ -263,6 +243,7 @@ public sealed class ImportBridgeSpecs : IDisposable
                 HeadingRange = "B3:F3"
             });
         Assert.Equal("P-300", Assert.Single(preview.Parts).ImportedId);
+        var selection = SelectionFromPreview(preview, "parts", "Parts");
 
         var finalized = await DispatchAsync<ImportSessionResponse>(
             dispatcher,
@@ -271,17 +252,7 @@ public sealed class ImportBridgeSpecs : IDisposable
             {
                 SessionId = sessionId,
                 Project = new Project { ProjectId = "manual-heading-project" },
-                Worksheets =
-                [
-                    new ImportWorksheetSelection
-                    {
-                        WorksheetName = "Parts",
-                        OriginalPosition = 1,
-                        HeadingRange = "B3:F3",
-                        OptimizationGroupId = "parts",
-                        OptimizationGroupName = "Parts"
-                    }
-                ]
+                Worksheets = [selection]
             });
 
         Assert.True(finalized.Success);
@@ -324,6 +295,94 @@ public sealed class ImportBridgeSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Excel_session_rejects_a_selected_Worksheet_that_was_not_confirmed_by_preview()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "not-previewed.xlsx");
+        WriteWorkbook(workbookPath, "Demo Material");
+        var originalPart = new PartRow
+        {
+            RowId = "existing",
+            ImportedId = "EXISTING",
+            Length = 10,
+            Width = 10,
+            Quantity = 1,
+            MaterialName = "Demo Material"
+        };
+        var project = new Project
+        {
+            ProjectId = "not-previewed-project",
+            State = new ProjectState { Parts = [originalPart] }
+        };
+
+        var dispatcher = CreateDispatcher();
+        const string sessionId = "not-previewed-session";
+        var started = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest { SessionId = sessionId, ImportSourcePath = workbookPath });
+        Assert.True(started.Success);
+
+        var finalized = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.FinalizeImportSession,
+            new FinalizeImportSessionRequest
+            {
+                SessionId = sessionId,
+                Project = project,
+                Worksheets =
+                [
+                    new ImportWorksheetSelection
+                    {
+                        WorksheetName = "Parts",
+                        OriginalPosition = 1,
+                        HeadingRange = "A1:E1",
+                        Options = RequiredWorkbookOptions(),
+                        OptimizationGroupId = "parts",
+                        OptimizationGroupName = "Parts"
+                    }
+                ]
+            });
+
+        Assert.False(finalized.Success);
+        Assert.False(finalized.Finalized);
+        Assert.Null(finalized.Project);
+        Assert.Equal("import-worksheet-not-ready", finalized.Error?.Code);
+        Assert.Equal("EXISTING", Assert.Single(project.State.Parts).ImportedId);
+    }
+
+    [Fact]
+    public async Task Excel_session_rejects_a_duplicate_Worksheet_with_a_caller_supplied_position()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "duplicate-selection.xlsx");
+        WriteWorkbook(workbookPath, "Demo Material");
+        var dispatcher = CreateDispatcher();
+        const string sessionId = "duplicate-selection-session";
+        var started = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest { SessionId = sessionId, ImportSourcePath = workbookPath });
+        Assert.True(started.Success);
+        var selection = await PreviewWorksheetSelectionAsync(
+            dispatcher, sessionId, "Parts", 1, "parts", "Parts");
+
+        var finalized = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.FinalizeImportSession,
+            new FinalizeImportSessionRequest
+            {
+                SessionId = sessionId,
+                Project = new Project { ProjectId = "duplicate-selection-project" },
+                Worksheets = [selection, selection with { OriginalPosition = 99 }]
+            });
+
+        Assert.False(finalized.Success);
+        Assert.Null(finalized.Project);
+        Assert.Equal("import-worksheet-not-ready", finalized.Error?.Code);
+    }
+
+    [Fact]
     public async Task Excel_session_rejects_conflicting_Workbook_wide_Material_Resolutions()
     {
         Directory.CreateDirectory(_workspacePath);
@@ -342,6 +401,42 @@ public sealed class ImportBridgeSpecs : IDisposable
             BridgeMessageTypes.BeginImportSession,
             new BeginImportSessionRequest { SessionId = sessionId, ImportSourcePath = workbookPath });
         Assert.True(started.Success);
+        var firstSelection = await PreviewWorksheetSelectionAsync(
+            dispatcher,
+            sessionId,
+            "First",
+            1,
+            "first-group",
+            "First",
+            options: RequiredWorkbookOptions() with
+            {
+                MaterialMappings =
+                [
+                    new ImportMaterialMapping
+                    {
+                        SourceMaterialName = "Shared Label",
+                        TargetMaterialId = "material-a"
+                    }
+                ]
+            });
+        var secondSelection = await PreviewWorksheetSelectionAsync(
+            dispatcher,
+            sessionId,
+            "Second",
+            2,
+            "second-group",
+            "Second",
+            options: RequiredWorkbookOptions() with
+            {
+                MaterialMappings =
+                [
+                    new ImportMaterialMapping
+                    {
+                        SourceMaterialName = "Shared Label",
+                        TargetMaterialId = "material-b"
+                    }
+                ]
+            });
 
         var finalized = await DispatchAsync<ImportSessionResponse>(
             dispatcher,
@@ -350,45 +445,7 @@ public sealed class ImportBridgeSpecs : IDisposable
             {
                 SessionId = sessionId,
                 Project = new Project { ProjectId = "conflicting-material-project" },
-                Worksheets =
-                [
-                    new ImportWorksheetSelection
-                    {
-                        WorksheetName = "First",
-                        OriginalPosition = 1,
-                        OptimizationGroupId = "first-group",
-                        OptimizationGroupName = "First",
-                        Options = new ImportOptions
-                        {
-                            MaterialMappings =
-                            [
-                                new ImportMaterialMapping
-                                {
-                                    SourceMaterialName = "Shared Label",
-                                    TargetMaterialId = "material-a"
-                                }
-                            ]
-                        }
-                    },
-                    new ImportWorksheetSelection
-                    {
-                        WorksheetName = "Second",
-                        OriginalPosition = 2,
-                        OptimizationGroupId = "second-group",
-                        OptimizationGroupName = "Second",
-                        Options = new ImportOptions
-                        {
-                            MaterialMappings =
-                            [
-                                new ImportMaterialMapping
-                                {
-                                    SourceMaterialName = "Shared Label",
-                                    TargetMaterialId = "material-b"
-                                }
-                            ]
-                        }
-                    }
-                ]
+                Worksheets = [firstSelection, secondSelection]
             });
 
         Assert.False(finalized.Success);
@@ -414,6 +471,26 @@ public sealed class ImportBridgeSpecs : IDisposable
             BridgeMessageTypes.BeginImportSession,
             new BeginImportSessionRequest { SessionId = sessionId, ImportSourcePath = workbookPath });
         Assert.True(started.Success);
+        var firstSelection = await PreviewWorksheetSelectionAsync(
+            dispatcher, sessionId, "First", 1, "first-group", "First");
+        var secondSelection = await PreviewWorksheetSelectionAsync(
+            dispatcher,
+            sessionId,
+            "Second",
+            2,
+            "second-group",
+            "Second",
+            options: RequiredWorkbookOptions() with
+            {
+                MaterialMappings =
+                [
+                    new ImportMaterialMapping
+                    {
+                        SourceMaterialName = "Shared Label",
+                        TargetMaterialId = "material-b"
+                    }
+                ]
+            });
 
         var finalized = await DispatchAsync<ImportSessionResponse>(
             dispatcher,
@@ -435,34 +512,7 @@ public sealed class ImportBridgeSpecs : IDisposable
                         }
                     }
                 ],
-                Worksheets =
-                [
-                    new ImportWorksheetSelection
-                    {
-                        WorksheetName = "First",
-                        OriginalPosition = 1,
-                        OptimizationGroupId = "first-group",
-                        OptimizationGroupName = "First"
-                    },
-                    new ImportWorksheetSelection
-                    {
-                        WorksheetName = "Second",
-                        OriginalPosition = 2,
-                        OptimizationGroupId = "second-group",
-                        OptimizationGroupName = "Second",
-                        Options = new ImportOptions
-                        {
-                            MaterialMappings =
-                            [
-                                new ImportMaterialMapping
-                                {
-                                    SourceMaterialName = "Shared Label",
-                                    TargetMaterialId = "material-b"
-                                }
-                            ]
-                        }
-                    }
-                ]
+                Worksheets = [firstSelection, secondSelection]
             });
 
         Assert.False(finalized.Success);
@@ -1566,6 +1616,74 @@ public sealed class ImportBridgeSpecs : IDisposable
         worksheet.Cell(2, 4).Value = 1;
         worksheet.Cell(2, 5).Value = materialName;
     }
+
+    private static async Task<ImportWorksheetSelection> PreviewWorksheetSelectionAsync(
+        BridgeMessageDispatcher dispatcher,
+        string sessionId,
+        string worksheetName,
+        int originalPosition,
+        string optimizationGroupId,
+        string optimizationGroupName,
+        string headingRange = "A1:E1",
+        ImportOptions? options = null)
+    {
+        var previewOptions = options ?? RequiredWorkbookOptions();
+        var preview = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.PreviewImportSession,
+            new PreviewImportSessionRequest
+            {
+                SessionId = sessionId,
+                WorksheetName = worksheetName,
+                HeadingRange = headingRange,
+                Options = previewOptions
+            });
+        Assert.Equal(worksheetName, preview.Worksheet?.WorksheetName);
+        Assert.Equal(originalPosition, preview.Worksheet?.OriginalPosition);
+        return SelectionFromPreview(
+            preview,
+            optimizationGroupId,
+            optimizationGroupName,
+            previewOptions);
+    }
+
+    private static ImportWorksheetSelection SelectionFromPreview(
+        ImportSessionResponse preview,
+        string optimizationGroupId,
+        string optimizationGroupName,
+        ImportOptions? options = null) =>
+        new()
+        {
+            WorksheetName = preview.Worksheet!.WorksheetName,
+            OriginalPosition = preview.Worksheet.OriginalPosition,
+            HeadingRange = preview.Worksheet.HeadingRange,
+            OptimizationGroupId = optimizationGroupId,
+            OptimizationGroupName = optimizationGroupName,
+            Options = (options ?? new ImportOptions()) with
+            {
+                ColumnMappings = preview.ColumnMappings
+                    .Where(mapping => !string.IsNullOrWhiteSpace(mapping.SourceColumn))
+                    .Select(mapping => new ImportColumnMapping
+                    {
+                        SourceColumn = mapping.SourceColumn!,
+                        TargetField = mapping.TargetField
+                    })
+                    .ToArray()
+            }
+        };
+
+    private static ImportOptions RequiredWorkbookOptions() =>
+        new()
+        {
+            ColumnMappings =
+            [
+                new ImportColumnMapping { SourceColumn = "A", TargetField = ImportFieldNames.Id },
+                new ImportColumnMapping { SourceColumn = "B", TargetField = ImportFieldNames.Length },
+                new ImportColumnMapping { SourceColumn = "C", TargetField = ImportFieldNames.Width },
+                new ImportColumnMapping { SourceColumn = "D", TargetField = ImportFieldNames.Quantity },
+                new ImportColumnMapping { SourceColumn = "E", TargetField = ImportFieldNames.Material }
+            ]
+        };
 
     private static async Task<TResponse> DispatchAsync<TResponse>(
         BridgeMessageDispatcher dispatcher,

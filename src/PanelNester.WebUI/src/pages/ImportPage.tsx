@@ -898,7 +898,6 @@ export function ImportPage({
             draft.newMaterials.map((material) => material.sourceMaterialName),
           );
           return !draft.hasPendingChanges &&
-            draft.preview.errors.length === 0 &&
             requiredImportFieldNames.every((field) =>
               draft.options.columnMappings.some(
                 (mapping) =>

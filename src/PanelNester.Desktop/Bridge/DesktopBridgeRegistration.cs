@@ -392,6 +392,10 @@ public static class DesktopBridgeRegistration
                         var orderedSelections = request.Worksheets
                             .OrderBy(selection => selection.OriginalPosition)
                             .ToArray();
+                        foreach (var selection in orderedSelections)
+                        {
+                            finalization.EnsureWorksheetReady(selection);
+                        }
                         var conflictingMaterialLabel = FindConflictingMaterialResolution(
                             orderedSelections,
                             request.NewMaterials);

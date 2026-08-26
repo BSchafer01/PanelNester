@@ -80,6 +80,7 @@ internal sealed class ImportSessionCoordinator
         try
         {
             var response = await ImportSnapshotAsync(session, options, worksheetName, headingRange, cancellationToken).ConfigureAwait(false);
+            session.RecordWorksheetPreview(worksheetName, response);
             return new ImportSessionResult(session.ImportSource, response);
         }
         catch
@@ -253,6 +254,8 @@ internal sealed class ImportSessionCoordinator
         private CancellationTokenSource? _operationCancellation;
         private byte[]? _contents;
         private ImportSourceMetadata? _importSource;
+        private readonly Dictionary<string, ReadyWorksheetPreview> _readyWorksheetPreviews =
+            new(StringComparer.Ordinal);
         private bool _released;
 
         public string ImportSourcePath { get; } = importSourcePath;
@@ -317,6 +320,49 @@ internal sealed class ImportSessionCoordinator
             }
         }
 
+        public void RecordWorksheetPreview(string? requestedWorksheetName, ImportResponse response)
+        {
+            lock (_gate)
+            {
+                if (!string.IsNullOrWhiteSpace(requestedWorksheetName))
+                {
+                    _readyWorksheetPreviews.Remove(requestedWorksheetName);
+                }
+
+                var worksheet = response.Worksheet;
+                if (worksheet is null ||
+                    string.IsNullOrWhiteSpace(worksheet.HeadingRange) ||
+                    !HasAllRequiredMappings(response.ColumnMappings))
+                {
+                    return;
+                }
+
+                _readyWorksheetPreviews[worksheet.WorksheetName] = new ReadyWorksheetPreview(
+                    worksheet.WorksheetName,
+                    worksheet.OriginalPosition,
+                    worksheet.HeadingRange,
+                    BuildColumnMappingSignature(response.ColumnMappings));
+            }
+        }
+
+        public void EnsureWorksheetReady(ImportWorksheetSelection selection)
+        {
+            lock (_gate)
+            {
+                var mappingSignature = BuildColumnMappingSignature(
+                    selection.Options?.ColumnMappings ?? Array.Empty<ImportColumnMapping>());
+                if (!_readyWorksheetPreviews.TryGetValue(selection.WorksheetName, out var preview) ||
+                    preview.OriginalPosition != selection.OriginalPosition ||
+                    !string.Equals(preview.HeadingRange, selection.HeadingRange, StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(preview.ColumnMappingSignature, mappingSignature, StringComparison.Ordinal))
+                {
+                    throw new ImportSessionException(
+                        "import-worksheet-not-ready",
+                        $"Worksheet '{selection.WorksheetName}' must be previewed with its confirmed Heading Range and Column Mappings before finalization.");
+                }
+            }
+        }
+
         public CancellationToken BeginOperation(CancellationToken cancellationToken)
         {
             lock (_gate)
@@ -373,7 +419,44 @@ internal sealed class ImportSessionCoordinator
             }
 
             _importSource = null;
+            _readyWorksheetPreviews.Clear();
         }
+
+        private static bool HasAllRequiredMappings(
+            IReadOnlyList<ImportFieldMappingStatus> mappings)
+        {
+            var mappedFields = mappings
+                .Where(mapping => !string.IsNullOrWhiteSpace(mapping.SourceColumn))
+                .Select(mapping => mapping.TargetField)
+                .ToHashSet(StringComparer.Ordinal);
+            return ImportFieldNames.Required.All(mappedFields.Contains);
+        }
+
+        private static string BuildColumnMappingSignature(
+            IEnumerable<ImportFieldMappingStatus> mappings) =>
+            string.Join(
+                '\u001f',
+                mappings
+                    .Where(mapping => !string.IsNullOrWhiteSpace(mapping.SourceColumn))
+                    .Select(mapping => $"{mapping.TargetField}\u001e{mapping.SourceColumn!.Trim()}")
+                    .OrderBy(value => value, StringComparer.Ordinal));
+
+        private static string BuildColumnMappingSignature(
+            IEnumerable<ImportColumnMapping> mappings) =>
+            string.Join(
+                '\u001f',
+                mappings
+                    .Where(mapping =>
+                        !string.IsNullOrWhiteSpace(mapping.TargetField) &&
+                        !string.IsNullOrWhiteSpace(mapping.SourceColumn))
+                    .Select(mapping => $"{mapping.TargetField.Trim()}\u001e{mapping.SourceColumn.Trim()}")
+                    .OrderBy(value => value, StringComparer.Ordinal));
+
+        private sealed record ReadyWorksheetPreview(
+            string WorksheetName,
+            int OriginalPosition,
+            string HeadingRange,
+            string ColumnMappingSignature);
     }
 
     internal sealed class ImportSessionFinalization : IDisposable
@@ -411,6 +494,12 @@ internal sealed class ImportSessionCoordinator
                 .ImportSnapshotFileAsync(_session, options, worksheetName, headingRange, CancellationToken)
                 .ConfigureAwait(false);
             return new ImportSessionResult(_session.ImportSource, response);
+        }
+
+        public void EnsureWorksheetReady(ImportWorksheetSelection selection)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            _session.EnsureWorksheetReady(selection);
         }
 
         public void Dispose()

@@ -166,7 +166,7 @@ public sealed class PartRowValidator
         string code,
         string message,
         string rowId,
-        ValidationLocation? location,
+        WorksheetRowLocation? location,
         ICollection<string> rowMessages,
         ICollection<ValidationError> errors)
     {
@@ -178,7 +178,7 @@ public sealed class PartRowValidator
         string code,
         string message,
         string rowId,
-        ValidationLocation? location,
+        WorksheetRowLocation? location,
         ICollection<string> rowMessages,
         ICollection<ValidationWarning> warnings)
     {
@@ -197,7 +197,7 @@ public sealed class PartRowValidator
         string label,
         string codePrefix,
         string rowId,
-        ValidationLocation? location,
+        WorksheetRowLocation? location,
         ICollection<string> rowErrors,
         ICollection<ValidationError> errors)
     {
@@ -222,15 +222,8 @@ public sealed class PartRowValidator
         return value;
     }
 
-    private static ValidationLocation? CreateValidationLocation(SourceReference? sourceReference) =>
-        sourceReference is null
-            ? null
-            : new ValidationLocation
-            {
-                WorksheetName = sourceReference.WorksheetName,
-                WorksheetPosition = sourceReference.WorksheetPosition,
-                PhysicalRow = sourceReference.PhysicalRow
-            };
+    private static WorksheetRowLocation? CreateValidationLocation(SourceReference? sourceReference) =>
+        sourceReference;
 
     private static string? NormalizeOptional(string? value)
     {
