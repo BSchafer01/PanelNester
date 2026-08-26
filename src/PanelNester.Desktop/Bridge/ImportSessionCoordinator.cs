@@ -55,7 +55,24 @@ internal sealed class ImportSessionCoordinator
 
         try
         {
+            session.ReportProgress(WorkbookImportPhase.OpeningWorkbook, "Opening workbook");
+            if (session.IsWorkbook)
+            {
+                try
+                {
+                    await session.PreflightAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (WorkbookSafetyException exception)
+                {
+                    throw new ImportSessionException("workbook-safety-ceiling-exceeded", exception.Message);
+                }
+                catch (EncryptedWorkbookException exception)
+                {
+                    throw new ImportSessionException("encrypted-workbook", exception.Message);
+                }
+            }
             await session.CaptureAsync(cancellationToken).ConfigureAwait(false);
+            session.ReportProgress(WorkbookImportPhase.InspectingWorksheets, "Inspecting Worksheets");
             WorkbookDiscovery? workbook;
             try
             {
@@ -65,10 +82,17 @@ internal sealed class ImportSessionCoordinator
             {
                 throw new ImportSessionException("encrypted-workbook", exception.Message);
             }
+            workbook = session.AttachPreflight(workbook);
+            session.RecordWorkbookDiscovery(workbook);
             return new ImportSessionResult(
                 session.ImportSource,
                 new ImportResponse { Success = true },
                 workbook);
+        }
+        catch (WorkbookSafetyException exception)
+        {
+            Release(sessionId);
+            throw new ImportSessionException("workbook-safety-ceiling-exceeded", exception.Message);
         }
         catch
         {
@@ -88,7 +112,9 @@ internal sealed class ImportSessionCoordinator
         var session = GetSession(sessionId);
         try
         {
+            session.ReportWorksheetProgress(worksheetName);
             var response = await ImportSnapshotAsync(session, options, worksheetName, headingRange, cancellationToken).ConfigureAwait(false);
+            session.ReportProgress(WorkbookImportPhase.Validating, "Validating");
             session.RecordWorksheetPreview(worksheetName, options, newMaterials, response);
             return new ImportSessionResult(session.ImportSource, response);
         }
@@ -118,6 +144,12 @@ internal sealed class ImportSessionCoordinator
 
         _cancelledSessionIds.TryAdd(sessionId, 0);
         return false;
+    }
+
+    public ImportSessionProgressSnapshot GetProgress(string sessionId)
+    {
+        var session = GetSession(sessionId);
+        return session.GetProgress();
     }
 
     private async Task<ImportResponse> ImportSnapshotAsync(
@@ -271,6 +303,15 @@ internal sealed class ImportSessionCoordinator
 
         public string Extension { get; } = extension;
 
+        private WorkbookDiscovery? _workbook;
+        private WorkbookPreflightAssessment? _preflight;
+        private WorkbookImportProgress? _progress;
+        private readonly List<WorkbookImportProgress> _progressHistory = [];
+
+        public bool IsWorkbook =>
+            string.Equals(Extension, ".xlsx", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(Extension, ".xlsm", StringComparison.OrdinalIgnoreCase);
+
         public ImportSourceMetadata ImportSource
         {
             get
@@ -296,9 +337,37 @@ internal sealed class ImportSessionCoordinator
                     FileShare.ReadWrite | FileShare.Delete,
                     bufferSize: 81920,
                     useAsync: true);
-                using var snapshot = new MemoryStream();
-                await source.CopyToAsync(snapshot, operationToken).ConfigureAwait(false);
-                var contents = snapshot.ToArray();
+                byte[] contents;
+                if (IsWorkbook)
+                {
+                    if (source.Length > WorkbookSafetyLimits.DesktopDefault.MaximumCompressedBytes)
+                    {
+                        throw new WorkbookSafetyException(
+                            "Workbook compressed size changed after preflight and is now above the desktop safety ceiling.");
+                    }
+
+                    contents = GC.AllocateUninitializedArray<byte>(checked((int)source.Length));
+                    var offset = 0;
+                    while (offset < contents.Length)
+                    {
+                        operationToken.ThrowIfCancellationRequested();
+                        var read = await source
+                            .ReadAsync(contents.AsMemory(offset), operationToken)
+                            .ConfigureAwait(false);
+                        if (read == 0)
+                        {
+                            Array.Resize(ref contents, offset);
+                            break;
+                        }
+                        offset += read;
+                    }
+                }
+                else
+                {
+                    using var snapshot = new MemoryStream();
+                    await source.CopyToAsync(snapshot, operationToken).ConfigureAwait(false);
+                    contents = snapshot.ToArray();
+                }
 
                 lock (_gate)
                 {
@@ -316,6 +385,114 @@ internal sealed class ImportSessionCoordinator
             finally
             {
                 CompleteOperation();
+            }
+        }
+
+        public async Task PreflightAsync(CancellationToken cancellationToken)
+        {
+            var operationToken = BeginOperation(cancellationToken);
+            try
+            {
+                var assessment = await Task.Run(
+                        () => WorkbookPackagePreflight.Inspect(
+                            ImportSourcePath,
+                            WorkbookSafetyLimits.DesktopDefault,
+                            operationToken),
+                        operationToken)
+                    .ConfigureAwait(false);
+                lock (_gate)
+                {
+                    _preflight = assessment;
+                }
+                ReportProgress(
+                    WorkbookImportPhase.OpeningWorkbook,
+                    "Opening workbook",
+                    preflight: assessment);
+            }
+            finally
+            {
+                CompleteOperation();
+            }
+        }
+
+        public WorkbookDiscovery? AttachPreflight(WorkbookDiscovery? workbook)
+        {
+            lock (_gate)
+            {
+                return workbook is null ? null : workbook with { Preflight = _preflight };
+            }
+        }
+
+        public void RecordWorkbookDiscovery(WorkbookDiscovery? workbook)
+        {
+            lock (_gate)
+            {
+                _workbook = workbook;
+            }
+
+            if (workbook is not null)
+            {
+                ReportProgress(
+                    WorkbookImportPhase.InspectingWorksheets,
+                    "Inspecting Worksheets",
+                    workbook.Worksheets.Count,
+                    workbook.Worksheets.Count);
+            }
+        }
+
+        public void ReportWorksheetProgress(string? worksheetName)
+        {
+            WorkbookDiscovery? workbook;
+            lock (_gate)
+            {
+                workbook = _workbook;
+            }
+
+            var worksheets = workbook?.Worksheets ?? Array.Empty<ImportWorksheetDescriptor>();
+            var index = string.IsNullOrWhiteSpace(worksheetName)
+                ? -1
+                : Array.FindIndex(
+                    worksheets.ToArray(),
+                    worksheet => string.Equals(worksheet.WorksheetName, worksheetName, StringComparison.Ordinal));
+            ReportProgress(
+                WorkbookImportPhase.ReadingWorksheet,
+                index >= 0 && worksheets.Count > 0
+                    ? $"Reading Worksheet {index + 1} of {worksheets.Count}"
+                    : "Reading Worksheet",
+                index >= 0 ? index + 1 : null,
+                worksheets.Count > 0 ? worksheets.Count : null,
+                worksheetName);
+        }
+
+        public void ReportProgress(
+            WorkbookImportPhase phase,
+            string label,
+            int? current = null,
+            int? total = null,
+            string? worksheetName = null,
+            WorkbookPreflightAssessment? preflight = null)
+        {
+            lock (_gate)
+            {
+                var progress = new WorkbookImportProgress
+                {
+                    Phase = phase,
+                    Label = label,
+                    Current = current,
+                    Total = total,
+                    WorksheetName = worksheetName,
+                    Preflight = preflight ?? _progress?.Preflight
+                };
+                _progress = progress;
+                _progressHistory.Add(progress);
+            }
+        }
+
+        public ImportSessionProgressSnapshot GetProgress()
+        {
+            lock (_gate)
+            {
+                return new ImportSessionProgressSnapshot(_progress, _progressHistory.ToArray());
             }
         }
 
@@ -488,6 +665,8 @@ internal sealed class ImportSessionCoordinator
 
             _importSource = null;
             _readyWorksheetPreviews.Clear();
+            _workbook = null;
+            _preflight = null;
         }
 
         private static bool HasAllRequiredMappings(
@@ -663,8 +842,20 @@ internal sealed class ImportSessionCoordinator
         public CancellationToken CancellationToken { get; }
 
         public bool IsWorkbook =>
-            string.Equals(_session.Extension, ".xlsx", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(_session.Extension, ".xlsm", StringComparison.OrdinalIgnoreCase);
+            _session.IsWorkbook;
+
+        public void ReportProgress(
+            WorkbookImportPhase phase,
+            string label,
+            int? current = null,
+            int? total = null,
+            string? worksheetName = null) =>
+            _session.ReportProgress(phase, label, current, total, worksheetName);
+
+        public void ReportWorksheetProgress(string worksheetName) =>
+            _session.ReportWorksheetProgress(worksheetName);
+
+        public ImportSessionProgressSnapshot GetProgress() => _session.GetProgress();
 
         public async Task<ImportSessionResult> ImportAsync(
             ImportOptions? options,
@@ -703,7 +894,17 @@ internal sealed class ImportSessionCoordinator
 internal sealed record ImportSessionResult(
     ImportSourceMetadata ImportSource,
     ImportResponse Response,
-    WorkbookDiscovery? Workbook = null);
+    WorkbookDiscovery? Workbook = null)
+{
+    public WorkbookImportProgress? Progress { get; init; }
+
+    public IReadOnlyList<WorkbookImportProgress> ProgressHistory { get; init; } =
+        Array.Empty<WorkbookImportProgress>();
+}
+
+internal sealed record ImportSessionProgressSnapshot(
+    WorkbookImportProgress? Progress,
+    IReadOnlyList<WorkbookImportProgress> History);
 
 internal sealed class ImportSessionException(string code, string message) : Exception(message)
 {

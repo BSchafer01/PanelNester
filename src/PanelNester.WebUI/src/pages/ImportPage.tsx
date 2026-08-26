@@ -30,6 +30,7 @@ import {
   type ImportNewMaterialRequest,
   type ImportWorksheetDraft,
   type ImportSessionPhase,
+  type WorkbookImportProgress,
   type ImportMaterialResolution,
   type Material,
   type MaterialDraft,
@@ -89,6 +90,7 @@ interface ImportPageProps {
   mappingSession?: ImportMappingSession;
   importMessage: string;
   importPhase?: ImportSessionPhase;
+  importProgress?: WorkbookImportProgress;
   nestingMessage: string;
   importBusy: boolean;
   partMutationBusy: boolean;
@@ -672,6 +674,7 @@ export function ImportPage({
   mappingSession,
   importMessage,
   importPhase,
+  importProgress,
   nestingMessage,
   importBusy,
   partMutationBusy,
@@ -1512,10 +1515,27 @@ export function ImportPage({
           <p className="module-hero__intro">{importMessage}</p>
           {importBusy && importPhase ? (
             <div className="import-session-progress" role="status">
-              <span>{`${importPhase[0].toUpperCase()}${importPhase.slice(1)}…`}</span>
-              <progress aria-label={`Import ${importPhase}`} />
+              <span>
+                {importProgress?.label ??
+                  `${importPhase[0].toUpperCase()}${importPhase.slice(1)}`}
+                …
+              </span>
+              {importProgress?.isDeterminate && importProgress.current && importProgress.total ? (
+                <progress
+                  aria-label={importProgress.label}
+                  value={importProgress.current}
+                  max={importProgress.total}
+                />
+              ) : (
+                <progress aria-label={importProgress?.label ?? `Import ${importPhase}`} />
+              )}
             </div>
           ) : null}
+          {mappingSession?.workbook?.preflight?.warnings.map((warning) => (
+            <p className="callout callout--warning" key={warning}>
+              {warning}
+            </p>
+          ))}
           {displayFilePath ? (
             <p className="module-hero__meta import-path">Source file: {displayFilePath}</p>
           ) : null}

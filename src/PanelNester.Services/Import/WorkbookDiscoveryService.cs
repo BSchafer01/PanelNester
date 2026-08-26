@@ -15,13 +15,16 @@ public sealed class WorkbookDiscoveryService
         using var stream = ImportFileAccessGuard.OpenReadShared(workbookPath);
         ImportFileAccessGuard.RejectEncryptedOpenXmlPackage(stream);
         using var workbook = new XLWorkbook(stream);
-        var worksheets = workbook.Worksheets
-            .Where(worksheet =>
-                worksheet.Visibility == XLWorksheetVisibility.Visible &&
+        var worksheets = new List<ImportWorksheetDescriptor>();
+        foreach (var worksheet in workbook.Worksheets.OrderBy(worksheet => worksheet.Position))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (worksheet.Visibility == XLWorksheetVisibility.Visible &&
                 worksheet.RangeUsed() is not null)
-            .OrderBy(worksheet => worksheet.Position)
-            .Select(HeadingRangeDetector.Describe)
-            .ToArray();
+            {
+                worksheets.Add(HeadingRangeDetector.Describe(worksheet));
+            }
+        }
 
         return Task.FromResult(new WorkbookDiscovery
         {

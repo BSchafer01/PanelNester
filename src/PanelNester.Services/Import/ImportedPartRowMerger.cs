@@ -10,7 +10,8 @@ internal static class ImportedPartRowMerger
         bool useGroupKey,
         bool useSheetNumberKey,
         bool useRowNumberKey,
-        bool useColumnNumberKey)
+        bool useColumnNumberKey,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(updates);
 
@@ -24,6 +25,7 @@ internal static class ImportedPartRowMerger
 
         foreach (var update in updates)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             ArgumentNullException.ThrowIfNull(update);
 
             if (!TryCreateMergeKey(

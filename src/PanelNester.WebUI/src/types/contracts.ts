@@ -8,6 +8,7 @@ export const bridgeMessageTypes = {
   previewImportSession: 'preview-import-session',
   finalizeImportSession: 'finalize-import-session',
   cancelImportSession: 'cancel-import-session',
+  getImportSessionProgress: 'get-import-session-progress',
   updatePartRow: 'update-part-row',
   deletePartRow: 'delete-part-row',
   addPartRow: 'add-part-row',
@@ -283,6 +284,35 @@ export interface WorkbookDiscovery {
   initialWorksheetName: string;
   worksheets: ImportWorksheetDescriptor[];
   macrosPresent: boolean;
+  preflight?: WorkbookPreflightAssessment | null;
+}
+
+export interface WorkbookPreflightAssessment {
+  compressedBytes: number;
+  uncompressedBytes: number;
+  packageEntryCount: number;
+  largestEntryBytes: number;
+  compressionRatio: number;
+  warnings: string[];
+}
+
+export type WorkbookImportPhase =
+  | 'preflight'
+  | 'openingWorkbook'
+  | 'inspectingWorksheets'
+  | 'readingWorksheet'
+  | 'validating'
+  | 'combiningParts'
+  | 'finalizing';
+
+export interface WorkbookImportProgress {
+  phase: WorkbookImportPhase;
+  label: string;
+  current?: number | null;
+  total?: number | null;
+  worksheetName?: string | null;
+  preflight?: WorkbookPreflightAssessment | null;
+  isDeterminate: boolean;
 }
 
 export interface ImportNewMaterialRequest {
@@ -364,6 +394,19 @@ export interface CancelImportSessionRequest {
   sessionId: string;
 }
 
+export interface GetImportSessionProgressRequest {
+  sessionId: string;
+}
+
+export interface GetImportSessionProgressResponse {
+  success: boolean;
+  sessionId: string;
+  progress?: WorkbookImportProgress | null;
+  history: WorkbookImportProgress[];
+  error?: BridgeError | null;
+  message?: string;
+}
+
 export interface ImportSessionResponse extends ImportFileResponse {
   sessionId: string;
   importSourcePath: string | null;
@@ -373,6 +416,8 @@ export interface ImportSessionResponse extends ImportFileResponse {
   project?: ProjectRecord | null;
   workbook?: WorkbookDiscovery | null;
   previewSummary?: ImportPreviewSummary | null;
+  progress?: WorkbookImportProgress | null;
+  progressHistory?: WorkbookImportProgress[];
 }
 
 export interface ImportPreviewSummary {
@@ -1186,6 +1231,7 @@ export const requestedBridgeCapabilities: BridgeCapability[] = [
   bridgeMessageTypes.previewImportSession,
   bridgeMessageTypes.finalizeImportSession,
   bridgeMessageTypes.cancelImportSession,
+  bridgeMessageTypes.getImportSessionProgress,
   bridgeMessageTypes.updatePartRow,
   bridgeMessageTypes.deletePartRow,
   bridgeMessageTypes.addPartRow,

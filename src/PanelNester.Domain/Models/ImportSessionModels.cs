@@ -124,6 +124,8 @@ public sealed record WorkbookDiscovery
         Array.Empty<ImportWorksheetDescriptor>();
 
     public bool MacrosPresent { get; init; }
+
+    public WorkbookPreflightAssessment? Preflight { get; init; }
 }
 
 public record WorksheetRowLocation

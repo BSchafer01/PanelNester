@@ -43,6 +43,8 @@ import {
   type CancelImportSessionRequest,
   type ImportSessionResponse,
   type CancelImportSessionResponse,
+  type GetImportSessionProgressRequest,
+  type GetImportSessionProgressResponse,
   type ImportResponse,
   type ListMaterialsRequest,
   type ListMaterialsResponse,
@@ -92,7 +94,7 @@ type BridgeSubscriber = (event: HostBridgeEvent) => void;
 
 interface PendingRequest {
   resolve: (value: unknown) => void;
-  timeoutId: number;
+  timeoutId?: number;
 }
 
 interface WebViewMessageEvent {
@@ -210,7 +212,7 @@ class HostBridgeClient {
   async invoke<TResponse>(
     type: string,
     payload: unknown,
-    timeoutMs = requestTimeoutMs,
+    timeoutMs: number | null = requestTimeoutMs,
   ): Promise<TResponse> {
     const requestId = this.createRequestId();
     const message: BridgeMessage = {
@@ -226,10 +228,12 @@ class HostBridgeClient {
     }
 
     return new Promise<TResponse>((resolve, reject) => {
-      const timeoutId = window.setTimeout(() => {
-        this.pendingRequests.delete(requestId);
-        reject(new Error(`Timed out waiting for "${type}" response from desktop host.`));
-      }, timeoutMs);
+      const timeoutId = timeoutMs === null
+        ? undefined
+        : window.setTimeout(() => {
+            this.pendingRequests.delete(requestId);
+            reject(new Error(`Timed out waiting for "${type}" response from desktop host.`));
+          }, timeoutMs);
 
       this.pendingRequests.set(requestId, {
         resolve: resolve as (value: unknown) => void,
@@ -298,7 +302,7 @@ class HostBridgeClient {
     return this.invoke<ImportSessionResponse>(
       bridgeMessageTypes.beginImportSession,
       request,
-      longRunningRequestTimeoutMs,
+      null,
     );
   }
 
@@ -306,7 +310,7 @@ class HostBridgeClient {
     return this.invoke<ImportSessionResponse>(
       bridgeMessageTypes.previewImportSession,
       request,
-      longRunningRequestTimeoutMs,
+      null,
     );
   }
 
@@ -314,7 +318,7 @@ class HostBridgeClient {
     return this.invoke<ImportSessionResponse>(
       bridgeMessageTypes.finalizeImportSession,
       request,
-      longRunningRequestTimeoutMs,
+      null,
     );
   }
 
@@ -322,7 +326,16 @@ class HostBridgeClient {
     return this.invoke<CancelImportSessionResponse>(
       bridgeMessageTypes.cancelImportSession,
       request,
-      longRunningRequestTimeoutMs,
+      null,
+    );
+  }
+
+  getImportSessionProgress(
+    request: GetImportSessionProgressRequest,
+  ): Promise<GetImportSessionProgressResponse> {
+    return this.invoke<GetImportSessionProgressResponse>(
+      bridgeMessageTypes.getImportSessionProgress,
+      request,
     );
   }
 
@@ -563,7 +576,9 @@ class HostBridgeClient {
       const pendingRequest = this.pendingRequests.get(normalized.requestId);
 
       if (pendingRequest) {
-        window.clearTimeout(pendingRequest.timeoutId);
+        if (pendingRequest.timeoutId !== undefined) {
+          window.clearTimeout(pendingRequest.timeoutId);
+        }
         this.pendingRequests.delete(normalized.requestId);
         pendingRequest.resolve(normalized.payload);
       }

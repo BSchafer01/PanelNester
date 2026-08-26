@@ -351,6 +351,64 @@ public sealed class ImportBridgeSpecs : IDisposable
         Assert.Empty(response.Parts);
     }
 
+    [Fact]
+    public async Task Beginning_a_Workbook_session_reports_truthful_discovery_progress()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "progress.xlsx");
+        using (var workbook = new XLWorkbook())
+        {
+            WriteWorkbookWorksheet(workbook.AddWorksheet("First"), "FIRST", "Demo Material");
+            WriteWorkbookWorksheet(workbook.AddWorksheet("Second"), "SECOND", "Demo Material");
+            workbook.SaveAs(workbookPath);
+        }
+
+        var dispatcher = CreateDispatcher();
+        const string sessionId = "progress-session";
+        var started = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest { SessionId = sessionId, ImportSourcePath = workbookPath });
+        var progress = await DispatchAsync<GetImportSessionProgressResponse>(
+            dispatcher,
+            BridgeMessageTypes.GetImportSessionProgress,
+            new GetImportSessionProgressRequest { SessionId = sessionId });
+
+        Assert.True(started.Success);
+        Assert.True(progress.Success);
+        Assert.Equal(WorkbookImportPhase.InspectingWorksheets, progress.Progress?.Phase);
+        Assert.Equal(2, progress.Progress?.Current);
+        Assert.Equal(2, progress.Progress?.Total);
+        Assert.True(progress.Progress?.IsDeterminate);
+        Assert.Equal(
+            [WorkbookImportPhase.OpeningWorkbook, WorkbookImportPhase.InspectingWorksheets],
+            progress.History.Select(item => item.Phase).Distinct());
+    }
+
+    [Fact]
+    public async Task Beginning_a_Workbook_session_rejects_compressed_size_above_the_desktop_ceiling_before_snapshot_capture()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "oversized.xlsx");
+        await using (var stream = new FileStream(workbookPath, FileMode.CreateNew, FileAccess.Write))
+        {
+            stream.SetLength(WorkbookSafetyLimits.DesktopDefault.MaximumCompressedBytes + 1);
+        }
+
+        var response = await DispatchAsync<ImportSessionResponse>(
+            CreateDispatcher(),
+            BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest
+            {
+                SessionId = "oversized-session",
+                ImportSourcePath = workbookPath
+            });
+
+        Assert.False(response.Success);
+        Assert.Equal("workbook-safety-ceiling-exceeded", response.Error?.Code);
+        Assert.Contains("compressed size", response.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Theory]
     [InlineData(".xlsx")]
     [InlineData(".xlsm")]
@@ -435,6 +493,16 @@ public sealed class ImportBridgeSpecs : IDisposable
         Assert.Equal("combined", group.OptimizationGroupId);
         Assert.Equal("Combined", group.Name);
         Assert.Equal(["FIRST", "THIRD"], group.Parts.Select(part => part.ImportedId));
+        Assert.Equal(
+            [
+                WorkbookImportPhase.OpeningWorkbook,
+                WorkbookImportPhase.InspectingWorksheets,
+                WorkbookImportPhase.ReadingWorksheet,
+                WorkbookImportPhase.Validating,
+                WorkbookImportPhase.CombiningParts,
+                WorkbookImportPhase.Finalizing
+            ],
+            finalized.ProgressHistory.Select(item => item.Phase).Distinct());
         Assert.All(
             project.State.ImportConfiguration!.Worksheets,
             worksheet =>
@@ -1820,6 +1888,11 @@ public sealed class ImportBridgeSpecs : IDisposable
             new PreviewImportSessionRequest { SessionId = sessionId });
         await blockingImport.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
+        var activeProgress = await DispatchAsync<GetImportSessionProgressResponse>(
+            dispatcher,
+            BridgeMessageTypes.GetImportSessionProgress,
+            new GetImportSessionProgressRequest { SessionId = sessionId });
+
         var cancelled = await DispatchAsync<CancelImportSessionResponse>(
             dispatcher,
             BridgeMessageTypes.CancelImportSession,
@@ -1828,6 +1901,8 @@ public sealed class ImportBridgeSpecs : IDisposable
 
         Assert.True(cancelled.Success);
         Assert.True(cancelled.Released);
+        Assert.Equal(WorkbookImportPhase.ReadingWorksheet, activeProgress.Progress?.Phase);
+        Assert.False(activeProgress.Progress?.IsDeterminate);
         Assert.True(await blockingImport.CancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(5)));
         Assert.False(latePreviewResponse.Success);
         Assert.Equal("cancelled", latePreviewResponse.Error?.Code);

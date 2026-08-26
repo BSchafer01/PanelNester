@@ -407,8 +407,11 @@ public static class DesktopBridgeRegistration
                         }
                         foreach (var selection in orderedSelections)
                         {
+                            finalization.CancellationToken.ThrowIfCancellationRequested();
                             finalization.EnsureWorksheetReady(selection, request.NewMaterials);
                         }
+
+                        finalization.ReportProgress(WorkbookImportPhase.Validating, "Validating");
 
                         var workbookPreparation = await PrepareImportOptionsAsync(
                                 new ImportFileRequest
@@ -438,8 +441,16 @@ public static class DesktopBridgeRegistration
                                 preparationMessage);
                         }
 
-                        foreach (var selection in orderedSelections)
+                        for (var selectionIndex = 0; selectionIndex < orderedSelections.Length; selectionIndex++)
                         {
+                            var selection = orderedSelections[selectionIndex];
+                            finalization.CancellationToken.ThrowIfCancellationRequested();
+                            finalization.ReportProgress(
+                                WorkbookImportPhase.ReadingWorksheet,
+                                $"Reading Worksheet {selectionIndex + 1} of {orderedSelections.Length}",
+                                selectionIndex + 1,
+                                orderedSelections.Length,
+                                selection.WorksheetName);
                             var worksheetOptions = (selection.Options ?? new ImportOptions()) with
                             {
                                 MaterialMappings = workbookPreparation.Options.MaterialMappings
@@ -499,6 +510,8 @@ public static class DesktopBridgeRegistration
                                 worksheetResult.Response));
                         }
 
+                        finalization.CancellationToken.ThrowIfCancellationRequested();
+                        finalization.ReportProgress(WorkbookImportPhase.CombiningParts, "Combining parts");
                         var workbookProject = ProjectImportFinalizer.FinalizeWorkbook(
                             request.Project,
                             workbookImportSource!,
@@ -511,6 +524,15 @@ public static class DesktopBridgeRegistration
                             workbookImportSource!,
                             worksheetImports,
                             workbookProject.State.Parts);
+                        finalization.CancellationToken.ThrowIfCancellationRequested();
+                        finalization.ReportProgress(WorkbookImportPhase.Finalizing, "Finalizing");
+                        finalization.CancellationToken.ThrowIfCancellationRequested();
+                        var finalProgress = finalization.GetProgress();
+                        combinedResult = combinedResult with
+                        {
+                            Progress = finalProgress.Progress,
+                            ProgressHistory = finalProgress.History
+                        };
                         return BuildImportSessionResponse(
                             request.SessionId,
                             combinedResult,
@@ -558,6 +580,8 @@ public static class DesktopBridgeRegistration
                         return BuildImportSessionResponse(request.SessionId, result, ImportSessionPhase.Failed);
                     }
 
+                    finalization.CancellationToken.ThrowIfCancellationRequested();
+                    finalization.ReportProgress(WorkbookImportPhase.CombiningParts, "Combining parts");
                     var project = ProjectImportFinalizer.Finalize(
                         request.Project,
                         result.ImportSource,
@@ -565,6 +589,15 @@ public static class DesktopBridgeRegistration
                         result.Response,
                         request.TargetOptimizationGroupId,
                         request.ReplaceExistingImportSource);
+                    finalization.CancellationToken.ThrowIfCancellationRequested();
+                    finalization.ReportProgress(WorkbookImportPhase.Finalizing, "Finalizing");
+                    finalization.CancellationToken.ThrowIfCancellationRequested();
+                    var completedProgress = finalization.GetProgress();
+                    result = result with
+                    {
+                        Progress = completedProgress.Progress,
+                        ProgressHistory = completedProgress.History
+                    };
                     return BuildImportSessionResponse(
                         request.SessionId,
                         result,
@@ -623,6 +656,33 @@ public static class DesktopBridgeRegistration
                         false,
                         request.SessionId,
                         false,
+                        BridgeError.Create(ex.Code, ex.Message),
+                        ex.Message));
+                }
+            });
+
+        dispatcher.Register<GetImportSessionProgressRequest>(
+            BridgeMessageTypes.GetImportSessionProgress,
+            (request, _) =>
+            {
+                try
+                {
+                    var progress = importSessions.GetProgress(request.SessionId);
+                    return Task.FromResult<object?>(new GetImportSessionProgressResponse(
+                        true,
+                        request.SessionId,
+                        progress.Progress,
+                        progress.History,
+                        null,
+                        null));
+                }
+                catch (ImportSessionException ex)
+                {
+                    return Task.FromResult<object?>(new GetImportSessionProgressResponse(
+                        false,
+                        request.SessionId,
+                        null,
+                        Array.Empty<WorkbookImportProgress>(),
                         BridgeError.Create(ex.Code, ex.Message),
                         ex.Message));
                 }
@@ -2236,7 +2296,9 @@ public static class DesktopBridgeRegistration
             Workbook = result.Workbook,
             SourceColumns = response.SourceColumns,
             Worksheet = response.Worksheet,
-            PreviewSummary = previewSummary ?? BuildWorksheetPreviewSummary(response)
+            PreviewSummary = previewSummary ?? BuildWorksheetPreviewSummary(response),
+            Progress = result.Progress,
+            ProgressHistory = result.ProgressHistory
         };
     }
 

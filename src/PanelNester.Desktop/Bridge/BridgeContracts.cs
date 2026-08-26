@@ -14,6 +14,7 @@ public static class BridgeMessageTypes
     public const string PreviewImportSession = "preview-import-session";
     public const string FinalizeImportSession = "finalize-import-session";
     public const string CancelImportSession = "cancel-import-session";
+    public const string GetImportSessionProgress = "get-import-session-progress";
     public const string UpdatePartRow = "update-part-row";
     public const string DeletePartRow = "delete-part-row";
     public const string AddPartRow = "add-part-row";
@@ -393,6 +394,11 @@ public sealed record CancelImportSessionRequest
     public string SessionId { get; init; } = string.Empty;
 }
 
+public sealed record GetImportSessionProgressRequest
+{
+    public string SessionId { get; init; } = string.Empty;
+}
+
 public enum ImportSessionPhase
 {
     Opening,
@@ -429,6 +435,11 @@ public sealed record ImportSessionResponse(
 
     public ImportPreviewSummary? PreviewSummary { get; init; }
 
+    public WorkbookImportProgress? Progress { get; init; }
+
+    public IReadOnlyList<WorkbookImportProgress> ProgressHistory { get; init; } =
+        Array.Empty<WorkbookImportProgress>();
+
     public static ImportSessionResponse Failure(
         string sessionId,
         string? importSourcePath,
@@ -461,6 +472,14 @@ public sealed record CancelImportSessionResponse(
     bool Success,
     string SessionId,
     bool Released,
+    BridgeError? Error,
+    string? Message);
+
+public sealed record GetImportSessionProgressResponse(
+    bool Success,
+    string SessionId,
+    WorkbookImportProgress? Progress,
+    IReadOnlyList<WorkbookImportProgress> History,
     BridgeError? Error,
     string? Message);
 

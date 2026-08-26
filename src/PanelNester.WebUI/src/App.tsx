@@ -60,6 +60,7 @@ import {
   type ReportSettings,
   type StiffenerTakeoffReportData,
   type StiffenerTakeoffSettings,
+  type WorkbookImportProgress,
 } from './types/contracts';
 
 type AppRoute = 'overview' | 'import' | 'materials' | 'extrusions' | 'results';
@@ -115,6 +116,7 @@ interface AppState {
   importMappingSession?: ImportMappingSession;
   importMessage: string;
   importPhase?: ImportSessionPhase;
+  importProgress?: WorkbookImportProgress;
   nestingMessage: string;
   materialsMessage: string;
   reportMessage: string;
@@ -177,6 +179,7 @@ type AppAction =
   | { type: 'material-updated'; material: Material; message: string }
   | { type: 'material-deleted'; materialId: string; message: string }
   | { type: 'import-started'; message: string; phase: ImportSessionPhase }
+  | { type: 'import-progressed'; progress: WorkbookImportProgress }
   | { type: 'import-selection-cancelled'; message: string }
   | {
       type: 'import-mapping-ready';
@@ -1665,13 +1668,21 @@ function reducer(state: AppState, action: AppAction): AppState {
         ...state,
         importBusy: true,
         importPhase: action.phase,
+        importProgress: undefined,
         importMessage: action.message,
+      };
+    case 'import-progressed':
+      return {
+        ...state,
+        importProgress: action.progress,
+        importMessage: `${action.progress.label}…`,
       };
     case 'import-selection-cancelled':
       return {
         ...state,
         importBusy: false,
         importPhase: undefined,
+        importProgress: undefined,
         importMessage: action.message,
       };
     case 'import-mapping-ready':
@@ -1679,6 +1690,7 @@ function reducer(state: AppState, action: AppAction): AppState {
         ...state,
         importBusy: false,
         importPhase: undefined,
+        importProgress: undefined,
         activeRoute: 'import',
         importMappingSession: action.session,
         importMessage: action.message,
@@ -1693,6 +1705,7 @@ function reducer(state: AppState, action: AppAction): AppState {
         ...state,
         importBusy: false,
         importPhase: undefined,
+        importProgress: undefined,
         importMappingSession: undefined,
         importMessage: action.message,
       };
@@ -1702,6 +1715,7 @@ function reducer(state: AppState, action: AppAction): AppState {
           ...state,
           importBusy: false,
           importPhase: undefined,
+          importProgress: undefined,
           importMappingSession: undefined,
           selectedFilePath: action.filePath,
           importSource: action.project?.state.importSource ?? undefined,
@@ -1762,6 +1776,7 @@ function reducer(state: AppState, action: AppAction): AppState {
         ...state,
         importBusy: false,
         importPhase: undefined,
+        importProgress: undefined,
         importMessage: action.message,
       };
     case 'nesting-started':
@@ -1832,6 +1847,7 @@ function reducer(state: AppState, action: AppAction): AppState {
         importMappingSession: undefined,
         importBusy: false,
         importPhase: undefined,
+        importProgress: undefined,
         importMessage: defaultImportMessage,
         nestingMessage: defaultNestingMessage,
         reportMessage: defaultReportMessage,
@@ -2657,6 +2673,43 @@ export default function App() {
     }
   };
 
+  const trackImportOperation = async <T,>(
+    sessionId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> => {
+    if (!hasCapability(bridgeMessageTypes.getImportSessionProgress)) {
+      return operation();
+    }
+
+    let active = true;
+    let pollInFlight = false;
+    const poll = async () => {
+      if (!active || pollInFlight || activeImportSessionIdRef.current !== sessionId) {
+        return;
+      }
+      pollInFlight = true;
+      try {
+        const response = await hostBridge.getImportSessionProgress({ sessionId });
+        if (active && response.success && response.progress) {
+          dispatch({ type: 'import-progressed', progress: response.progress });
+        }
+      } catch {
+        // Progress is advisory; the operation response remains authoritative.
+      } finally {
+        pollInFlight = false;
+      }
+    };
+
+    void poll();
+    const intervalId = window.setInterval(() => void poll(), 250);
+    try {
+      return await operation();
+    } finally {
+      active = false;
+      window.clearInterval(intervalId);
+    }
+  };
+
   const retryHandshake = async () => {
     const handshake = await hostBridge.initialize();
     dispatch({
@@ -3171,7 +3224,8 @@ export default function App() {
           message: `Reading an immutable snapshot of ${fileNameFromPath(selectedFilePath)}…`,
         });
         const started = normalizeImportSessionResponse(
-          await hostBridge.beginImportSession({ sessionId, importSourcePath: selectedFilePath }),
+          await trackImportOperation(sessionId, () =>
+            hostBridge.beginImportSession({ sessionId, importSourcePath: selectedFilePath })),
           sessionId,
         );
         if (activeImportSessionIdRef.current !== sessionId) {
@@ -3220,11 +3274,12 @@ export default function App() {
           return;
         }
         const response = normalizeImportSessionResponse(
-          await hostBridge.previewImportSession({
-            sessionId,
-            worksheetName: initialWorksheet?.worksheetName ?? null,
-            headingRange: initialWorksheet?.headingRange ?? null,
-          }),
+          await trackImportOperation(sessionId, () =>
+            hostBridge.previewImportSession({
+              sessionId,
+              worksheetName: initialWorksheet?.worksheetName ?? null,
+              headingRange: initialWorksheet?.headingRange ?? null,
+            })),
           sessionId,
         );
         if (activeImportSessionIdRef.current !== sessionId) {
@@ -3272,12 +3327,13 @@ export default function App() {
           message: `Finalizing the import for ${fileNameFromPath(selectedFilePath)}…`,
         });
         const finalized = normalizeImportSessionResponse(
-          await hostBridge.finalizeImportSession({
-            sessionId,
-            project: buildProjectRecord(state),
-            replaceExistingImportSource: replacingExistingImportSource,
-            targetOptimizationGroupId: state.activeOptimizationGroupId ?? null,
-          }),
+          await trackImportOperation(sessionId, () =>
+            hostBridge.finalizeImportSession({
+              sessionId,
+              project: buildProjectRecord(state),
+              replaceExistingImportSource: replacingExistingImportSource,
+              targetOptimizationGroupId: state.activeOptimizationGroupId ?? null,
+            })),
           sessionId,
         );
         if (activeImportSessionIdRef.current !== sessionId) {
@@ -3496,16 +3552,17 @@ export default function App() {
         session.sessionId !== 'legacy-import' &&
         hasCapability(bridgeMessageTypes.previewImportSession)
           ? normalizeImportSessionResponse(
-              await hostBridge.previewImportSession({
-                sessionId: session.sessionId,
-                options: session.options,
-                newMaterials: session.newMaterials,
-                worksheetName: session.activeWorksheetName ?? null,
-                headingRange:
-                  session.worksheets?.find(
-                    (draft) => draft.worksheet.worksheetName === session.activeWorksheetName,
-                  )?.headingRange ?? null,
-              }),
+              await trackImportOperation(session.sessionId, () =>
+                hostBridge.previewImportSession({
+                  sessionId: session.sessionId,
+                  options: session.options,
+                  newMaterials: session.newMaterials,
+                  worksheetName: session.activeWorksheetName ?? null,
+                  headingRange:
+                    session.worksheets?.find(
+                      (draft) => draft.worksheet.worksheetName === session.activeWorksheetName,
+                    )?.headingRange ?? null,
+                })),
               session.sessionId,
             )
           : normalizeImportFileResponse(
@@ -3615,24 +3672,25 @@ export default function App() {
       let response: ImportFileResponse;
       if (usesImportSession) {
         sessionResponse = normalizeImportSessionResponse(
-          await hostBridge.finalizeImportSession({
-            sessionId: session.sessionId,
-            options: session.options,
-            newMaterials: sessionNewMaterials,
-            project: buildProjectRecord(state),
-            replaceExistingImportSource: hasExistingImportSource(state),
-            targetOptimizationGroupId: state.activeOptimizationGroupId ?? null,
-            worksheets: selectedWorksheetDrafts.map((draft) => ({
-              worksheetName: draft.worksheet.worksheetName,
-              originalPosition: draft.worksheet.originalPosition,
-              options: draft.options,
-              optimizationGroupId: draft.optimizationGroupId,
-              optimizationGroupName: draft.optimizationGroupName,
-              headingRange: draft.headingRange,
-              excludedSourceRows: draft.excludedSourceRows,
-              partOverrides: draft.partOverrides,
+          await trackImportOperation(session.sessionId, () =>
+            hostBridge.finalizeImportSession({
+              sessionId: session.sessionId,
+              options: session.options,
+              newMaterials: sessionNewMaterials,
+              project: buildProjectRecord(state),
+              replaceExistingImportSource: hasExistingImportSource(state),
+              targetOptimizationGroupId: state.activeOptimizationGroupId ?? null,
+              worksheets: selectedWorksheetDrafts.map((draft) => ({
+                worksheetName: draft.worksheet.worksheetName,
+                originalPosition: draft.worksheet.originalPosition,
+                options: draft.options,
+                optimizationGroupId: draft.optimizationGroupId,
+                optimizationGroupName: draft.optimizationGroupName,
+                headingRange: draft.headingRange,
+                excludedSourceRows: draft.excludedSourceRows,
+                partOverrides: draft.partOverrides,
+              })),
             })),
-          }),
           session.sessionId,
         );
         response = sessionResponse;
@@ -4604,6 +4662,7 @@ export default function App() {
           mappingSession={state.importMappingSession}
           importMessage={state.importMessage}
           importPhase={state.importPhase}
+          importProgress={state.importProgress}
           nestingMessage={state.nestingMessage}
           importBusy={state.importBusy}
           partMutationBusy={state.partMutationBusy}

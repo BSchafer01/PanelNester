@@ -11,21 +11,35 @@ public sealed class XlsxImportService : IImportService
     private readonly IReadOnlyList<Material> _fallbackMaterials;
     private readonly ImportMappingResolver _mappingResolver;
     private readonly IMaterialRepository? _materialRepository;
+    private readonly IProgress<WorkbookImportProgress>? _progress;
+    private readonly WorkbookSafetyLimits _safetyLimits;
     private readonly PartRowValidator _validator;
 
-    public XlsxImportService(IEnumerable<Material>? knownMaterials = null, PartRowValidator? validator = null)
+    public XlsxImportService(
+        IEnumerable<Material>? knownMaterials = null,
+        PartRowValidator? validator = null,
+        WorkbookSafetyLimits? safetyLimits = null,
+        IProgress<WorkbookImportProgress>? progress = null)
     {
         _fallbackMaterials = (knownMaterials ?? DemoMaterialCatalog.All).ToArray();
         _mappingResolver = new ImportMappingResolver();
         _validator = validator ?? new PartRowValidator();
+        _safetyLimits = safetyLimits ?? WorkbookSafetyLimits.DesktopDefault;
+        _progress = progress;
     }
 
-    public XlsxImportService(IMaterialRepository materialRepository, PartRowValidator? validator = null)
+    public XlsxImportService(
+        IMaterialRepository materialRepository,
+        PartRowValidator? validator = null,
+        WorkbookSafetyLimits? safetyLimits = null,
+        IProgress<WorkbookImportProgress>? progress = null)
     {
         _materialRepository = materialRepository ?? throw new ArgumentNullException(nameof(materialRepository));
         _fallbackMaterials = Array.Empty<Material>();
         _mappingResolver = new ImportMappingResolver();
         _validator = validator ?? new PartRowValidator();
+        _safetyLimits = safetyLimits ?? WorkbookSafetyLimits.DesktopDefault;
+        _progress = progress;
     }
 
     public async Task<ImportResponse> ImportAsync(ImportRequest request, CancellationToken cancellationToken = default)
@@ -66,10 +80,52 @@ public sealed class XlsxImportService : IImportService
         IReadOnlyList<ImportFieldMappingStatus> columnMappings = Array.Empty<ImportFieldMappingStatus>();
         IReadOnlyList<ImportMaterialResolution> materialResolutions = Array.Empty<ImportMaterialResolution>();
         ImportWorksheetDescriptor? worksheetDescriptor = null;
+
+        WorkbookPreflightAssessment preflight;
+        try
+        {
+            preflight = WorkbookPackagePreflight.Inspect(request.FilePath, _safetyLimits, cancellationToken);
+        }
+        catch (WorkbookSafetyException exception)
+        {
+            return PartRowValidator.CreateResponse(
+                [],
+                [new ValidationError("workbook-safety-ceiling-exceeded", exception.Message)],
+                []);
+        }
+        catch (EncryptedWorkbookException exception)
+        {
+            return PartRowValidator.CreateResponse(
+                [],
+                [new ValidationError("encrypted-workbook", exception.Message)],
+                []);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return PartRowValidator.CreateResponse(
+                [],
+                [ImportFileAccessGuard.CreateXlsxReadError(request.FilePath, exception)],
+                []);
+        }
+
+        _progress?.Report(new WorkbookImportProgress
+        {
+            Phase = WorkbookImportPhase.Preflight,
+            Label = "Checking Workbook safety",
+            Preflight = preflight
+        });
+        warnings.AddRange(preflight.Warnings.Select(message =>
+            new ValidationWarning("workbook-safety-warning", message)));
         var knownMaterials = await LoadKnownMaterialsAsync(cancellationToken).ConfigureAwait(false);
 
         try
         {
+            _progress?.Report(new WorkbookImportProgress
+            {
+                Phase = WorkbookImportPhase.OpeningWorkbook,
+                Label = "Opening workbook",
+                Preflight = preflight
+            });
             await using var stream = ImportFileAccessGuard.OpenReadShared(request.FilePath);
             ImportFileAccessGuard.RejectEncryptedOpenXmlPackage(stream);
             var vbaProject = WorkbookVbaProjectInspector.Inspect(stream);
@@ -92,6 +148,23 @@ public sealed class XlsxImportService : IImportService
                 return PartRowValidator.CreateResponse([], errors, warnings);
             }
 
+            var visibleWorksheets = workbook.Worksheets.Count(sheet =>
+                sheet.Visibility == XLWorksheetVisibility.Visible && sheet.RangeUsed() is not null);
+            var visibleWorksheetNumber = workbook.Worksheets
+                .Where(sheet => sheet.Visibility == XLWorksheetVisibility.Visible && sheet.RangeUsed() is not null)
+                .OrderBy(sheet => sheet.Position)
+                .TakeWhile(sheet => sheet.Position != worksheet.Position)
+                .Count() + 1;
+            _progress?.Report(new WorkbookImportProgress
+            {
+                Phase = WorkbookImportPhase.ReadingWorksheet,
+                Label = $"Reading Worksheet {visibleWorksheetNumber} of {visibleWorksheets}",
+                Current = visibleWorksheetNumber,
+                Total = visibleWorksheets,
+                WorksheetName = worksheet.Name,
+                Preflight = preflight
+            });
+
             var usedRows = worksheet.RowsUsed().ToList();
             if (usedRows.Count == 0)
             {
@@ -110,6 +183,7 @@ public sealed class XlsxImportService : IImportService
                         usedRows[0].LastCellUsed()!.Address.ColumnNumber)
                     : worksheet.Range(request.HeadingRange.Trim());
             }
+
             catch (ArgumentException)
             {
                 errors.Add(new ValidationError(
@@ -278,9 +352,31 @@ public sealed class XlsxImportService : IImportService
                 warnings.Add(new ValidationWarning("no-data-rows", "Workbook header was present, but no data rows were found."));
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
+            _progress?.Report(new WorkbookImportProgress
+            {
+                Phase = WorkbookImportPhase.Validating,
+                Label = "Validating",
+                WorksheetName = worksheet.Name,
+                Preflight = preflight
+            });
             var materialPlan = _mappingResolver.ResolveMaterials(rowUpdates, knownMaterials, request.Options, errors);
+            cancellationToken.ThrowIfCancellationRequested();
+            _progress?.Report(new WorkbookImportProgress
+            {
+                Phase = WorkbookImportPhase.CombiningParts,
+                Label = "Combining parts",
+                WorksheetName = worksheet.Name,
+                Preflight = preflight
+            });
             rowUpdates = ImportedPartRowMerger
-                .MergeCompatibleRows(materialPlan.Updates, hasGroupColumn, hasSheetNumberColumn, hasRowNumberColumn, hasColumnNumberColumn)
+                .MergeCompatibleRows(
+                    materialPlan.Updates,
+                    hasGroupColumn,
+                    hasSheetNumberColumn,
+                    hasRowNumberColumn,
+                    hasColumnNumberColumn,
+                    cancellationToken)
                 .ToList();
             materialResolutions = materialPlan.Resolutions;
         }
@@ -293,7 +389,8 @@ public sealed class XlsxImportService : IImportService
             errors.Add(ImportFileAccessGuard.CreateXlsxReadError(request.FilePath, exception));
         }
 
-        return _validator.ValidateRows(rowUpdates, knownMaterials, errors, warnings) with
+        cancellationToken.ThrowIfCancellationRequested();
+        return _validator.ValidateRows(rowUpdates, knownMaterials, errors, warnings, cancellationToken) with
         {
             AvailableColumns = availableColumns,
             SourceColumns = sourceColumns,

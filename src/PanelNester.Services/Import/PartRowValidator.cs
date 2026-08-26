@@ -13,7 +13,8 @@ public sealed class PartRowValidator
         IEnumerable<PartRowUpdate> updates,
         IReadOnlyDictionary<string, Material> knownMaterials,
         IEnumerable<ValidationError>? errors = null,
-        IEnumerable<ValidationWarning>? warnings = null)
+        IEnumerable<ValidationWarning>? warnings = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(updates);
         ArgumentNullException.ThrowIfNull(knownMaterials);
@@ -26,6 +27,7 @@ public sealed class PartRowValidator
 
         foreach (var update in updates)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             ArgumentNullException.ThrowIfNull(update);
 
             rowIndex++;
