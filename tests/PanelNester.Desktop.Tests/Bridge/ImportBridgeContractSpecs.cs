@@ -61,6 +61,7 @@ public sealed class ImportBridgeContractSpecs
         Assert.Contains("preview-import-session", dispatcher.RegisteredTypes);
         Assert.Contains("finalize-import-session", dispatcher.RegisteredTypes);
         Assert.Contains("cancel-import-session", dispatcher.RegisteredTypes);
+        Assert.Contains("get-import-session-progress", dispatcher.RegisteredTypes);
     }
 
     private sealed class StubFileDialogService : IFileDialogService

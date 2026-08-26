@@ -78,6 +78,61 @@ public sealed class WorkbookSafetyPreflightSpecs : IDisposable
             progress.Items.Select(item => item.Phase));
     }
 
+    [Theory]
+    [InlineData("expanded-size")]
+    [InlineData("largest-entry")]
+    [InlineData("entry-count")]
+    [InlineData("compression-ratio")]
+    public async Task Import_enforces_each_package_characteristic_ceiling(string characteristic)
+    {
+        var workbookPath = CreateWorkbook();
+        var limits = characteristic switch
+        {
+            "expanded-size" => WorkbookSafetyLimits.DesktopDefault with { MaximumUncompressedBytes = 1 },
+            "largest-entry" => WorkbookSafetyLimits.DesktopDefault with { MaximumLargestEntryBytes = 1 },
+            "entry-count" => WorkbookSafetyLimits.DesktopDefault with { MaximumPackageEntryCount = 1 },
+            "compression-ratio" => WorkbookSafetyLimits.DesktopDefault with { MaximumCompressionRatio = 1 },
+            _ => throw new ArgumentOutOfRangeException(nameof(characteristic))
+        };
+        var service = new XlsxImportService(DemoMaterialCatalog.All, safetyLimits: limits);
+
+        var response = await service.ImportAsync(new ImportRequest { FilePath = workbookPath });
+
+        Assert.Equal("workbook-safety-ceiling-exceeded", Assert.Single(response.Errors).Code);
+    }
+
+    [Fact]
+    public async Task Import_returns_clear_guidance_when_package_characteristics_cross_warning_thresholds()
+    {
+        var workbookPath = CreateWorkbook();
+        var limits = WorkbookSafetyLimits.DesktopDefault with
+        {
+            WarningCompressedBytes = 0,
+            WarningUncompressedBytes = 0,
+            WarningPackageEntryCount = 0,
+            WarningLargestEntryBytes = 0,
+            WarningCompressionRatio = 0,
+            MaximumCompressedBytes = long.MaxValue,
+            MaximumUncompressedBytes = long.MaxValue,
+            MaximumPackageEntryCount = int.MaxValue,
+            MaximumLargestEntryBytes = long.MaxValue,
+            MaximumCompressionRatio = double.MaxValue
+        };
+        var service = new XlsxImportService(DemoMaterialCatalog.All, safetyLimits: limits);
+
+        var response = await service.ImportAsync(new ImportRequest { FilePath = workbookPath });
+
+        Assert.True(response.Success);
+        var safetyWarnings = response.Warnings
+            .Where(warning => warning.Code == "workbook-safety-warning")
+            .ToArray();
+        Assert.Equal(5, safetyWarnings.Length);
+        Assert.Contains(safetyWarnings, warning =>
+            warning.Message.Contains("split", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(safetyWarnings, warning =>
+            warning.Message.Contains("memory-intensive", StringComparison.OrdinalIgnoreCase));
+    }
+
     private string CreateWorkbook()
     {
         Directory.CreateDirectory(_workspacePath);

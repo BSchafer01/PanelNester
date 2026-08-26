@@ -229,7 +229,15 @@ internal sealed class ImportSessionCoordinator
         return await WithSnapshotFileAsync(
                 session,
                 cancellationToken,
-                snapshotPath => new WorkbookDiscoveryService().DiscoverAsync(snapshotPath, cancellationToken))
+                snapshotPath =>
+                {
+                    var assessment = WorkbookPackagePreflight.Inspect(
+                        snapshotPath,
+                        WorkbookSafetyLimits.DesktopDefault,
+                        cancellationToken);
+                    session.RecordPreflight(assessment);
+                    return new WorkbookDiscoveryService().DiscoverAsync(snapshotPath, cancellationToken);
+                })
             .ConfigureAwait(false);
     }
 
@@ -400,10 +408,7 @@ internal sealed class ImportSessionCoordinator
                             operationToken),
                         operationToken)
                     .ConfigureAwait(false);
-                lock (_gate)
-                {
-                    _preflight = assessment;
-                }
+                RecordPreflight(assessment);
                 ReportProgress(
                     WorkbookImportPhase.OpeningWorkbook,
                     "Opening workbook",
@@ -412,6 +417,15 @@ internal sealed class ImportSessionCoordinator
             finally
             {
                 CompleteOperation();
+            }
+        }
+
+        public void RecordPreflight(WorkbookPreflightAssessment assessment)
+        {
+            ArgumentNullException.ThrowIfNull(assessment);
+            lock (_gate)
+            {
+                _preflight = assessment;
             }
         }
 

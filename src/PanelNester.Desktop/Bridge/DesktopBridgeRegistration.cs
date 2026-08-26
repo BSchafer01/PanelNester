@@ -411,8 +411,6 @@ public static class DesktopBridgeRegistration
                             finalization.EnsureWorksheetReady(selection, request.NewMaterials);
                         }
 
-                        finalization.ReportProgress(WorkbookImportPhase.Validating, "Validating");
-
                         var workbookPreparation = await PrepareImportOptionsAsync(
                                 new ImportFileRequest
                                 {
@@ -462,6 +460,12 @@ public static class DesktopBridgeRegistration
                                     selection.WorksheetName,
                                     selection.HeadingRange)
                                 .ConfigureAwait(false);
+                            finalization.ReportProgress(
+                                WorkbookImportPhase.Validating,
+                                "Validating",
+                                selectionIndex + 1,
+                                orderedSelections.Length,
+                                selection.WorksheetName);
                             var importedWorksheet = worksheetResult.Response.Worksheet;
                             var normalizedSelection = importedWorksheet is null
                                 ? selection
@@ -510,13 +514,13 @@ public static class DesktopBridgeRegistration
                                 worksheetResult.Response));
                         }
 
-                        finalization.CancellationToken.ThrowIfCancellationRequested();
-                        finalization.ReportProgress(WorkbookImportPhase.CombiningParts, "Combining parts");
                         var workbookProject = ProjectImportFinalizer.FinalizeWorkbook(
                             request.Project,
                             workbookImportSource!,
                             worksheetImports,
-                            request.ReplaceExistingImportSource);
+                            request.ReplaceExistingImportSource,
+                            (phase, label) => finalization.ReportProgress(phase, label),
+                            finalization.CancellationToken);
                         var previewSummary = BuildWorkbookPreviewSummary(
                             worksheetImports,
                             workbookProject.State.OptimizationGroups);
@@ -524,8 +528,6 @@ public static class DesktopBridgeRegistration
                             workbookImportSource!,
                             worksheetImports,
                             workbookProject.State.Parts);
-                        finalization.CancellationToken.ThrowIfCancellationRequested();
-                        finalization.ReportProgress(WorkbookImportPhase.Finalizing, "Finalizing");
                         finalization.CancellationToken.ThrowIfCancellationRequested();
                         var finalProgress = finalization.GetProgress();
                         combinedResult = combinedResult with
@@ -580,17 +582,15 @@ public static class DesktopBridgeRegistration
                         return BuildImportSessionResponse(request.SessionId, result, ImportSessionPhase.Failed);
                     }
 
-                    finalization.CancellationToken.ThrowIfCancellationRequested();
-                    finalization.ReportProgress(WorkbookImportPhase.CombiningParts, "Combining parts");
                     var project = ProjectImportFinalizer.Finalize(
                         request.Project,
                         result.ImportSource,
                         importPreparation.Options,
                         result.Response,
                         request.TargetOptimizationGroupId,
-                        request.ReplaceExistingImportSource);
-                    finalization.CancellationToken.ThrowIfCancellationRequested();
-                    finalization.ReportProgress(WorkbookImportPhase.Finalizing, "Finalizing");
+                        request.ReplaceExistingImportSource,
+                        (phase, label) => finalization.ReportProgress(phase, label),
+                        finalization.CancellationToken);
                     finalization.CancellationToken.ThrowIfCancellationRequested();
                     var completedProgress = finalization.GetProgress();
                     result = result with

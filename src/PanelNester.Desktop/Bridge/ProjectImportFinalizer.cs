@@ -143,11 +143,14 @@ internal static class ProjectImportFinalizer
         Project project,
         ImportSourceMetadata importSource,
         IReadOnlyList<FinalizedWorksheetImport> worksheetImports,
-        bool replaceExistingImportSource = false)
+        bool replaceExistingImportSource = false,
+        Action<WorkbookImportPhase, string>? reportProgress = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(importSource);
         ArgumentNullException.ThrowIfNull(worksheetImports);
+        cancellationToken.ThrowIfCancellationRequested();
 
         var targetProject = PrepareImportSource(project, replaceExistingImportSource);
 
@@ -180,6 +183,7 @@ internal static class ProjectImportFinalizer
         var selectedGroupIds = orderedImports
             .Select(item => item.Selection.OptimizationGroupId)
             .ToHashSet(StringComparer.Ordinal);
+        reportProgress?.Invoke(WorkbookImportPhase.CombiningParts, "Combining parts");
         var groups = targetProject.State.OptimizationGroups
             .OrderBy(group => group.Order)
             .Select(group => selectedGroupIds.Contains(group.OptimizationGroupId)
@@ -189,6 +193,7 @@ internal static class ProjectImportFinalizer
 
         foreach (var worksheetImport in orderedImports)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var selection = worksheetImport.Selection;
             var groupIndex = groups.FindIndex(group => string.Equals(
                 group.OptimizationGroupId,
@@ -215,13 +220,17 @@ internal static class ProjectImportFinalizer
         }
 
         var normalizedGroups = groups
-            .Select(group => UpdateParts(group, CombineCompatibleImportedParts(group.Parts)))
+            .Select(group => UpdateParts(
+                group,
+                CombineCompatibleImportedParts(group.Parts, cancellationToken)))
             .Select((group, order) => group with { Order = order })
             .ToArray();
         var importedParts = normalizedGroups
             .SelectMany(group => group.Parts)
             .Where(part => !part.IsManual)
             .ToArray();
+        cancellationToken.ThrowIfCancellationRequested();
+        reportProgress?.Invoke(WorkbookImportPhase.Finalizing, "Finalizing");
         var resolvedMaterialMappings = orderedImports
             .SelectMany(item => item.Response.MaterialResolutions)
             .Where(resolution =>
@@ -260,6 +269,7 @@ internal static class ProjectImportFinalizer
         };
 
         var compatibilityGroup = normalizedGroups.FirstOrDefault();
+        cancellationToken.ThrowIfCancellationRequested();
         return targetProject with
         {
             State = targetProject.State with
@@ -281,16 +291,20 @@ internal static class ProjectImportFinalizer
         ImportOptions importOptions,
         ImportResponse importResponse,
         string? targetOptimizationGroupId,
-        bool replaceExistingImportSource = false)
+        bool replaceExistingImportSource = false,
+        Action<WorkbookImportPhase, string>? reportProgress = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(importSource);
         ArgumentException.ThrowIfNullOrWhiteSpace(importSource.ImportSourcePath);
         ArgumentNullException.ThrowIfNull(importOptions);
         ArgumentNullException.ThrowIfNull(importResponse);
+        cancellationToken.ThrowIfCancellationRequested();
         var targetProject = PrepareImportSource(project, replaceExistingImportSource);
         var parts = importResponse.Parts;
 
+        reportProgress?.Invoke(WorkbookImportPhase.CombiningParts, "Combining parts");
         var nextPartsById = parts.ToDictionary(part => part.RowId, StringComparer.Ordinal);
         var assignedIds = new HashSet<string>(StringComparer.Ordinal);
         var groups = targetProject.State.OptimizationGroups
@@ -330,6 +344,8 @@ internal static class ProjectImportFinalizer
             });
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
+        reportProgress?.Invoke(WorkbookImportPhase.Finalizing, "Finalizing");
         var compatibilityGroup = groups.FirstOrDefault();
         return targetProject with
         {
@@ -438,12 +454,14 @@ internal static class ProjectImportFinalizer
         };
 
     private static IReadOnlyList<PartRow> CombineCompatibleImportedParts(
-        IReadOnlyList<PartRow> parts)
+        IReadOnlyList<PartRow> parts,
+        CancellationToken cancellationToken)
     {
         var combined = new List<PartRow>(parts.Count);
         var indexByKey = new Dictionary<ImportedPartCompatibilityKey, int>();
         foreach (var part in parts)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (part.IsManual ||
                 part.Quantity <= 0 ||
                 string.Equals(part.ValidationStatus, ValidationStatuses.Error, StringComparison.Ordinal))

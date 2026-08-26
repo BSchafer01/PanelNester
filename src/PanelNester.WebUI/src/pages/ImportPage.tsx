@@ -1532,7 +1532,7 @@ export function ImportPage({
             </div>
           ) : null}
           {mappingSession?.workbook?.preflight?.warnings.map((warning) => (
-            <p className="callout callout--warning" key={warning}>
+            <p className="mapping-warning" key={warning} role="status">
               {warning}
             </p>
           ))}

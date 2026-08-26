@@ -468,6 +468,10 @@ public sealed class ImportBridgeSpecs : IDisposable
             dispatcher, sessionId, "First", 1, "combined", "Combined");
         var thirdSelection = await PreviewWorksheetSelectionAsync(
             dispatcher, sessionId, "Third", 3, "combined", "Combined");
+        var progressBeforeFinalization = await DispatchAsync<GetImportSessionProgressResponse>(
+            dispatcher,
+            BridgeMessageTypes.GetImportSessionProgress,
+            new GetImportSessionProgressRequest { SessionId = sessionId });
 
         var finalized = await DispatchAsync<ImportSessionResponse>(
             dispatcher,
@@ -495,14 +499,16 @@ public sealed class ImportBridgeSpecs : IDisposable
         Assert.Equal(["FIRST", "THIRD"], group.Parts.Select(part => part.ImportedId));
         Assert.Equal(
             [
-                WorkbookImportPhase.OpeningWorkbook,
-                WorkbookImportPhase.InspectingWorksheets,
+                WorkbookImportPhase.ReadingWorksheet,
+                WorkbookImportPhase.Validating,
                 WorkbookImportPhase.ReadingWorksheet,
                 WorkbookImportPhase.Validating,
                 WorkbookImportPhase.CombiningParts,
                 WorkbookImportPhase.Finalizing
             ],
-            finalized.ProgressHistory.Select(item => item.Phase).Distinct());
+            finalized.ProgressHistory
+                .Skip(progressBeforeFinalization.History.Count)
+                .Select(item => item.Phase));
         Assert.All(
             project.State.ImportConfiguration!.Worksheets,
             worksheet =>

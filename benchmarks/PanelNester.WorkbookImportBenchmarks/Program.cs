@@ -15,7 +15,10 @@ try
 
     await RunImportProfileAsync("large", quick ? 10_000 : 75_000, 5, 1);
     await RunImportProfileAsync("wide", quick ? 500 : 5_000, quick ? 50 : 200, 1);
-    await RunImportProfileAsync("many-worksheets", quick ? 25 : 200, 5, quick ? 20 : 100, dimensionsAreWorksheets: true);
+    await RunManyWorksheetProfileAsync(
+        "many-worksheets",
+        worksheetCount: quick ? 25 : 200,
+        rowsPerWorksheet: quick ? 20 : 100);
     await RunCompressedProfileAsync("highly-compressed", quick ? 16 : 128, quick ? 1 : 1);
     await RunCompressedProfileAsync("pathological", quick ? 32 : 600, 0);
 }
@@ -28,17 +31,8 @@ async Task RunImportProfileAsync(
     string name,
     int rows,
     int columns,
-    int worksheetCount,
-    bool dimensionsAreWorksheets = false)
+    int worksheetCount)
 {
-    if (dimensionsAreWorksheets)
-    {
-        var requestedWorksheetCount = rows;
-        rows = worksheetCount;
-        worksheetCount = requestedWorksheetCount;
-        columns = 5;
-    }
-
     var path = Path.Combine(root, $"{name}.xlsx");
     using (var workbook = new XLWorkbook())
     {
@@ -82,6 +76,9 @@ async Task RunImportProfileAsync(
         }
     });
 }
+
+Task RunManyWorksheetProfileAsync(string name, int worksheetCount, int rowsPerWorksheet) =>
+    RunImportProfileAsync(name, rowsPerWorksheet, columns: 5, worksheetCount);
 
 async Task RunCompressedProfileAsync(string name, int repeatedMiB, int randomMiB)
 {
