@@ -92,6 +92,7 @@ public static class ImportSourceReplacementService
     private static OptimizationGroup ClearResults(OptimizationGroup group) =>
         group with
         {
+            LastStockLengthOptimizationResult = null,
             LastNestingResult = null,
             LastBatchNestingResult = null,
             ResultStatus = OptimizationResultStatus.None

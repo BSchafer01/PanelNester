@@ -69,6 +69,8 @@ import {
   type UpdateOptimizationGroupsResponse,
   type UpdateRequiredPiecesRequest,
   type UpdateRequiredPiecesResponse,
+  type GenerateSelectedCutPlanRequest,
+  type GenerateSelectedCutPlanResponse,
   type UpdateDesktopAppSettingsRequest,
   type UpdateDesktopAppSettingsResponse,
   type UpdateReportSettingsRequest,
@@ -514,6 +516,16 @@ class HostBridgeClient {
     return this.invoke<UpdateRequiredPiecesResponse>(
       bridgeMessageTypes.updateRequiredPieces,
       request,
+    );
+  }
+
+  generateSelectedCutPlan(
+    request: GenerateSelectedCutPlanRequest,
+  ): Promise<GenerateSelectedCutPlanResponse> {
+    return this.invoke<GenerateSelectedCutPlanResponse>(
+      bridgeMessageTypes.generateSelectedCutPlan,
+      request,
+      longRunningRequestTimeoutMs,
     );
   }
 

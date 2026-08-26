@@ -4,6 +4,8 @@ using PanelNester.Desktop;
 using PanelNester.Domain.Contracts;
 using PanelNester.Domain.Models;
 using PanelNester.Services.Import;
+using PanelNester.Services.Nesting;
+using PanelNester.Services.Projects;
 using PanelNester.Services.Reporting;
 
 namespace PanelNester.Desktop.Bridge;
@@ -993,6 +995,30 @@ public static class DesktopBridgeRegistration
                     : UpdateRequiredPiecesResponse.Failure(
                         GetFirstErrorCode(result.Errors, "required-piece-change-invalid"),
                         GetFirstErrorMessage(result.Errors, "Required Pieces could not be updated."));
+            });
+
+        var stockLengthGenerationService = new StockLengthProjectGenerationService(
+            new SheetOptimizerStockLengthCutPlanGenerator(nestingService));
+        dispatcher.Register<GenerateSelectedCutPlanRequest>(
+            BridgeMessageTypes.GenerateSelectedCutPlan,
+            async (request, cancellationToken) =>
+            {
+                var result = await stockLengthGenerationService
+                    .GenerateSelectedAsync(request.Project, request.OptimizationGroupId, cancellationToken)
+                    .ConfigureAwait(false);
+                var generated = result.Project?.State.OptimizationGroups.FirstOrDefault(group =>
+                    string.Equals(group.OptimizationGroupId, request.OptimizationGroupId, StringComparison.Ordinal))
+                    ?.LastStockLengthOptimizationResult;
+                return result.Success && result.Project is not null && generated is not null
+                    ? new GenerateSelectedCutPlanResponse(
+                        true,
+                        result.Project,
+                        generated,
+                        null,
+                        $"Generated deterministic heuristic Cut Plan for '{request.OptimizationGroupId}'.")
+                    : GenerateSelectedCutPlanResponse.Failure(
+                        GetFirstErrorCode(result.Errors, "cut-plan-generation-failed"),
+                        GetFirstErrorMessage(result.Errors, "The selected Optimization Group could not generate a Cut Plan."));
             });
 
         if (batchNestingService is not null &&

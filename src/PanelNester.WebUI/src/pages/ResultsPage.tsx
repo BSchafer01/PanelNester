@@ -22,6 +22,7 @@ import type {
   Material,
   NestResponse,
   OptimizationGroup,
+  ProjectKind,
   ProjectMaterialSnapshot,
   ReportSettings,
   StiffenerTakeoffReportData,
@@ -30,6 +31,7 @@ import type {
 } from '../types/contracts';
 
 interface ResultsPageProps {
+  projectKind?: ProjectKind;
   optimizationGroups: OptimizationGroup[];
   activeOptimizationGroupId?: string;
   material?: Material;
@@ -69,6 +71,66 @@ interface ResultsPageProps {
     overrides?: StiffenerExportOverrides,
   ) => Promise<void>;
   onSelectOptimizationGroup: (optimizationGroupId: string) => void;
+}
+
+interface StockLengthResultsProps {
+  optimizationGroups: OptimizationGroup[];
+  activeOptimizationGroupId?: string;
+  onSelectOptimizationGroup: (optimizationGroupId: string) => void;
+}
+
+function formatCutPlanStatus(status: string): string {
+  return status.length > 0 ? `${status[0].toUpperCase()}${status.slice(1)}` : status;
+}
+
+export function StockLengthResults({
+  optimizationGroups,
+  activeOptimizationGroupId,
+  onSelectOptimizationGroup,
+}: StockLengthResultsProps) {
+  const orderedGroups = [...optimizationGroups]
+    .sort((left, right) => left.order - right.order);
+  const activeGroup = orderedGroups.find(
+    (group) => group.optimizationGroupId === activeOptimizationGroupId,
+  ) ?? orderedGroups[0];
+  const result = activeGroup?.resultStatus === 'valid'
+    ? activeGroup.lastStockLengthOptimizationResult
+    : null;
+  const stockItems = result?.cutPlans.flatMap((plan) => [...plan.stockItems]
+    .sort((left, right) => left.stockItemNumber - right.stockItemNumber)
+    .map((item) => ({ plan, item }))) ?? [];
+  const unplaced = result?.cutPlans.flatMap((plan) => plan.unplacedPieceInstances) ?? [];
+
+  return (
+    <div className="results-explorer stock-length-results">
+      <header className="page-header">
+        <div>
+          <p className="eyebrow">Stock-Length Results</p>
+          <h1>{activeGroup?.name ?? 'Selected Optimization Group'} Cut Plan</h1>
+          <p>{result?.description ?? (activeGroup?.requiredPieces.length ? 'Needs Generation' : 'Empty Optimization Group')}</p>
+        </div>
+        <label className="project-field">
+          <span>Optimization Group</span>
+          <select aria-label="Select Optimization Group results" onChange={(event) => onSelectOptimizationGroup(event.target.value)} value={activeGroup?.optimizationGroupId ?? ''}>
+            {orderedGroups.map((group) => <option key={group.optimizationGroupId} value={group.optimizationGroupId}>{group.order + 1}. {group.name}</option>)}
+          </select>
+        </label>
+      </header>
+      {result ? (
+        <>
+          <section className="project-card">
+            <div className="project-card__header"><h2>Stock Items</h2><StatusPill label={formatCutPlanStatus(result.status)} tone={result.status === 'complete' ? 'ok' : result.status === 'partial' ? 'warn' : 'error'} /></div>
+            <div className="table-wrap"><table><thead><tr><th>Stock Item</th><th>Profile Number</th><th>Finish</th><th>Stock Length</th><th>Piece Length</th><th>Saw Loss</th><th>Remainder</th><th>Utilization</th><th>Status</th></tr></thead><tbody>
+              {stockItems.map(({ plan, item }) => <tr key={item.stockItemId}><td>{item.stockItemNumber}</td><td>{plan.stockGroup.profileNumber}</td><td>{plan.stockGroup.finish || 'No finish specified'}</td><td>{item.stockLength} in</td><td>{item.pieceLength} in</td><td>{item.sawLoss} in</td><td>{item.remainder} in</td><td>{item.utilizationPercent.toFixed(1)}%</td><td>{formatCutPlanStatus(plan.status)}</td></tr>)}
+            </tbody></table></div>
+          </section>
+          <section className="project-card"><div className="project-card__header"><h2>Unplaced</h2></div>
+            {unplaced.length > 0 ? <div className="table-wrap"><table><thead><tr><th>Piece Instance</th><th>Length</th><th>Reason</th></tr></thead><tbody>{unplaced.map((item) => <tr key={item.pieceInstance.pieceInstanceId}><td>{item.pieceInstance.pieceInstanceId}</td><td>{item.pieceInstance.length} in</td><td>{item.reasonDescription}</td></tr>)}</tbody></table></div> : <p className="section-note">Every Piece Instance was placed.</p>}
+          </section>
+        </>
+      ) : <div className="empty-state"><strong>{activeGroup?.requiredPieces.length ? 'Needs Generation' : 'Empty Optimization Group'}</strong><span>{activeGroup?.requiredPieces.length ? 'Generate Selected to create a deterministic heuristic Cut Plan.' : 'Add Required Pieces before generating.'}</span></div>}
+    </div>
+  );
 }
 
 interface MaterialResultView {
@@ -340,6 +402,7 @@ function itemLabel(partId: string): string {
 }
 
 export function ResultsPage({
+  projectKind,
   optimizationGroups,
   activeOptimizationGroupId,
   material,
@@ -773,6 +836,10 @@ export function ResultsPage({
   const sheetSummaryLabel = activeSheetView
     ? `${formatDimension(activeSheetView.sheet.sheetLength)} x ${formatDimension(activeSheetView.sheet.sheetWidth)} in`
     : 'Waiting for a nesting result';
+
+  if (projectKind === 'stockLength') {
+    return <StockLengthResults optimizationGroups={optimizationGroups} activeOptimizationGroupId={activeOptimizationGroupId} onSelectOptimizationGroup={onSelectOptimizationGroup} />;
+  }
 
   return (
     <div className="results-explorer">

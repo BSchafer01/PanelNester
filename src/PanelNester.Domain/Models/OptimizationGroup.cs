@@ -18,6 +18,8 @@ public sealed record OptimizationGroup
 
     public IReadOnlyList<StockGroup> StockGroups { get; init; } = Array.Empty<StockGroup>();
 
+    public StockLengthOptimizationResult? LastStockLengthOptimizationResult { get; init; }
+
     public NestResponse? LastNestingResult { get; init; }
 
     public BatchNestResponse? LastBatchNestingResult { get; init; }

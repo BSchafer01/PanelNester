@@ -137,6 +137,72 @@ public sealed class ProjectBridgeSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Generate_Selected_Cut_Plan_round_trips_through_the_bridge_and_project_persistence()
+    {
+        var projectPath = Path.Combine(_workspacePath, "generated-stock.pnest");
+        var repository = new JsonMaterialRepository(Path.Combine(_workspacePath, "generated-materials.json"));
+        var materialService = new MaterialService(repository);
+        var dispatcher = DesktopBridgeRegistration.CreateDefault(
+            new RecordingFileDialogService(),
+            materialService,
+            new ProjectService(materialService),
+            new CsvImportService(repository),
+            new PartEditorService(repository),
+            new ShelfNestingService(),
+            () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true));
+        var project = new Project
+        {
+            ProjectId = "stock-project",
+            ProjectKind = ProjectKind.StockLength,
+            Settings = new ProjectSettings { KerfWidth = 0.125m },
+            State = new ProjectState
+            {
+                OptimizationGroups =
+                [
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "frames",
+                        Name = "Frames",
+                        StockLength = 120,
+                        RequiredPieces =
+                        [
+                            new RequiredPiece
+                            {
+                                RequiredPieceId = "piece-1", Quantity = 2, Length = 48,
+                                ProfileNumber = "P-100", Finish = "Clear"
+                            }
+                        ]
+                    }
+                ]
+            }
+        };
+
+        var generated = await DispatchAsync<GenerateSelectedCutPlanResponse>(
+            dispatcher,
+            BridgeMessageTypes.GenerateSelectedCutPlan,
+            new GenerateSelectedCutPlanRequest(project, "frames"));
+        var saved = await DispatchAsync<SaveProjectResponse>(
+            dispatcher,
+            BridgeMessageTypes.SaveProject,
+            new SaveProjectRequest(generated.Project!, projectPath));
+        var reopened = await DispatchAsync<OpenProjectResponse>(
+            dispatcher,
+            BridgeMessageTypes.OpenProject,
+            new OpenProjectRequest(projectPath));
+
+        Assert.True(generated.Success, generated.Message);
+        Assert.Equal(CutPlanStatus.Complete, generated.Result?.Status);
+        Assert.DoesNotContain("__stock__", JsonSerializer.Serialize(generated, SerializerOptions), StringComparison.Ordinal);
+        Assert.True(saved.Success);
+        Assert.True(reopened.Success);
+        var restoredGroup = Assert.Single(reopened.Project!.State.OptimizationGroups);
+        var restored = restoredGroup.LastStockLengthOptimizationResult;
+        Assert.Equal(OptimizationResultStatus.Valid, restoredGroup.ResultStatus);
+        Assert.Equal(CutPlanStatus.Complete, restored?.Status);
+        Assert.Equal(2, Assert.Single(Assert.Single(restored!.CutPlans).StockItems).CutSequence.Count);
+    }
+
+    [Fact]
     public void Phase_three_project_bridge_message_names_follow_the_existing_request_response_pattern()
     {
         var responseTypes = Phase03ProjectBridgeExpectations.ProjectMessageTypes

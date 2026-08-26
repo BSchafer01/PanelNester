@@ -1338,7 +1338,7 @@ function invalidateOptimizationGroupResults(
 ): OptimizationGroup[] {
   return groups.map((group) =>
     isAffected(group) &&
-    (group.lastNestingResult || group.lastBatchNestingResult)
+    (group.lastStockLengthOptimizationResult || group.lastNestingResult || group.lastBatchNestingResult)
       ? { ...group, resultStatus: 'stale' as const }
       : group,
   );
@@ -4512,6 +4512,37 @@ export default function App() {
     }
   };
 
+  const generateSelectedCutPlan = async (optimizationGroupId: string): Promise<void> => {
+    if (!hasCapability(bridgeMessageTypes.generateSelectedCutPlan)) {
+      throw new Error('Cut Plan generation is not available from the connected desktop host.');
+    }
+
+    dispatch({ type: 'project-operation-started', message: 'Generating deterministic heuristic Cut Plan…' });
+    try {
+      const response = await hostBridge.generateSelectedCutPlan({
+        project: buildProjectRecord(state),
+        optimizationGroupId,
+      });
+      if (!response.success || !response.project || !response.result) {
+        throw new Error(getBridgeErrorMessage(
+          response.error,
+          response.message ?? 'The selected Optimization Group could not generate a Cut Plan.',
+        ));
+      }
+
+      dispatch({
+        type: 'optimization-groups-updated',
+        project: response.project,
+        activeOptimizationGroupId: optimizationGroupId,
+        message: response.message ?? 'Generated deterministic heuristic Cut Plan.',
+      });
+    } catch (error) {
+      const message = getErrorMessage(error, 'The selected Optimization Group could not generate a Cut Plan.');
+      dispatch({ type: 'project-operation-failed', message });
+      throw new Error(message);
+    }
+  };
+
   const exportReport = async (overrides?: ReportExportOverrides) => {
     const reportSettingsOverride = overrides?.reportSettings;
     const hasResult =
@@ -4871,6 +4902,7 @@ export default function App() {
     case 'import':
       content = state.projectKind === 'stockLength' ? (
         <RequiredPiecesPage
+          activeOptimizationGroupId={state.activeOptimizationGroupId}
           busy={state.projectBusy || state.importBusy}
           inchDisplayFormat={state.projectSettings.inchDisplayFormat}
           mappingSession={state.importMappingSession}
@@ -4888,6 +4920,7 @@ export default function App() {
             })
           }
           onFinalizeImportMapping={finalizeImportMapping}
+          onGenerateSelected={generateSelectedCutPlan}
           onImportFile={importFile}
           onInchDisplayFormatChange={(inchDisplayFormat: InchDisplayFormat) =>
             dispatch({
@@ -5049,6 +5082,7 @@ export default function App() {
     case 'results':
       content = (
         <ResultsPage
+          projectKind={state.projectKind}
           optimizationGroups={state.optimizationGroups}
           activeOptimizationGroupId={state.activeOptimizationGroupId}
           material={resultsMaterial}

@@ -551,6 +551,7 @@ public sealed class ProjectService : IProjectService
         var hasOwnedContent =
             group.Parts.Count > 0 ||
             group.RequiredPieces.Count > 0 ||
+            group.LastStockLengthOptimizationResult is not null ||
             group.LastNestingResult is not null ||
             group.LastBatchNestingResult is not null;
         if (hasOwnedContent && !removeOwnedContent)
@@ -567,7 +568,8 @@ public sealed class ProjectService : IProjectService
     private static OptimizationGroup InvalidateOptimizationGroup(OptimizationGroup group) =>
         group with
         {
-            ResultStatus = group.LastNestingResult is null && group.LastBatchNestingResult is null
+            ResultStatus = group.LastStockLengthOptimizationResult is null &&
+                group.LastNestingResult is null && group.LastBatchNestingResult is null
                 ? OptimizationResultStatus.None
                 : OptimizationResultStatus.Stale
         };

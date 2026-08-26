@@ -41,6 +41,7 @@ export const bridgeMessageTypes = {
   changeProjectKind: 'change-project-kind',
   updateOptimizationGroups: 'update-optimization-groups',
   updateRequiredPieces: 'update-required-pieces',
+  generateSelectedCutPlan: 'generate-selected-cut-plan',
   getDesktopAppSettings: 'get-desktop-app-settings',
   updateDesktopAppSettings: 'update-desktop-app-settings',
 } as const;
@@ -625,6 +626,7 @@ export interface OptimizationGroup {
   stockLength?: number | null;
   requiredPieces: RequiredPiece[];
   stockGroups: StockGroup[];
+  lastStockLengthOptimizationResult?: StockLengthOptimizationResult | null;
   lastNestingResult?: NestResponse | null;
   lastBatchNestingResult?: BatchNestResponse | null;
   resultStatus: OptimizationResultStatus;
@@ -669,6 +671,52 @@ export interface StockGroup {
   profileNumber: string;
   finish?: string | null;
   requiredPieceIds: string[];
+}
+
+export type CutPlanStatus = 'complete' | 'partial' | 'failed';
+
+export interface StockLengthOptimizationResult {
+  optimizationGroupId: string;
+  status: CutPlanStatus;
+  description: string;
+  cutPlans: CutPlan[];
+}
+
+export interface CutPlan {
+  cutPlanId: string;
+  stockGroup: StockGroup;
+  status: CutPlanStatus;
+  stockItems: StockItem[];
+  unplacedPieceInstances: UnplacedPieceInstance[];
+}
+
+export interface StockItem {
+  stockItemId: string;
+  stockItemNumber: number;
+  stockLength: number;
+  pieceLength: number;
+  sawLoss: number;
+  remainder: number;
+  utilizationPercent: number;
+  cutSequence: PieceInstance[];
+}
+
+export interface PieceInstance {
+  pieceInstanceId: string;
+  requiredPieceId: string;
+  instanceNumber: number;
+  length: number;
+  profileNumber: string;
+  finish?: string | null;
+  partNumber?: string | null;
+  partName?: string | null;
+  sourceReferences: SourceReference[];
+}
+
+export interface UnplacedPieceInstance {
+  pieceInstance: PieceInstance;
+  reasonCode: string;
+  reasonDescription: string;
 }
 
 export type RequiredPieceChangeType = 'create' | 'update' | 'delete';
@@ -1173,6 +1221,19 @@ export interface UpdateRequiredPiecesResponse {
   message?: string;
 }
 
+export interface GenerateSelectedCutPlanRequest {
+  project: ProjectRecord;
+  optimizationGroupId: string;
+}
+
+export interface GenerateSelectedCutPlanResponse {
+  success: boolean;
+  project?: ProjectRecord | null;
+  result?: StockLengthOptimizationResult | null;
+  error?: BridgeError | null;
+  message?: string;
+}
+
 export interface StiffenerTakeoffLengthSummary {
   label: string;
   lengthInches: number;
@@ -1351,6 +1412,7 @@ export const requestedBridgeCapabilities: BridgeCapability[] = [
   bridgeMessageTypes.updateProjectMetadata,
   bridgeMessageTypes.updateOptimizationGroups,
   bridgeMessageTypes.updateRequiredPieces,
+  bridgeMessageTypes.generateSelectedCutPlan,
   bridgeMessageTypes.getDesktopAppSettings,
   bridgeMessageTypes.updateDesktopAppSettings,
 ];

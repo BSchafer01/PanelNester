@@ -16,6 +16,7 @@ import {
 
 interface RequiredPiecesPageProps {
   optimizationGroups: OptimizationGroup[];
+  activeOptimizationGroupId?: string;
   inchDisplayFormat: InchDisplayFormat;
   busy: boolean;
   message?: string;
@@ -24,6 +25,7 @@ interface RequiredPiecesPageProps {
   onCreateRequiredPiece: (change: RequiredPieceChange) => void | Promise<void>;
   onUpdateRequiredPiece: (change: RequiredPieceChange) => void | Promise<void>;
   onDeleteRequiredPiece: (optimizationGroupId: string, requiredPieceId: string) => void | Promise<void>;
+  onGenerateSelected?: (optimizationGroupId: string) => void | Promise<void>;
   onInchDisplayFormatChange: (format: InchDisplayFormat) => void;
   mappingSession?: ImportMappingSession;
   onImportFile?: () => void | Promise<void>;
@@ -110,6 +112,7 @@ function toDraft(groupId: string, piece: RequiredPiece): RequiredPieceDraft {
 
 export function RequiredPiecesPage({
   optimizationGroups,
+  activeOptimizationGroupId,
   inchDisplayFormat,
   busy,
   message,
@@ -118,6 +121,7 @@ export function RequiredPiecesPage({
   onCreateRequiredPiece,
   onUpdateRequiredPiece,
   onDeleteRequiredPiece,
+  onGenerateSelected,
   onInchDisplayFormatChange,
   mappingSession,
   onImportFile,
@@ -133,6 +137,9 @@ export function RequiredPiecesPage({
   const [sharedStockLengthDraft, setSharedStockLengthDraft] = useState('');
   const [draft, setDraft] = useState<RequiredPieceDraft>(emptyDraft);
   const [importCorrection, setImportCorrection] = useState<ImportCorrectionDraft | null>(null);
+  const activeOptimizationGroup = optimizationGroups.find(
+    (group) => group.optimizationGroupId === activeOptimizationGroupId,
+  ) ?? optimizationGroups[0];
 
   useEffect(() => {
     if (!draft.optimizationGroupId && optimizationGroups.length > 0) {
@@ -331,6 +338,23 @@ export function RequiredPiecesPage({
             ))}
           </select>
         </label>
+        {onGenerateSelected ? (
+          <div className="form-actions">
+            <button
+              className="primary-button"
+              disabled={busy || !activeOptimizationGroup || activeOptimizationGroup.requiredPieces.length === 0 || !activeOptimizationGroup.stockLength || activeOptimizationGroup.stockLength <= 0}
+              onClick={() => activeOptimizationGroup && runAction(() => onGenerateSelected(activeOptimizationGroup.optimizationGroupId))}
+              type="button"
+            >Generate Selected</button>
+            <span className="section-note">
+              {!activeOptimizationGroup || activeOptimizationGroup.requiredPieces.length === 0
+                ? 'Empty Optimization Group'
+                : activeOptimizationGroup.resultStatus === 'valid'
+                  ? 'Current Cut Plan'
+                  : 'Needs Generation'}
+            </span>
+          </div>
+        ) : null}
       </header>
 
       <section className="project-card stock-length-import__csv">

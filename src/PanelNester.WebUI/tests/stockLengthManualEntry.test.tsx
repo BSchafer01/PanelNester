@@ -19,6 +19,54 @@ const emptyGroup: OptimizationGroup = {
 };
 
 describe('Stock-Length manual entry', () => {
+  it('generates only the selected nonempty Optimization Group', async () => {
+    const user = userEvent.setup();
+    const onGenerateSelected = vi.fn();
+    const populatedGroup: OptimizationGroup = {
+      ...emptyGroup,
+      requiredPieces: [{
+        requiredPieceId: 'piece-1', quantity: 1, length: 48, profileNumber: 'P-100',
+        isManual: true, sourceReferences: [],
+      }],
+    };
+    const { rerender } = render(
+      <RequiredPiecesPage
+        activeOptimizationGroupId="frames"
+        busy={false}
+        inchDisplayFormat="decimal"
+        onCreateOptimizationGroup={vi.fn()}
+        onCreateRequiredPiece={vi.fn()}
+        onDeleteRequiredPiece={vi.fn()}
+        onGenerateSelected={onGenerateSelected}
+        onInchDisplayFormatChange={vi.fn()}
+        onUpdateRequiredPiece={vi.fn()}
+        onUpdateStockLength={vi.fn()}
+        optimizationGroups={[populatedGroup]}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Generate Selected' }));
+    expect(onGenerateSelected).toHaveBeenCalledWith('frames');
+
+    rerender(
+      <RequiredPiecesPage
+        activeOptimizationGroupId="frames"
+        busy={false}
+        inchDisplayFormat="decimal"
+        onCreateOptimizationGroup={vi.fn()}
+        onCreateRequiredPiece={vi.fn()}
+        onDeleteRequiredPiece={vi.fn()}
+        onGenerateSelected={onGenerateSelected}
+        onInchDisplayFormatChange={vi.fn()}
+        onUpdateRequiredPiece={vi.fn()}
+        onUpdateStockLength={vi.fn()}
+        optimizationGroups={[emptyGroup]}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Generate Selected' })).toBeDisabled();
+    expect(screen.getByText('Empty Optimization Group')).toBeInTheDocument();
+  });
+
   it('creates an Optimization Group with Stock Length', async () => {
     const user = userEvent.setup();
     const onCreateOptimizationGroup = vi.fn();

@@ -132,7 +132,13 @@ internal static class ProjectSchemaMigrator
             OptimizationGroupId = id,
             Name = name,
             Parts = parts,
-            ResultStatus = GetResultStatus(parts, group.LastNestingResult, group.LastBatchNestingResult)
+            ResultStatus = GetResultStatus(
+                id,
+                parts,
+                group.RequiredPieces ?? Array.Empty<RequiredPiece>(),
+                group.LastNestingResult,
+                group.LastBatchNestingResult,
+                group.LastStockLengthOptimizationResult)
         };
     }
 
@@ -156,10 +162,20 @@ internal static class ProjectSchemaMigrator
     }
 
     private static OptimizationResultStatus GetResultStatus(
+        string optimizationGroupId,
         IReadOnlyList<PartRow> parts,
+        IReadOnlyList<RequiredPiece> requiredPieces,
         NestResponse? nestingResult,
-        BatchNestResponse? batchResult)
+        BatchNestResponse? batchResult,
+        StockLengthOptimizationResult? stockLengthResult)
     {
+        if (stockLengthResult is not null)
+        {
+            return IsStockLengthResultConsistent(optimizationGroupId, requiredPieces, stockLengthResult)
+                ? OptimizationResultStatus.Valid
+                : OptimizationResultStatus.Stale;
+        }
+
         if (nestingResult is null && batchResult is null)
         {
             return OptimizationResultStatus.None;
@@ -168,6 +184,29 @@ internal static class ProjectSchemaMigrator
         return AreResultsConsistent(parts, nestingResult, batchResult)
             ? OptimizationResultStatus.Valid
             : OptimizationResultStatus.Stale;
+    }
+
+    private static bool IsStockLengthResultConsistent(
+        string optimizationGroupId,
+        IReadOnlyList<RequiredPiece> requiredPieces,
+        StockLengthOptimizationResult result)
+    {
+        if (!string.Equals(result.OptimizationGroupId, optimizationGroupId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var expectedInstances = requiredPieces
+            .SelectMany(piece => Enumerable.Range(1, Math.Max(piece.Quantity, 0))
+                .Select(instanceNumber => $"{piece.RequiredPieceId}:instance-{instanceNumber}"))
+            .ToHashSet(StringComparer.Ordinal);
+        var representedInstances = result.CutPlans
+            .SelectMany(plan => plan.StockItems.SelectMany(item => item.CutSequence)
+                .Concat(plan.UnplacedPieceInstances.Select(item => item.PieceInstance)))
+            .Select(instance => instance.PieceInstanceId)
+            .ToArray();
+        return representedInstances.Distinct(StringComparer.Ordinal).Count() == representedInstances.Length &&
+            expectedInstances.SetEquals(representedInstances);
     }
 
     private static bool AreResultsConsistent(

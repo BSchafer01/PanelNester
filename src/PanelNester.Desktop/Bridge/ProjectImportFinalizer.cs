@@ -787,6 +787,7 @@ internal static class ProjectImportFinalizer
     private static OptimizationGroup ClearResults(OptimizationGroup group) =>
         group with
         {
+            LastStockLengthOptimizationResult = null,
             LastNestingResult = null,
             LastBatchNestingResult = null,
             ResultStatus = OptimizationResultStatus.None
