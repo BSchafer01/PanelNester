@@ -120,6 +120,31 @@ public sealed class WorkbookDiscoveryServiceSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Discovery_does_not_choose_between_unequal_high_confidence_tables()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "multiple-high-confidence-headings.xlsx");
+
+        using (var workbook = new XLWorkbook())
+        {
+            var worksheet = workbook.AddWorksheet("Parts");
+            WriteCandidate(worksheet, 2, "P-100");
+            WriteCandidate(worksheet, 7, "P-200");
+            worksheet.Cell("F2").Value = "Part Group";
+            worksheet.Cell("F3").Value = "North";
+            workbook.SaveAs(workbookPath);
+        }
+
+        var result = await new WorkbookDiscoveryService().DiscoverAsync(workbookPath);
+
+        var worksheetResult = Assert.Single(result.Worksheets);
+        Assert.Equal("tied", worksheetResult.HeadingRangeDetectionStatus);
+        Assert.Equal(string.Empty, worksheetResult.HeadingRange);
+        Assert.Equal(2, worksheetResult.HeadingRangeCandidates.Count(candidate => candidate.IsHighConfidence));
+        Assert.Equal(2, worksheetResult.HeadingRangeCandidates.Count(candidate => candidate.IsTied));
+    }
+
+    [Fact]
     public async Task Discovery_leaves_low_confidence_candidates_unset()
     {
         Directory.CreateDirectory(_workspacePath);
@@ -141,6 +166,28 @@ public sealed class WorkbookDiscoveryServiceSpecs : IDisposable
         Assert.Equal("low-confidence", worksheetResult.HeadingRangeDetectionStatus);
         Assert.Equal(string.Empty, worksheetResult.HeadingRange);
         Assert.False(Assert.Single(worksheetResult.HeadingRangeCandidates).IsHighConfidence);
+    }
+
+    [Fact]
+    public async Task Discovery_marks_equal_low_confidence_candidates_as_tied()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "low-confidence-tie.xlsx");
+
+        using (var workbook = new XLWorkbook())
+        {
+            var worksheet = workbook.AddWorksheet("Parts");
+            WriteLowConfidenceCandidate(worksheet, 2, "P-100");
+            WriteLowConfidenceCandidate(worksheet, 7, "P-200");
+            workbook.SaveAs(workbookPath);
+        }
+
+        var result = await new WorkbookDiscoveryService().DiscoverAsync(workbookPath);
+
+        var worksheetResult = Assert.Single(result.Worksheets);
+        Assert.Equal("tied", worksheetResult.HeadingRangeDetectionStatus);
+        Assert.Equal(string.Empty, worksheetResult.HeadingRange);
+        Assert.Equal(2, worksheetResult.HeadingRangeCandidates.Count(candidate => candidate.IsTied));
     }
 
     private static void AddChartSheet(string workbookPath)
@@ -173,6 +220,17 @@ public sealed class WorkbookDiscoveryServiceSpecs : IDisposable
         worksheet.Cell(rowNumber + 1, 3).Value = 24;
         worksheet.Cell(rowNumber + 1, 4).Value = 1;
         worksheet.Cell(rowNumber + 1, 5).Value = "ACM";
+    }
+
+    private static void WriteLowConfidenceCandidate(
+        IXLWorksheet worksheet,
+        int rowNumber,
+        string partId)
+    {
+        worksheet.Cell(rowNumber, 1).Value = "Part Number";
+        worksheet.Cell(rowNumber, 2).Value = "Qty";
+        worksheet.Cell(rowNumber + 1, 1).Value = partId;
+        worksheet.Cell(rowNumber + 1, 2).Value = 2;
     }
 
     public void Dispose()

@@ -1024,7 +1024,14 @@ export function ImportPage({
       ...current,
       [worksheetName]: copied?.headingRange ?? '',
     }));
-    onUpdateImportMappingSession({ ...mappingSession, worksheets: result.drafts });
+    const activeDraft = result.drafts.find(
+      (draft) => draft.worksheet.worksheetName === mappingSession.activeWorksheetName,
+    );
+    onUpdateImportMappingSession({
+      ...mappingSession,
+      worksheets: result.drafts,
+      hasPendingChanges: activeDraft?.hasPendingChanges ?? mappingSession.hasPendingChanges,
+    });
   };
 
   const prepareBulkHeadingConfirmation = () => {
@@ -1038,12 +1045,17 @@ export function ImportPage({
     if (!mappingSession?.worksheets || !bulkHeadingSummary) {
       return;
     }
+    const worksheets = applyHighConfidenceHeadingRanges(
+      mappingSession.worksheets,
+      bulkHeadingSummary,
+    );
+    const activeDraft = worksheets.find(
+      (draft) => draft.worksheet.worksheetName === mappingSession.activeWorksheetName,
+    );
     onUpdateImportMappingSession({
       ...mappingSession,
-      worksheets: applyHighConfidenceHeadingRanges(
-        mappingSession.worksheets,
-        bulkHeadingSummary,
-      ),
+      worksheets,
+      hasPendingChanges: activeDraft?.hasPendingChanges ?? mappingSession.hasPendingChanges,
     });
     setBulkHeadingSummary(undefined);
   };
@@ -1561,8 +1573,7 @@ export function ImportPage({
                             {(draft.worksheet.headingRangeCandidates ?? []).map((candidate) => (
                               <button
                                 className={`heading-candidate${
-                                  draft.worksheet.headingRangeDetectionStatus === 'tied' &&
-                                  candidate.isHighConfidence
+                                  candidate.isTied
                                     ? ' heading-candidate--tied'
                                     : ''
                                 }`}

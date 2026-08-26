@@ -1,5 +1,16 @@
 namespace PanelNester.Domain.Models;
 
+public static class HeadingRangeDetectionStatuses
+{
+    public const string None = "none";
+
+    public const string LowConfidence = "low-confidence";
+
+    public const string Tied = "tied";
+
+    public const string UniqueHighConfidence = "unique-high-confidence";
+}
+
 public sealed record ImportConfiguration
 {
     public ImportOptions Options { get; init; } = new();
@@ -32,7 +43,7 @@ public sealed record ImportWorksheetDescriptor
 
     public string HeadingRange { get; init; } = string.Empty;
 
-    public string HeadingRangeDetectionStatus { get; init; } = "none";
+    public string HeadingRangeDetectionStatus { get; init; } = HeadingRangeDetectionStatuses.None;
 
     public IReadOnlyList<HeadingRangeCandidate> HeadingRangeCandidates { get; init; } =
         Array.Empty<HeadingRangeCandidate>();
@@ -48,6 +59,8 @@ public sealed record HeadingRangeCandidate
     public double Confidence { get; init; }
 
     public bool IsHighConfidence { get; init; }
+
+    public bool IsTied { get; init; }
 }
 
 public sealed record WorksheetPreviewRow

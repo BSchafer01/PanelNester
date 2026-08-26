@@ -133,9 +133,9 @@ public sealed class XlsxImportService : IImportService
                 return PartRowValidator.CreateResponse([], errors, warnings);
             }
 
-            var headerRowNumber = headingAddress.FirstAddress.RowNumber;
-            var firstHeaderColumn = headingAddress.FirstAddress.ColumnNumber;
-            var lastHeaderColumn = headingAddress.LastAddress.ColumnNumber;
+            var headingRowNumber = headingAddress.FirstAddress.RowNumber;
+            var firstHeadingColumn = headingAddress.FirstAddress.ColumnNumber;
+            var lastHeadingColumn = headingAddress.LastAddress.ColumnNumber;
             if (headingRange.Cells().All(cell => string.IsNullOrWhiteSpace(GetCellText(cell))))
             {
                 errors.Add(new ValidationError("missing-column", "Worksheet header row is empty."));
@@ -149,11 +149,11 @@ public sealed class XlsxImportService : IImportService
                 HeadingRange = headingRange.RangeAddress.ToStringRelative()
             };
 
-            sourceColumns = Enumerable.Range(firstHeaderColumn, lastHeaderColumn - firstHeaderColumn + 1)
+            sourceColumns = Enumerable.Range(firstHeadingColumn, lastHeadingColumn - firstHeadingColumn + 1)
                 .Select(columnNumber => new ImportSourceColumn
                 {
                     Address = XLHelper.GetColumnLetterFromNumber(columnNumber),
-                    Heading = GetCellText(worksheet.Cell(headerRowNumber, columnNumber))
+                    Heading = GetCellText(worksheet.Cell(headingRowNumber, columnNumber))
                 })
                 .ToArray();
             availableColumns = sourceColumns.Select(column => column.Address).ToArray();
@@ -184,8 +184,8 @@ public sealed class XlsxImportService : IImportService
             var hasRowNumberColumn = columnPlan.FieldToSource.TryGetValue(ImportFieldNames.RowNumber, out var rowNumberSourceColumn);
             var hasColumnNumberColumn = columnPlan.FieldToSource.TryGetValue(ImportFieldNames.ColumnNumber, out var columnNumberSourceColumn);
 
-            var lastTableRow = worksheet.LastRowUsed()?.RowNumber() ?? headerRowNumber;
-            foreach (var row in Enumerable.Range(headerRowNumber + 1, Math.Max(0, lastTableRow - headerRowNumber))
+            var lastTableRegionRow = worksheet.LastRowUsed()?.RowNumber() ?? headingRowNumber;
+            foreach (var row in Enumerable.Range(headingRowNumber + 1, Math.Max(0, lastTableRegionRow - headingRowNumber))
                          .Select(worksheet.Row))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -216,7 +216,7 @@ public sealed class XlsxImportService : IImportService
                             WorksheetPosition = worksheet.Position,
                             PhysicalRow = row.RowNumber(),
                             SourceFingerprint = Fingerprint(
-                                Enumerable.Range(firstHeaderColumn, lastHeaderColumn - firstHeaderColumn + 1)
+                                Enumerable.Range(firstHeadingColumn, lastHeadingColumn - firstHeadingColumn + 1)
                                     .Select(columnNumber => GetCellText(row.Cell(columnNumber))))
                         }
                     ]

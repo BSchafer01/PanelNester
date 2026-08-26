@@ -239,6 +239,7 @@ export interface HeadingRangeCandidate {
   address: string;
   confidence: number;
   isHighConfidence: boolean;
+  isTied: boolean;
 }
 
 export interface WorksheetPreviewRow {

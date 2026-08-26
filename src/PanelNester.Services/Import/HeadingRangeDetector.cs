@@ -46,26 +46,40 @@ internal static class HeadingRangeDetector
             .ThenBy(candidate => candidate.Address, StringComparer.Ordinal)
             .ToArray();
         var highConfidence = candidates.Where(candidate => candidate.IsHighConfidence).ToArray();
-        var topHighConfidence = highConfidence.Length == 0
+        var topScoreCandidates = candidates.Length == 0
             ? Array.Empty<HeadingRangeCandidate>()
-            : highConfidence
-                .Where(candidate => Math.Abs(candidate.Confidence - highConfidence[0].Confidence) < 0.0001)
+            : candidates
+                .Where(candidate => Math.Abs(candidate.Confidence - candidates[0].Confidence) < 0.0001)
                 .ToArray();
-        var detectionStatus = topHighConfidence.Length switch
+        var detectionStatus = highConfidence.Length switch
         {
-            1 => "unique-high-confidence",
-            > 1 => "tied",
-            _ when candidates.Length > 0 => "low-confidence",
-            _ => "none"
+            1 => HeadingRangeDetectionStatuses.UniqueHighConfidence,
+            > 1 => HeadingRangeDetectionStatuses.Tied,
+            _ when topScoreCandidates.Length > 1 => HeadingRangeDetectionStatuses.Tied,
+            _ when candidates.Length > 0 => HeadingRangeDetectionStatuses.LowConfidence,
+            _ => HeadingRangeDetectionStatuses.None
         };
+        var ambiguousAddresses = (highConfidence.Length > 1
+                ? highConfidence
+                : topScoreCandidates.Length > 1
+                    ? topScoreCandidates
+                    : Array.Empty<HeadingRangeCandidate>())
+            .Select(candidate => candidate.Address)
+            .ToHashSet(StringComparer.Ordinal);
+        var presentedCandidates = candidates
+            .Select(candidate => candidate with
+            {
+                IsTied = ambiguousAddresses.Contains(candidate.Address)
+            })
+            .ToArray();
 
         return new ImportWorksheetDescriptor
         {
             WorksheetName = worksheet.Name,
             OriginalPosition = worksheet.Position,
-            HeadingRange = topHighConfidence.Length == 1 ? topHighConfidence[0].Address : string.Empty,
+            HeadingRange = highConfidence.Length == 1 ? highConfidence[0].Address : string.Empty,
             HeadingRangeDetectionStatus = detectionStatus,
-            HeadingRangeCandidates = candidates,
+            HeadingRangeCandidates = presentedCandidates,
             PreviewRows = previewRows
         };
     }
