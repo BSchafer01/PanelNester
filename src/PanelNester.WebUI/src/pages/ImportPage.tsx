@@ -983,6 +983,14 @@ export function ImportPage({
     );
     if (result.error) {
       setHeadingRangeErrors((current) => ({ ...current, [worksheetName]: result.error! }));
+      const activeDraft = result.drafts.find(
+        (draft) => draft.worksheet.worksheetName === mappingSession.activeWorksheetName,
+      );
+      onUpdateImportMappingSession({
+        ...mappingSession,
+        worksheets: result.drafts,
+        hasPendingChanges: activeDraft?.hasPendingChanges ?? mappingSession.hasPendingChanges,
+      });
       return;
     }
 

@@ -50,7 +50,15 @@ export function confirmWorksheetHeadingRange(
   const normalized = normalizeHeadingRangeAddress(address);
   if (!normalized) {
     return {
-      drafts,
+      drafts: drafts.map((draft) =>
+        draft.worksheet.worksheetName === worksheetName
+          ? {
+              ...draft,
+              headingRangeConfirmed: false,
+              hasPendingChanges: true,
+            }
+          : draft,
+      ),
       error: 'Enter one contiguous, single-row Heading Range such as B4:H4.',
     };
   }

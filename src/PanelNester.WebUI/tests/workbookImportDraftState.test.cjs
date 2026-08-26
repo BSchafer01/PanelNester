@@ -115,7 +115,8 @@ test('preview cell endpoints produce a normalized single-row Heading Range', () 
 });
 
 test('manual entry rejects multi-row and noncontiguous Heading Ranges clearly', () => {
-  const drafts = createWorkbookWorksheetDrafts('fixture', workbook, preview, options);
+  let drafts = createWorkbookWorksheetDrafts('fixture', workbook, preview, options);
+  drafts = confirmWorksheetHeadingRange(drafts, 'First', 'B4:H4').drafts;
 
   const multiRow = confirmWorksheetHeadingRange(drafts, 'First', 'B4:H5');
   const noncontiguous = confirmWorksheetHeadingRange(drafts, 'First', 'B4:D4,F4:H4');
@@ -123,6 +124,7 @@ test('manual entry rejects multi-row and noncontiguous Heading Ranges clearly', 
   assert.match(multiRow.error, /one contiguous, single-row/i);
   assert.match(noncontiguous.error, /one contiguous, single-row/i);
   assert.equal(multiRow.drafts[0].headingRangeConfirmed, false);
+  assert.equal(multiRow.drafts[0].hasPendingChanges, true);
 });
 
 test('Same Heading Range as Previous copies an independently editable snapshot across Optimization Groups', () => {

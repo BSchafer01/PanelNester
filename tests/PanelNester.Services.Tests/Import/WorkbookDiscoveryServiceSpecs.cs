@@ -120,7 +120,7 @@ public sealed class WorkbookDiscoveryServiceSpecs : IDisposable
     }
 
     [Fact]
-    public async Task Discovery_does_not_choose_between_unequal_high_confidence_tables()
+    public async Task Discovery_does_not_choose_between_unequal_high_confidence_Heading_Ranges()
     {
         Directory.CreateDirectory(_workspacePath);
         var workbookPath = Path.Combine(_workspacePath, "multiple-high-confidence-headings.xlsx");
