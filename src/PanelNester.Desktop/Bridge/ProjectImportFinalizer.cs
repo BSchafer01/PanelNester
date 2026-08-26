@@ -1,5 +1,6 @@
 using PanelNester.Domain.Models;
 using PanelNester.Domain.Contracts;
+using PanelNester.Services.Projects;
 
 namespace PanelNester.Desktop.Bridge;
 
@@ -141,11 +142,14 @@ internal static class ProjectImportFinalizer
     public static Project FinalizeWorkbook(
         Project project,
         ImportSourceMetadata importSource,
-        IReadOnlyList<FinalizedWorksheetImport> worksheetImports)
+        IReadOnlyList<FinalizedWorksheetImport> worksheetImports,
+        bool replaceExistingImportSource = false)
     {
         ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(importSource);
         ArgumentNullException.ThrowIfNull(worksheetImports);
+
+        var targetProject = PrepareImportSource(project, replaceExistingImportSource);
 
         var orderedImports = worksheetImports
             .OrderBy(item => item.Selection.OriginalPosition)
@@ -176,7 +180,7 @@ internal static class ProjectImportFinalizer
         var selectedGroupIds = orderedImports
             .Select(item => item.Selection.OptimizationGroupId)
             .ToHashSet(StringComparer.Ordinal);
-        var groups = project.State.OptimizationGroups
+        var groups = targetProject.State.OptimizationGroups
             .OrderBy(group => group.Order)
             .Select(group => selectedGroupIds.Contains(group.OptimizationGroupId)
                 ? UpdateParts(group, group.Parts.Where(part => part.IsManual).ToArray())
@@ -200,7 +204,8 @@ internal static class ProjectImportFinalizer
                 {
                     OptimizationGroupId = selection.OptimizationGroupId,
                     Name = MakeUniqueGroupName(requestedName, groups),
-                    Order = groupIndex
+                    Order = groupIndex,
+                    Origin = OptimizationGroupOrigin.ImportSource
                 });
             }
 
@@ -255,9 +260,9 @@ internal static class ProjectImportFinalizer
         };
 
         var compatibilityGroup = normalizedGroups.FirstOrDefault();
-        return project with
+        return targetProject with
         {
-            State = project.State with
+            State = targetProject.State with
             {
                 SourceFilePath = importSource.ImportSourcePath,
                 ImportSource = importSource,
@@ -275,22 +280,36 @@ internal static class ProjectImportFinalizer
         ImportSourceMetadata importSource,
         ImportOptions importOptions,
         ImportResponse importResponse,
-        string? targetOptimizationGroupId)
+        string? targetOptimizationGroupId,
+        bool replaceExistingImportSource = false)
     {
         ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(importSource);
         ArgumentException.ThrowIfNullOrWhiteSpace(importSource.ImportSourcePath);
         ArgumentNullException.ThrowIfNull(importOptions);
         ArgumentNullException.ThrowIfNull(importResponse);
+        var targetProject = PrepareImportSource(project, replaceExistingImportSource);
         var parts = importResponse.Parts;
 
         var nextPartsById = parts.ToDictionary(part => part.RowId, StringComparer.Ordinal);
         var assignedIds = new HashSet<string>(StringComparer.Ordinal);
-        var groups = project.State.OptimizationGroups
+        var groups = targetProject.State.OptimizationGroups
             .OrderBy(group => group.Order)
             .Select(group => SynchronizeExistingParts(group, nextPartsById, assignedIds))
             .ToArray();
         var unassignedParts = parts.Where(part => !assignedIds.Contains(part.RowId)).ToArray();
+
+        if (groups.Length == 0 && unassignedParts.Length > 0)
+        {
+            groups =
+            [
+                ImportSourceReplacementService.CreateSourceOptimizationGroup(
+                    targetProject,
+                    importSource,
+                    unassignedParts)
+            ];
+            unassignedParts = [];
+        }
 
         if (groups.Length > 0 && unassignedParts.Length > 0)
         {
@@ -312,9 +331,9 @@ internal static class ProjectImportFinalizer
         }
 
         var compatibilityGroup = groups.FirstOrDefault();
-        return project with
+        return targetProject with
         {
-            State = project.State with
+            State = targetProject.State with
             {
                 SourceFilePath = importSource.ImportSourcePath,
                 ImportSource = importSource,
@@ -368,6 +387,19 @@ internal static class ProjectImportFinalizer
                     }
                 ]
         };
+    }
+
+    private static Project PrepareImportSource(Project project, bool replacementConfirmed)
+    {
+        var preparation = ImportSourceReplacementService.Prepare(project, replacementConfirmed);
+        if (preparation.ConfirmationRequired)
+        {
+            throw new ImportSessionException(
+                "import-source-replacement-confirmation-required",
+                "Replacing the existing Import Source requires explicit confirmation.");
+        }
+
+        return preparation.Project;
     }
 
     private static OptimizationGroup SynchronizeExistingParts(

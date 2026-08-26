@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { MaterialCombobox } from '../components/MaterialCombobox';
+import { ImportDetails } from '../components/ImportDetails';
 import { StatusPill } from '../components/StatusPill';
 import { ThemedSelect, type ThemedSelectOption } from '../components/ThemedSelect';
 import {
@@ -23,6 +24,7 @@ import {
   requiredImportFieldNames,
   type HostBridgeSnapshot,
   type ImportFieldName,
+  type ImportConfiguration,
   type ImportMappingSession,
   type ImportMaterialMapping,
   type ImportNewMaterialRequest,
@@ -33,6 +35,7 @@ import {
   type MaterialDraft,
   type OptimizationGroup,
   type ImportResponse,
+  type ImportSourceMetadata,
   type PartRow,
   type PartRowUpdate,
   type ValidationStatus,
@@ -81,6 +84,8 @@ interface ImportPageProps {
   materials: Material[];
   selectedFilePath?: string;
   importResponse: ImportResponse;
+  importSource?: ImportSourceMetadata;
+  importConfiguration?: ImportConfiguration;
   mappingSession?: ImportMappingSession;
   importMessage: string;
   importPhase?: ImportSessionPhase;
@@ -662,6 +667,8 @@ export function ImportPage({
   materials,
   selectedFilePath,
   importResponse,
+  importSource,
+  importConfiguration,
   mappingSession,
   importMessage,
   importPhase,
@@ -1511,6 +1518,15 @@ export function ImportPage({
           ) : null}
           {displayFilePath ? (
             <p className="module-hero__meta import-path">Source file: {displayFilePath}</p>
+          ) : null}
+          {importSource && importConfiguration ? (
+            <ImportDetails
+              importSource={importSource}
+              importConfiguration={importConfiguration}
+              importedParts={importResponse.parts}
+              materials={materials}
+              optimizationGroups={optimizationGroups}
+            />
           ) : null}
           <p className="module-hero__meta">
             {hasPendingImportReview

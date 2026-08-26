@@ -111,6 +111,7 @@ public sealed class ProjectPersistenceSpecs : IDisposable
             OptimizationGroupId = "group-stable-001",
             Name = "Lobby Panels",
             Order = 0,
+            Origin = OptimizationGroupOrigin.ImportSource,
             Parts = [sample.State.Parts[0] with { Group = "Casework" }],
             LastNestingResult = sample.State.LastNestingResult,
             LastBatchNestingResult = sample.State.LastBatchNestingResult,
@@ -129,6 +130,7 @@ public sealed class ProjectPersistenceSpecs : IDisposable
         Assert.Equal("group-stable-001", restoredGroup.OptimizationGroupId);
         Assert.Equal("Lobby Panels", restoredGroup.Name);
         Assert.Equal(0, restoredGroup.Order);
+        Assert.Equal(OptimizationGroupOrigin.ImportSource, restoredGroup.Origin);
         Assert.Equal("Casework", Assert.Single(restoredGroup.Parts).Group);
         Assert.Equal(OptimizationResultStatus.Valid, restoredGroup.ResultStatus);
         Assert.Equivalent(group.LastBatchNestingResult, restoredGroup.LastBatchNestingResult, strict: true);
@@ -138,6 +140,10 @@ public sealed class ProjectPersistenceSpecs : IDisposable
     public async Task Current_schema_round_trips_import_configuration_and_source_metadata_without_snapshot_bytes()
     {
         var filePath = Path.Combine(_workspacePath, "import-context-roundtrip.pnest");
+        var importSourcePath = Path.Combine(_workspacePath, "Lobby.xlsx");
+        const string sourceOnlyMarker = "SOURCE-BYTES-MUST-NOT-BE-EMBEDDED-7C1E6D1A";
+        EnsureWorkspace();
+        await File.WriteAllTextAsync(importSourcePath, sourceOnlyMarker);
         var serializer = new ProjectSerializer();
         var sample = Phase03ProjectPersistenceSpec.CreateSampleProject();
         var project = sample with
@@ -146,7 +152,7 @@ public sealed class ProjectPersistenceSpecs : IDisposable
             {
                 ImportSource = new ImportSourceMetadata
                 {
-                    ImportSourcePath = @"C:\imports\Lobby.csv",
+                    ImportSourcePath = importSourcePath,
                     ContentFingerprint = "A1B2C3",
                     ContentLength = 1234,
                     SnapshotCapturedAtUtc = new DateTime(2026, 8, 25, 12, 30, 0, DateTimeKind.Utc)
@@ -239,6 +245,7 @@ public sealed class ProjectPersistenceSpecs : IDisposable
 
         await serializer.SaveAsync(project, filePath);
         var restored = await serializer.LoadAsync(filePath);
+        var persistedContent = Encoding.UTF8.GetString(await File.ReadAllBytesAsync(filePath));
 
         Assert.Equivalent(project.State.ImportSource, restored.State.ImportSource, strict: true);
         Assert.Equivalent(project.State.ImportConfiguration, restored.State.ImportConfiguration, strict: true);
@@ -246,6 +253,7 @@ public sealed class ProjectPersistenceSpecs : IDisposable
             project.State.Parts[0].SourceReferences,
             restored.State.Parts[0].SourceReferences,
             strict: true);
+        Assert.DoesNotContain(sourceOnlyMarker, persistedContent, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -272,7 +280,7 @@ public sealed class ProjectPersistenceSpecs : IDisposable
 
         var restored = await serializer.LoadAsync(filePath);
 
-        Assert.Equal(3, Project.CurrentVersion);
+        Assert.Equal(4, Project.CurrentVersion);
         Assert.Equal(Project.CurrentVersion, restored.Version);
         var group = Assert.Single(restored.State.OptimizationGroups);
         Assert.Equal("project-phase3-001", group.OptimizationGroupId);
@@ -280,6 +288,73 @@ public sealed class ProjectPersistenceSpecs : IDisposable
         Assert.Equal("Casework", Assert.Single(group.Parts).Group);
         Assert.Equal(OptimizationResultStatus.Valid, group.ResultStatus);
         Assert.Equivalent(legacy.State.LastBatchNestingResult, group.LastBatchNestingResult, strict: true);
+    }
+
+    [Fact]
+    public async Task Version_three_projects_migrate_only_import_created_group_origins()
+    {
+        var filePath = Path.Combine(_workspacePath, "version-three-group-origins.pnest");
+        var sourcePart = new PartRow { RowId = "source", ImportedId = "SOURCE" };
+        var userGroupPart = new PartRow { RowId = "user", ImportedId = "USER" };
+        var project = new Project
+        {
+            Version = 3,
+            ProjectId = "version-three-project",
+            State = new ProjectState
+            {
+                SourceFilePath = "existing.xlsx",
+                ImportSource = new ImportSourceMetadata { ImportSourcePath = "existing.xlsx" },
+                ImportConfiguration = new ImportConfiguration
+                {
+                    Worksheets =
+                    [
+                        new ImportWorksheetConfiguration
+                        {
+                            WorksheetName = "Source Created",
+                            OriginalPosition = 1,
+                            OptimizationGroupId = "import-session-1"
+                        },
+                        new ImportWorksheetConfiguration
+                        {
+                            WorksheetName = "User Assigned",
+                            OriginalPosition = 2,
+                            OptimizationGroupId = "user-group"
+                        }
+                    ]
+                },
+                OptimizationGroups =
+                [
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "import-session-1",
+                        Name = "Source Created",
+                        Order = 0,
+                        Parts = [sourcePart]
+                    },
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "user-group",
+                        Name = "User Assigned",
+                        Order = 1,
+                        Parts = [userGroupPart]
+                    }
+                ]
+            }
+        };
+        EnsureWorkspace();
+        await File.WriteAllTextAsync(
+            filePath,
+            JsonSerializer.Serialize(project, CreateLegacyJsonOptions()));
+
+        var restored = await new ProjectSerializer().LoadAsync(filePath);
+
+        Assert.Equal(Project.CurrentVersion, restored.Version);
+        Assert.Equal(
+            OptimizationGroupOrigin.ImportSource,
+            restored.State.OptimizationGroups.Single(group => group.OptimizationGroupId == "import-session-1").Origin);
+        Assert.Equal(
+            OptimizationGroupOrigin.Project,
+            restored.State.OptimizationGroups.Single(group => group.OptimizationGroupId == "user-group").Origin);
     }
 
     [Fact]
@@ -558,7 +633,8 @@ public sealed class ProjectPersistenceSpecs : IDisposable
     [Theory]
     [InlineData(false, true, 1, "project-not-found")]
     [InlineData(true, false, 1, "project-corrupt")]
-    [InlineData(true, true, 4, "project-unsupported-version")]
+    [InlineData(true, true, 5, "project-unsupported-version")]
+    [InlineData(true, true, 4, null)]
     [InlineData(true, true, 3, null)]
     [InlineData(true, true, 2, null)]
     [InlineData(true, true, 1, null)]

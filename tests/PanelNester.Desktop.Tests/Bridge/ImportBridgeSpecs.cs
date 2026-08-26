@@ -967,6 +967,277 @@ public sealed class ImportBridgeSpecs : IDisposable
         Assert.Same(existingResult, manualGroup.LastNestingResult);
         Assert.Equal(OptimizationResultStatus.Valid, manualGroup.ResultStatus);
     }
+
+    [Fact]
+    public void Workbook_finalization_requires_explicit_confirmation_before_replacing_an_Import_Source()
+    {
+        var project = new Project
+        {
+            ProjectId = "replacement-confirmation-project",
+            State = new ProjectState
+            {
+                ImportSource = new ImportSourceMetadata
+                {
+                    ImportSourcePath = "existing.xlsx",
+                    ContentFingerprint = "EXISTING"
+                },
+                ImportConfiguration = new ImportConfiguration
+                {
+                    Worksheets =
+                    [
+                        new ImportWorksheetConfiguration
+                        {
+                            WorksheetName = "Existing",
+                            OriginalPosition = 1,
+                            OptimizationGroupId = "existing-group"
+                        }
+                    ]
+                }
+            }
+        };
+
+        var exception = Assert.Throws<ImportSessionException>(() =>
+            ProjectImportFinalizer.FinalizeWorkbook(
+                project,
+                new ImportSourceMetadata
+                {
+                    ImportSourcePath = "replacement.xlsx",
+                    ContentFingerprint = "REPLACEMENT"
+                },
+                [
+                    new FinalizedWorksheetImport(
+                        new ImportWorksheetSelection
+                        {
+                            WorksheetName = "Replacement",
+                            OriginalPosition = 1,
+                            OptimizationGroupId = "replacement-group",
+                            OptimizationGroupName = "Replacement"
+                        },
+                        new ImportOptions(),
+                        new ImportResponse
+                        {
+                            Success = true,
+                            Parts = [new PartRow { RowId = "replacement-part", ImportedId = "NEW" }]
+                        })
+                ],
+                replaceExistingImportSource: false));
+
+        Assert.Equal("import-source-replacement-confirmation-required", exception.Code);
+        Assert.Equal("existing.xlsx", project.State.ImportSource.ImportSourcePath);
+    }
+
+    [Fact]
+    public void Confirmed_Import_Source_replacement_preserves_manual_work_and_removes_empty_source_groups()
+    {
+        var retainedManualPart = new PartRow
+        {
+            RowId = "retained-manual",
+            ImportedId = "MANUAL",
+            IsManual = true
+        };
+        var unrelatedManualPart = new PartRow
+        {
+            RowId = "unrelated-manual",
+            ImportedId = "UNRELATED",
+            IsManual = true
+        };
+        var affectedResult = new NestResponse { Success = true };
+        var unrelatedResult = new NestResponse { Success = true };
+        var project = new Project
+        {
+            ProjectId = "replacement-project",
+            State = new ProjectState
+            {
+                SourceFilePath = "existing.xlsx",
+                ImportSource = new ImportSourceMetadata
+                {
+                    ImportSourcePath = "existing.xlsx",
+                    ContentFingerprint = "EXISTING"
+                },
+                ImportConfiguration = new ImportConfiguration
+                {
+                    Worksheets =
+                    [
+                        new ImportWorksheetConfiguration
+                        {
+                            WorksheetName = "Keep Group",
+                            OriginalPosition = 1,
+                            OptimizationGroupId = "source-with-manual"
+                        },
+                        new ImportWorksheetConfiguration
+                        {
+                            WorksheetName = "Remove Group",
+                            OriginalPosition = 2,
+                            OptimizationGroupId = "source-only"
+                        },
+                        new ImportWorksheetConfiguration
+                        {
+                            WorksheetName = "User Assigned",
+                            OriginalPosition = 3,
+                            OptimizationGroupId = "user-assigned"
+                        }
+                    ]
+                },
+                Parts =
+                [
+                    new PartRow { RowId = "old-a", ImportedId = "OLD-A" },
+                    new PartRow { RowId = "old-b", ImportedId = "OLD-B" },
+                    new PartRow { RowId = "old-user", ImportedId = "OLD-USER" }
+                ],
+                OptimizationGroups =
+                [
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "source-with-manual",
+                        Name = "Keep Group",
+                        Order = 0,
+                        Origin = OptimizationGroupOrigin.ImportSource,
+                        Parts =
+                        [
+                            retainedManualPart,
+                            new PartRow { RowId = "old-a", ImportedId = "OLD-A" }
+                        ],
+                        LastNestingResult = affectedResult,
+                        ResultStatus = OptimizationResultStatus.Valid
+                    },
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "source-only",
+                        Name = "Remove Group",
+                        Order = 1,
+                        Origin = OptimizationGroupOrigin.ImportSource,
+                        Parts = [new PartRow { RowId = "old-b", ImportedId = "OLD-B" }],
+                        LastNestingResult = affectedResult,
+                        ResultStatus = OptimizationResultStatus.Valid
+                    },
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "user-assigned",
+                        Name = "User Assigned",
+                        Order = 2,
+                        Parts = [new PartRow { RowId = "old-user", ImportedId = "OLD-USER" }],
+                        LastNestingResult = affectedResult,
+                        ResultStatus = OptimizationResultStatus.Valid
+                    },
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "unrelated-manual",
+                        Name = "Unrelated Manual",
+                        Order = 3,
+                        Parts = [unrelatedManualPart],
+                        LastNestingResult = unrelatedResult,
+                        ResultStatus = OptimizationResultStatus.Valid
+                    }
+                ]
+            }
+        };
+        var replacementPart = new PartRow { RowId = "replacement-part", ImportedId = "NEW" };
+
+        var finalized = ProjectImportFinalizer.FinalizeWorkbook(
+            project,
+            new ImportSourceMetadata
+            {
+                ImportSourcePath = "replacement.xlsx",
+                ContentFingerprint = "REPLACEMENT"
+            },
+            [
+                new FinalizedWorksheetImport(
+                    new ImportWorksheetSelection
+                    {
+                        WorksheetName = "Replacement",
+                        OriginalPosition = 1,
+                        OptimizationGroupId = "replacement-group",
+                        OptimizationGroupName = "Replacement"
+                    },
+                    new ImportOptions(),
+                    new ImportResponse { Success = true, Parts = [replacementPart] })
+            ],
+            replaceExistingImportSource: true);
+
+        Assert.Equal("replacement.xlsx", finalized.State.ImportSource!.ImportSourcePath);
+        Assert.Equal("REPLACEMENT", finalized.State.ImportSource.ContentFingerprint);
+        Assert.Equal("replacement-part", Assert.Single(finalized.State.Parts).RowId);
+        Assert.DoesNotContain(finalized.State.OptimizationGroups, group => group.OptimizationGroupId == "source-only");
+        var retainedGroup = Assert.Single(
+            finalized.State.OptimizationGroups,
+            group => group.OptimizationGroupId == "source-with-manual");
+        Assert.Same(retainedManualPart, Assert.Single(retainedGroup.Parts));
+        Assert.Null(retainedGroup.LastNestingResult);
+        Assert.Equal(OptimizationResultStatus.None, retainedGroup.ResultStatus);
+        var userAssignedGroup = Assert.Single(
+            finalized.State.OptimizationGroups,
+            group => group.OptimizationGroupId == "user-assigned");
+        Assert.Empty(userAssignedGroup.Parts);
+        Assert.Null(userAssignedGroup.LastNestingResult);
+        var unrelatedGroup = Assert.Single(
+            finalized.State.OptimizationGroups,
+            group => group.OptimizationGroupId == "unrelated-manual");
+        Assert.Same(unrelatedManualPart, Assert.Single(unrelatedGroup.Parts));
+        Assert.Same(unrelatedResult, unrelatedGroup.LastNestingResult);
+        Assert.Equal("replacement-part", Assert.Single(
+            finalized.State.OptimizationGroups,
+            group => group.OptimizationGroupId == "replacement-group").Parts[0].RowId);
+    }
+
+    [Fact]
+    public void Confirmed_CSV_replacement_creates_a_source_group_after_the_old_source_group_becomes_empty()
+    {
+        var project = new Project
+        {
+            ProjectId = "csv-replacement-project",
+            State = new ProjectState
+            {
+                ImportSource = new ImportSourceMetadata { ImportSourcePath = "old.csv" },
+                ImportConfiguration = new ImportConfiguration
+                {
+                    Worksheets =
+                    [
+                        new ImportWorksheetConfiguration
+                        {
+                            WorksheetName = "old.csv",
+                            OriginalPosition = 1,
+                            OptimizationGroupId = "old-source-group"
+                        }
+                    ]
+                },
+                OptimizationGroups =
+                [
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "old-source-group",
+                        Name = "Old",
+                        Origin = OptimizationGroupOrigin.ImportSource,
+                        Parts = [new PartRow { RowId = "old", ImportedId = "OLD" }]
+                    }
+                ]
+            }
+        };
+        var replacementPart = new PartRow { RowId = "new", ImportedId = "NEW" };
+
+        var finalized = ProjectImportFinalizer.Finalize(
+            project,
+            new ImportSourceMetadata { ImportSourcePath = @"C:\imports\Replacement Parts.csv" },
+            new ImportOptions(),
+            new ImportResponse
+            {
+                Success = true,
+                Parts = [replacementPart],
+                Worksheet = new ImportWorksheetDescriptor
+                {
+                    WorksheetName = "Replacement Parts.csv",
+                    OriginalPosition = 1,
+                    HeadingRange = "R1C1:R1C5"
+                }
+            },
+            targetOptimizationGroupId: null,
+            replaceExistingImportSource: true);
+
+        var group = Assert.Single(finalized.State.OptimizationGroups);
+        Assert.Equal("Replacement Parts", group.Name);
+        Assert.Equal("new", Assert.Single(group.Parts).RowId);
+        Assert.Equal(group.OptimizationGroupId, Assert.Single(
+            finalized.State.ImportConfiguration!.Worksheets).OptimizationGroupId);
+    }
     private static readonly JsonSerializerOptions SerializerOptions = BridgeJson.SerializerOptions;
     private readonly string _workspacePath = Path.Combine(Path.GetTempPath(), $"PanelNester.ImportBridgeSpecs.{Guid.NewGuid():N}");
 
@@ -1259,6 +1530,7 @@ public sealed class ImportBridgeSpecs : IDisposable
             {
                 SessionId = sessionId,
                 Project = project,
+                ReplaceExistingImportSource = true,
                 TargetOptimizationGroupId = "group-1"
             });
 
@@ -1283,6 +1555,7 @@ public sealed class ImportBridgeSpecs : IDisposable
         Assert.Equal(5, worksheetConfiguration.ColumnMappings.Count);
         Assert.Empty(worksheetConfiguration.ExcludedSourceRows);
         var finalizedGroup = Assert.Single(finalizedProject.State.OptimizationGroups);
+        Assert.Equal(finalizedGroup.OptimizationGroupId, worksheetConfiguration.OptimizationGroupId);
         Assert.Equal("NEW-PART", Assert.Single(finalizedGroup.Parts).ImportedId);
         Assert.Null(finalizedGroup.LastNestingResult);
         Assert.Equal(OptimizationResultStatus.None, finalizedGroup.ResultStatus);
@@ -1431,6 +1704,63 @@ public sealed class ImportBridgeSpecs : IDisposable
             BridgeMessageTypes.PreviewImportSession,
             new PreviewImportSessionRequest { SessionId = sessionId });
         Assert.Equal("import-session-not-found", preview.Error?.Code);
+    }
+
+    [Fact]
+    public async Task Cancelling_an_Import_Source_replacement_leaves_the_existing_project_unchanged()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var replacementPath = Path.Combine(_workspacePath, "replacement.csv");
+        await File.WriteAllTextAsync(replacementPath, "Id\nNEW\n");
+        var oldPart = new PartRow { RowId = "old", ImportedId = "OLD" };
+        var oldResult = new NestResponse { Success = true };
+        var project = new Project
+        {
+            ProjectId = "cancelled-replacement-project",
+            State = new ProjectState
+            {
+                SourceFilePath = "existing.csv",
+                ImportSource = new ImportSourceMetadata
+                {
+                    ImportSourcePath = "existing.csv",
+                    ContentFingerprint = "EXISTING"
+                },
+                ImportConfiguration = new ImportConfiguration(),
+                Parts = [oldPart],
+                OptimizationGroups =
+                [
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "existing-group",
+                        Name = "Existing",
+                        Parts = [oldPart],
+                        LastNestingResult = oldResult,
+                        ResultStatus = OptimizationResultStatus.Valid
+                    }
+                ]
+            }
+        };
+        var dispatcher = CreateDispatcher();
+        const string sessionId = "cancelled-replacement-session";
+
+        var started = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest
+            {
+                SessionId = sessionId,
+                ImportSourcePath = replacementPath
+            });
+        var cancelled = await DispatchAsync<CancelImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.CancelImportSession,
+            new CancelImportSessionRequest { SessionId = sessionId });
+
+        Assert.True(started.Success);
+        Assert.True(cancelled.Success);
+        Assert.Equal("existing.csv", project.State.ImportSource.ImportSourcePath);
+        Assert.Same(oldPart, Assert.Single(project.State.Parts));
+        Assert.Same(oldResult, Assert.Single(project.State.OptimizationGroups).LastNestingResult);
     }
 
     [Fact]

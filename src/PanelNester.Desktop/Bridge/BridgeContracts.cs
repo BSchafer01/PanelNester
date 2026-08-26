@@ -380,6 +380,8 @@ public sealed record FinalizeImportSessionRequest
 
     public Project? Project { get; init; }
 
+    public bool ReplaceExistingImportSource { get; init; }
+
     public string? TargetOptimizationGroupId { get; init; }
 
     public IReadOnlyList<ImportWorksheetSelection> Worksheets { get; init; } =

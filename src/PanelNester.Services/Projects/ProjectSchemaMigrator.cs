@@ -5,6 +5,7 @@ namespace PanelNester.Services.Projects;
 internal static class ProjectSchemaMigrator
 {
     internal const int FirstSupportedVersion = 1;
+    private const string LegacyImportSessionGroupIdPrefix = "import-";
 
     internal static Project MigrateToCurrent(Project project)
     {
@@ -14,12 +15,42 @@ internal static class ProjectSchemaMigrator
         }
 
         var state = project.State ?? new ProjectState();
+        var normalizedState = NormalizeOptimizationGroups(state, project.ProjectId);
+        if (project.Version < 4)
+        {
+            normalizedState = MigrateOptimizationGroupOrigins(normalizedState);
+        }
+
         return project with
         {
             Version = Project.CurrentVersion,
-            State = NormalizeOptimizationGroups(state, project.ProjectId)
+            State = normalizedState
         };
     }
+
+    private static ProjectState MigrateOptimizationGroupOrigins(ProjectState state)
+    {
+        var configuredGroupIds = (state.ImportConfiguration?.Worksheets ?? [])
+            .Select(worksheet => worksheet.OptimizationGroupId)
+            .Where(groupId => !string.IsNullOrWhiteSpace(groupId))
+            .Cast<string>()
+            .ToHashSet(StringComparer.Ordinal);
+        return state with
+        {
+            OptimizationGroups = state.OptimizationGroups
+                .Select(group =>
+                    IsLegacyImportSessionGroup(group, configuredGroupIds)
+                        ? group with { Origin = OptimizationGroupOrigin.ImportSource }
+                        : group)
+                .ToArray()
+        };
+    }
+
+    private static bool IsLegacyImportSessionGroup(
+        OptimizationGroup group,
+        IReadOnlySet<string> configuredGroupIds) =>
+        configuredGroupIds.Contains(group.OptimizationGroupId) &&
+        group.OptimizationGroupId.StartsWith(LegacyImportSessionGroupIdPrefix, StringComparison.Ordinal);
 
     internal static ProjectState NormalizeOptimizationGroups(ProjectState? state, string projectId)
     {

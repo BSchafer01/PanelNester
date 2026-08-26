@@ -850,6 +850,65 @@ h3 {
   word-break: break-all;
 }
 
+.import-details {
+  margin-top: 14px;
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  background: rgba(7, 21, 31, 0.38);
+}
+
+.import-details > summary {
+  cursor: pointer;
+  padding: 12px 14px;
+  font-weight: 700;
+}
+
+.import-details__content {
+  display: grid;
+  gap: 14px;
+  padding: 0 14px 14px;
+}
+
+.import-details__content section,
+.import-details__worksheet,
+.import-details__metadata > div {
+  padding: 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.import-details__metadata {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.import-details__metadata dt,
+.import-details__content h2,
+.import-details__content h3 {
+  margin: 0 0 6px;
+  color: var(--muted-text);
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.import-details__metadata dd,
+.import-details__content p {
+  margin: 0;
+}
+
+.import-details__fingerprint {
+  overflow-wrap: anywhere;
+  font-family: Consolas, "Courier New", monospace;
+}
+
+.import-details__worksheet + .import-details__worksheet {
+  margin-top: 8px;
+}
+
 .import-review-grid {
   display: grid;
   gap: 16px;

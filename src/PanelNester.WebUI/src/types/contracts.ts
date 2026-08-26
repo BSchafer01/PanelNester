@@ -159,6 +159,11 @@ export interface ExcludedSourceRow {
   sourceRow: PartRow;
 }
 
+export interface PersistedExcludedSourceRow
+  extends Omit<ExcludedSourceRow, 'sourceRow'> {
+  sourceRow?: PartRow;
+}
+
 export interface ImportRequest {
   filePath: string;
 }
@@ -348,6 +353,7 @@ export interface FinalizeImportSessionRequest {
   options?: ImportOptions | null;
   newMaterials?: ImportNewMaterialRequest[];
   project: ProjectRecord;
+  replaceExistingImportSource?: boolean;
   targetOptimizationGroupId?: string | null;
   worksheets?: ImportWorksheetSelection[];
 }
@@ -539,11 +545,13 @@ export interface ProjectSettings {
 export interface ProjectMaterialSnapshot extends Material {}
 
 export type OptimizationResultStatus = 'none' | 'valid' | 'stale';
+export type OptimizationGroupOrigin = 'project' | 'importSource';
 
 export interface OptimizationGroup {
   optimizationGroupId: string;
   name: string;
   order: number;
+  origin?: OptimizationGroupOrigin;
   parts: PartRow[];
   lastNestingResult?: NestResponse | null;
   lastBatchNestingResult?: BatchNestResponse | null;
@@ -582,6 +590,7 @@ export interface ProjectStateRecord {
 export interface ImportConfiguration {
   options: ImportOptions;
   worksheets: ImportWorksheetConfiguration[];
+  partOverrides: PartOverride[];
 }
 
 export interface ImportWorksheetConfiguration {
@@ -590,7 +599,7 @@ export interface ImportWorksheetConfiguration {
   headingRange: string;
   columnMappings: ImportColumnMapping[];
   optimizationGroupId?: string | null;
-  excludedSourceRows: number[];
+  excludedSourceRows: PersistedExcludedSourceRow[];
 }
 
 export interface ImportSourceMetadata {

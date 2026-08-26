@@ -96,6 +96,7 @@ declare global {
 const importFileDialogTimeoutMs = 300000;
 const importBridgeTimeoutMs = 120000;
 const nestingBridgeTimeoutMs = 300000;
+const currentProjectVersion = 4;
 
 interface AppState {
   activeRoute: AppRoute;
@@ -1225,6 +1226,7 @@ function buildOptimizationGroups(
         existingGroup?.optimizationGroupId || state.projectId || 'optimization-group-1',
       name: existingGroup?.name || sourceName || 'Parts',
       order: existingGroup?.order ?? 0,
+      origin: existingGroup?.origin ?? 'project',
       parts: state.importResponse.parts,
       lastNestingResult,
       lastBatchNestingResult,
@@ -1402,7 +1404,7 @@ function buildProjectRecord(
     batchNestResponse.materialResults.length > 0 ? batchNestResponse : null;
 
   return {
-    version: 2,
+    version: currentProjectVersion,
     projectId: state.projectId,
     metadata: mapMetadataToBridge(state.projectMetadata),
     settings: projectSettings,
@@ -1425,6 +1427,14 @@ function buildProjectRecord(
   };
 }
 
+function hasExistingImportSource(state: AppState): boolean {
+  return Boolean(
+    state.importSource ||
+      state.importConfiguration ||
+      (state.selectedFilePath && state.importResponse.parts.length > 0),
+  );
+}
+
 function buildStiffenerProjectRecord(
   state: AppState,
   settingsOverride?: ProjectSettings,
@@ -1438,7 +1448,7 @@ function buildStiffenerProjectRecord(
   );
 
   return {
-    version: 2,
+    version: currentProjectVersion,
     projectId: state.projectId,
     metadata: mapMetadataToBridge(state.projectMetadata),
     settings: settingsOverride ?? state.projectSettings,
@@ -3080,6 +3090,20 @@ export default function App() {
   saveProjectAsRef.current = () => saveProject({ saveAs: true });
 
   const importFile = async () => {
+    const replacingExistingImportSource = hasExistingImportSource(state);
+    if (
+      replacingExistingImportSource &&
+      !window.confirm(
+        'Replace the current Import Source? Imported Worksheets, source-derived parts, saved import configuration, and affected Optimization Results will be removed. Manual parts and their groups will be preserved.',
+      )
+    ) {
+      dispatch({
+        type: 'import-selection-cancelled',
+        message: 'Import Source replacement cancelled. The current project is unchanged.',
+      });
+      return;
+    }
+
     dispatch({
       type: 'import-started',
       phase: 'opening',
@@ -3251,6 +3275,7 @@ export default function App() {
           await hostBridge.finalizeImportSession({
             sessionId,
             project: buildProjectRecord(state),
+            replaceExistingImportSource: replacingExistingImportSource,
             targetOptimizationGroupId: state.activeOptimizationGroupId ?? null,
           }),
           sessionId,
@@ -3595,6 +3620,7 @@ export default function App() {
             options: session.options,
             newMaterials: sessionNewMaterials,
             project: buildProjectRecord(state),
+            replaceExistingImportSource: hasExistingImportSource(state),
             targetOptimizationGroupId: state.activeOptimizationGroupId ?? null,
             worksheets: selectedWorksheetDrafts.map((draft) => ({
               worksheetName: draft.worksheet.worksheetName,
@@ -4573,6 +4599,8 @@ export default function App() {
           materials={state.materials}
           selectedFilePath={state.selectedFilePath}
           importResponse={state.importResponse}
+          importSource={state.importSource}
+          importConfiguration={state.importConfiguration}
           mappingSession={state.importMappingSession}
           importMessage={state.importMessage}
           importPhase={state.importPhase}

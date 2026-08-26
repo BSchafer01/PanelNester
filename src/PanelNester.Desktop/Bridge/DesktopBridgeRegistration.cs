@@ -502,7 +502,8 @@ public static class DesktopBridgeRegistration
                         var workbookProject = ProjectImportFinalizer.FinalizeWorkbook(
                             request.Project,
                             workbookImportSource!,
-                            worksheetImports);
+                            worksheetImports,
+                            request.ReplaceExistingImportSource);
                         var previewSummary = BuildWorkbookPreviewSummary(
                             worksheetImports,
                             workbookProject.State.OptimizationGroups);
@@ -562,7 +563,8 @@ public static class DesktopBridgeRegistration
                         result.ImportSource,
                         importPreparation.Options,
                         result.Response,
-                        request.TargetOptimizationGroupId);
+                        request.TargetOptimizationGroupId,
+                        request.ReplaceExistingImportSource);
                     return BuildImportSessionResponse(
                         request.SessionId,
                         result,
