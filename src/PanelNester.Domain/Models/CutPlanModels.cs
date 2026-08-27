@@ -38,6 +38,34 @@ public sealed record StockLengthGenerationFailure
     public string Message { get; init; } = string.Empty;
 }
 
+public sealed record StockLengthGenerationProgress
+{
+    public StockLengthGenerationProgressPhase Phase { get; init; }
+
+    public int CompletedOptimizationGroups { get; init; }
+
+    public int TotalOptimizationGroups { get; init; }
+
+    public string? OptimizationGroupId { get; init; }
+
+    public int CompletedStockGroups { get; init; }
+
+    public int TotalStockGroups { get; init; }
+
+    public long CompletedPieceInstanceSteps { get; init; }
+
+    public long TotalPieceInstanceSteps { get; init; }
+
+    public string Label { get; init; } = string.Empty;
+}
+
+public enum StockLengthGenerationProgressPhase
+{
+    OptimizationGroups,
+    StockGroups,
+    PieceInstances
+}
+
 public sealed record StockLengthProjectGenerationResult
 {
     public bool Success => Failures.Count == 0;

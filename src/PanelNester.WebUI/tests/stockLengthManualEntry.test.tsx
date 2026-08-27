@@ -113,6 +113,80 @@ describe('Stock-Length manual entry', () => {
     expect(onGenerateAllStale).toHaveBeenCalledOnce();
   });
 
+  it('warns above the established quantity threshold without rejecting generation', async () => {
+    const user = userEvent.setup();
+    const onGenerateSelected = vi.fn();
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const largeGroup: OptimizationGroup = {
+      ...emptyGroup,
+      requiredPieces: [{
+        requiredPieceId: 'large', quantity: 10_001, length: 1, profileNumber: 'P-100',
+        isManual: true, sourceReferences: [],
+      }],
+    };
+
+    render(
+      <RequiredPiecesPage
+        activeOptimizationGroupId="frames"
+        busy={false}
+        inchDisplayFormat="decimal"
+        onCreateOptimizationGroup={vi.fn()}
+        onCreateRequiredPiece={vi.fn()}
+        onDeleteRequiredPiece={vi.fn()}
+        onGenerateSelected={onGenerateSelected}
+        onInchDisplayFormatChange={vi.fn()}
+        onUpdateRequiredPiece={vi.fn()}
+        onUpdateStockLength={vi.fn()}
+        optimizationGroups={[largeGroup]}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Generate Selected' }));
+
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('10,001 Piece Instances'));
+    expect(onGenerateSelected).toHaveBeenCalledWith('frames');
+    confirm.mockRestore();
+  });
+
+  it('shows domain progress and lets the user cancel an active generation', async () => {
+    const user = userEvent.setup();
+    const onCancelGeneration = vi.fn();
+
+    render(
+      <RequiredPiecesPage
+        activeOptimizationGroupId="frames"
+        busy={true}
+        generationBusy
+        generationProgress={{
+          phase: 'optimizationGroups',
+          completedOptimizationGroups: 1,
+          totalOptimizationGroups: 3,
+          optimizationGroupId: 'frames',
+          completedStockGroups: 0,
+          totalStockGroups: 0,
+          completedPieceInstanceSteps: 0,
+          totalPieceInstanceSteps: 0,
+          label: "Generating Cut Plan for 'Frames'",
+        }}
+        inchDisplayFormat="decimal"
+        onCancelGeneration={onCancelGeneration}
+        onCreateOptimizationGroup={vi.fn()}
+        onCreateRequiredPiece={vi.fn()}
+        onDeleteRequiredPiece={vi.fn()}
+        onGenerateSelected={vi.fn()}
+        onInchDisplayFormatChange={vi.fn()}
+        onUpdateRequiredPiece={vi.fn()}
+        onUpdateStockLength={vi.fn()}
+        optimizationGroups={[emptyGroup]}
+      />,
+    );
+
+    expect(screen.getByText("Generating Cut Plan for 'Frames'")).toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: 'Cut Plan generation progress' })).toHaveValue(1);
+    await user.click(screen.getByRole('button', { name: 'Cancel Generation' }));
+    expect(onCancelGeneration).toHaveBeenCalledOnce();
+  });
+
   it('creates an Optimization Group with Stock Length', async () => {
     const user = userEvent.setup();
     const onCreateOptimizationGroup = vi.fn();

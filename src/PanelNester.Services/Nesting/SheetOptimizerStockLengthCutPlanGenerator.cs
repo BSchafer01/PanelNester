@@ -1,5 +1,6 @@
 using PanelNester.Domain.Contracts;
 using PanelNester.Domain.Models;
+using PanelNester.Services;
 
 namespace PanelNester.Services.Nesting;
 
@@ -13,7 +14,19 @@ public sealed class SheetOptimizerStockLengthCutPlanGenerator(INestingService ne
 
     public async Task<StockLengthOptimizationResult> GenerateAsync(
         StockLengthCutPlanRequest request,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        await GenerateCoreAsync(request, null, cancellationToken).ConfigureAwait(false);
+
+    public async Task<StockLengthOptimizationResult> GenerateAsync(
+        StockLengthCutPlanRequest request,
+        IProgress<StockLengthGenerationProgress> progress,
+        CancellationToken cancellationToken = default) =>
+        await GenerateCoreAsync(request, progress, cancellationToken).ConfigureAwait(false);
+
+    private async Task<StockLengthOptimizationResult> GenerateCoreAsync(
+        StockLengthCutPlanRequest request,
+        IProgress<StockLengthGenerationProgress>? progress,
+        CancellationToken cancellationToken)
     {
         ValidateRequest(request);
         var groups = BuildStockGroups(request.RequiredPieces);
@@ -22,11 +35,16 @@ public sealed class SheetOptimizerStockLengthCutPlanGenerator(INestingService ne
         for (var groupIndex = 0; groupIndex < groups.Count; groupIndex++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var group = groups[groupIndex];
+            ReportProgress(progress, request, group, groupIndex, groups.Count, "Generating");
             cutPlans.Add(await GenerateStockGroupAsync(
                 request,
-                groups[groupIndex],
+                group,
                 groupIndex + 1,
+                groups.Count,
+                progress,
                 cancellationToken).ConfigureAwait(false));
+            ReportProgress(progress, request, group, groupIndex + 1, groups.Count, "Generated");
         }
 
         var placed = cutPlans.Sum(plan => plan.StockItems.Sum(item => item.CutSequence.Count));
@@ -43,10 +61,12 @@ public sealed class SheetOptimizerStockLengthCutPlanGenerator(INestingService ne
         StockLengthCutPlanRequest request,
         StockGroupInput group,
         int groupNumber,
+        int totalStockGroups,
+        IProgress<StockLengthGenerationProgress>? progress,
         CancellationToken cancellationToken)
     {
         var syntheticKey = BuildSyntheticMaterialKey(group.ProfileNumber, group.Finish);
-        var instancesByEnginePartId = BuildInstances(group.Pieces);
+        var instancesByEnginePartId = BuildInstances(group.Pieces, cancellationToken);
         var engineRequest = new NestRequest
         {
             Material = new Material
@@ -72,7 +92,22 @@ public sealed class SheetOptimizerStockLengthCutPlanGenerator(INestingService ne
                 ValidationStatus = ValidationStatuses.Valid
             }).ToArray()
         };
-        var engineResult = await _nestingService.NestAsync(engineRequest, cancellationToken).ConfigureAwait(false);
+        var engineProgress = new SynchronousProgress<NestingProgress>(report =>
+            progress?.Report(new StockLengthGenerationProgress
+            {
+                Phase = StockLengthGenerationProgressPhase.PieceInstances,
+                OptimizationGroupId = request.OptimizationGroupId,
+                CompletedStockGroups = groupNumber - 1,
+                TotalStockGroups = totalStockGroups,
+                CompletedPieceInstanceSteps = report.Phase == NestingProgressPhase.Preparing
+                    ? report.CompletedItems
+                    : report.TotalItems + report.CompletedItems,
+                TotalPieceInstanceSteps = checked(report.TotalItems * 2),
+                Label = $"{(report.Phase == NestingProgressPhase.Preparing ? "Preparing" : "Arranging")} Piece Instances for Stock Group '{group.ProfileNumber}' / '{group.Finish ?? "No finish"}'"
+            }));
+        var engineResult = await _nestingService
+            .NestAsync(engineRequest, engineProgress, cancellationToken)
+            .ConfigureAwait(false);
         ValidateEngineResult(engineRequest, engineResult, instancesByEnginePartId);
 
         var cutPlanId = $"{request.OptimizationGroupId}:stock-group-{groupNumber}";
@@ -167,7 +202,9 @@ public sealed class SheetOptimizerStockLengthCutPlanGenerator(INestingService ne
                 group.ToArray()))
             .ToArray();
 
-    private static Dictionary<string, PieceInstance> BuildInstances(IReadOnlyList<RequiredPiece> pieces)
+    private static Dictionary<string, PieceInstance> BuildInstances(
+        IReadOnlyList<RequiredPiece> pieces,
+        CancellationToken cancellationToken)
     {
         var instances = new Dictionary<string, PieceInstance>(StringComparer.Ordinal);
         foreach (var piece in pieces)
@@ -175,6 +212,11 @@ public sealed class SheetOptimizerStockLengthCutPlanGenerator(INestingService ne
             var syntheticPieceKey = BuildSyntheticPieceKey(piece.RequiredPieceId);
             for (var instanceNumber = 1; instanceNumber <= piece.Quantity; instanceNumber++)
             {
+                if ((instanceNumber & 255) == 0)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+
                 var enginePartId = piece.Quantity == 1 ? syntheticPieceKey : $"{syntheticPieceKey}#{instanceNumber}";
                 instances.Add(enginePartId, new PieceInstance
                 {
@@ -193,6 +235,22 @@ public sealed class SheetOptimizerStockLengthCutPlanGenerator(INestingService ne
 
         return instances;
     }
+
+    private static void ReportProgress(
+        IProgress<StockLengthGenerationProgress>? progress,
+        StockLengthCutPlanRequest request,
+        StockGroupInput group,
+        int completedStockGroups,
+        int totalStockGroups,
+        string verb) =>
+        progress?.Report(new StockLengthGenerationProgress
+        {
+            Phase = StockLengthGenerationProgressPhase.StockGroups,
+            OptimizationGroupId = request.OptimizationGroupId,
+            CompletedStockGroups = completedStockGroups,
+            TotalStockGroups = totalStockGroups,
+            Label = $"{verb} Stock Group '{group.ProfileNumber}' / '{group.Finish ?? "No finish"}'"
+        });
 
     private static void ValidateEngineResult(
         NestRequest request,

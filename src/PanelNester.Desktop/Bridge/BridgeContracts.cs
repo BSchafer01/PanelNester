@@ -46,6 +46,8 @@ public static class BridgeMessageTypes
     public const string UpdateRequiredPieces = "update-required-pieces";
     public const string GenerateSelectedCutPlan = "generate-selected-cut-plan";
     public const string GenerateAllStaleCutPlans = "generate-all-stale-cut-plans";
+    public const string CancelCutPlanGeneration = "cancel-cut-plan-generation";
+    public const string GetCutPlanGenerationProgress = "get-cut-plan-generation-progress";
     public const string GetDesktopAppSettings = "get-desktop-app-settings";
     public const string UpdateDesktopAppSettings = "update-desktop-app-settings";
     public const string UpdateReportSettings = "update-report-settings";
@@ -817,7 +819,10 @@ public sealed record UpdateRequiredPiecesResponse(
     }
 }
 
-public sealed record GenerateSelectedCutPlanRequest(Project Project, string OptimizationGroupId);
+public sealed record GenerateSelectedCutPlanRequest(
+    Project Project,
+    string OptimizationGroupId,
+    string OperationId = "");
 
 public sealed record GenerateSelectedCutPlanResponse(
     bool Success,
@@ -843,13 +848,31 @@ public sealed record GenerateSelectedCutPlanResponse(
     }
 }
 
-public sealed record GenerateAllStaleCutPlansRequest(Project Project);
+public sealed record GenerateAllStaleCutPlansRequest(Project Project, string OperationId = "");
 
 public sealed record GenerateAllStaleCutPlansResponse(
     bool Success,
     Project Project,
     IReadOnlyList<StockLengthGenerationFailure> Failures,
     string Message);
+
+public sealed record CancelCutPlanGenerationRequest(string OperationId);
+
+public sealed record CancelCutPlanGenerationResponse(
+    bool Success,
+    string OperationId,
+    bool CancellationRequested,
+    BridgeError? Error,
+    string Message);
+
+public sealed record GetCutPlanGenerationProgressRequest(string OperationId);
+
+public sealed record GetCutPlanGenerationProgressResponse(
+    bool Success,
+    string OperationId,
+    StockLengthGenerationProgress? Progress,
+    BridgeError? Error,
+    string? Message);
 
 public sealed record UpdateReportSettingsRequest(Project Project, ReportSettings ReportSettings);
 

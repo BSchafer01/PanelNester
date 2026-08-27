@@ -73,6 +73,10 @@ import {
   type GenerateSelectedCutPlanResponse,
   type GenerateAllStaleCutPlansRequest,
   type GenerateAllStaleCutPlansResponse,
+  type CancelCutPlanGenerationRequest,
+  type CancelCutPlanGenerationResponse,
+  type GetCutPlanGenerationProgressRequest,
+  type GetCutPlanGenerationProgressResponse,
   type UpdateDesktopAppSettingsRequest,
   type UpdateDesktopAppSettingsResponse,
   type UpdateReportSettingsRequest,
@@ -538,6 +542,25 @@ class HostBridgeClient {
       bridgeMessageTypes.generateAllStaleCutPlans,
       request,
       longRunningRequestTimeoutMs,
+    );
+  }
+
+  cancelCutPlanGeneration(
+    request: CancelCutPlanGenerationRequest,
+  ): Promise<CancelCutPlanGenerationResponse> {
+    return this.invoke<CancelCutPlanGenerationResponse>(
+      bridgeMessageTypes.cancelCutPlanGeneration,
+      request,
+      null,
+    );
+  }
+
+  getCutPlanGenerationProgress(
+    request: GetCutPlanGenerationProgressRequest,
+  ): Promise<GetCutPlanGenerationProgressResponse> {
+    return this.invoke<GetCutPlanGenerationProgressResponse>(
+      bridgeMessageTypes.getCutPlanGenerationProgress,
+      request,
     );
   }
 

@@ -8,3 +8,18 @@ public sealed record NestRequest
 
     public decimal KerfWidth { get; init; }
 }
+
+public enum NestingProgressPhase
+{
+    Preparing,
+    Placing
+}
+
+public sealed record NestingProgress
+{
+    public NestingProgressPhase Phase { get; init; }
+
+    public long CompletedItems { get; init; }
+
+    public long TotalItems { get; init; }
+}

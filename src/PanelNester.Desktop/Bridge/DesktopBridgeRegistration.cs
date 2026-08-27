@@ -157,6 +157,7 @@ public static class DesktopBridgeRegistration
 
         var dispatcher = new BridgeMessageDispatcher();
         var importSessions = new ImportSessionCoordinator(importService);
+        var cutPlanGeneration = new CutPlanGenerationCoordinator();
 
         dispatcher.Register<BridgeHandshakeRequest>(
             BridgeMessageTypes.BridgeHandshake,
@@ -1003,9 +1004,27 @@ public static class DesktopBridgeRegistration
             BridgeMessageTypes.GenerateSelectedCutPlan,
             async (request, cancellationToken) =>
             {
-                var result = await stockLengthGenerationService
-                    .GenerateSelectedAsync(request.Project, request.OptimizationGroupId, cancellationToken)
-                    .ConfigureAwait(false);
+                var operationId = ResolveOperationId(request.OperationId);
+                using var operation = cutPlanGeneration.Begin(operationId, cancellationToken);
+                ProjectOperationResult result;
+                try
+                {
+                    result = await Task.Run(
+                        () => stockLengthGenerationService.GenerateSelectedAsync(
+                            request.Project,
+                            request.OptimizationGroupId,
+                            operation,
+                            operation.Token),
+                        CancellationToken.None)
+                        .ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return GenerateSelectedCutPlanResponse.Failure(
+                        request.Project,
+                        "cut-plan-generation-cancelled",
+                        "Cut Plan generation was cancelled.");
+                }
                 var generated = result.Project?.State.OptimizationGroups.FirstOrDefault(group =>
                     string.Equals(group.OptimizationGroupId, request.OptimizationGroupId, StringComparison.Ordinal))
                     ?.LastStockLengthOptimizationResult;
@@ -1029,17 +1048,66 @@ public static class DesktopBridgeRegistration
             BridgeMessageTypes.GenerateAllStaleCutPlans,
             async (request, cancellationToken) =>
             {
-                var result = await stockLengthGenerationService
-                    .GenerateAllStaleAsync(request.Project, cancellationToken)
+                var operationId = ResolveOperationId(request.OperationId);
+                using var operation = cutPlanGeneration.Begin(operationId, cancellationToken);
+                var result = await Task.Run(
+                    () => stockLengthGenerationService.GenerateAllStaleAsync(
+                        request.Project,
+                        operation,
+                        operation.Token),
+                    CancellationToken.None)
                     .ConfigureAwait(false);
+                var requestedGroupIds = request.Project.State.OptimizationGroups
+                    .Where(group =>
+                        group.RequiredPieces.Count > 0 &&
+                        group.ResultStatus != OptimizationResultStatus.Valid)
+                    .Select(group => group.OptimizationGroupId)
+                    .ToHashSet(StringComparer.Ordinal);
+                var completed = result.Project.State.OptimizationGroups.Count(group =>
+                    requestedGroupIds.Contains(group.OptimizationGroupId) &&
+                    group.ResultStatus == OptimizationResultStatus.Valid);
+                var remaining = requestedGroupIds.Count - completed;
                 var message = result.Success
                     ? "Generated every stale Optimization Group."
-                    : $"Generated available Cut Plans; {result.Failures.Count} Optimization Group(s) failed.";
+                    : $"Generated {completed} Optimization Group(s); " +
+                      string.Join("; ", result.Failures.Select(failure =>
+                          $"{failure.OptimizationGroupId}: {failure.Message}")) +
+                      $" {remaining} Optimization Group(s) still need generation.";
                 return new GenerateAllStaleCutPlansResponse(
                     result.Success,
                     result.Project,
                     result.Failures,
                     message);
+            });
+        dispatcher.Register<CancelCutPlanGenerationRequest>(
+            BridgeMessageTypes.CancelCutPlanGeneration,
+            (request, _) =>
+            {
+                var requested = cutPlanGeneration.Cancel(request.OperationId);
+                return Task.FromResult<object?>(new CancelCutPlanGenerationResponse(
+                    true,
+                    request.OperationId,
+                    requested,
+                    null,
+                    requested
+                        ? "Cut Plan cancellation requested."
+                        : "No active Cut Plan generation operation was found."));
+            });
+        dispatcher.Register<GetCutPlanGenerationProgressRequest>(
+            BridgeMessageTypes.GetCutPlanGenerationProgress,
+            (request, _) =>
+            {
+                var progress = cutPlanGeneration.GetProgress(request.OperationId);
+                return Task.FromResult<object?>(new GetCutPlanGenerationProgressResponse(
+                    progress is not null,
+                    request.OperationId,
+                    progress,
+                    progress is null
+                        ? BridgeError.Create(
+                            "cut-plan-generation-not-found",
+                            "No active Cut Plan generation operation was found.")
+                        : null,
+                    null));
             });
 
         if (batchNestingService is not null &&
@@ -2568,6 +2636,11 @@ public static class DesktopBridgeRegistration
 
     private static string GetFirstErrorMessage(IReadOnlyList<ValidationError> errors, string fallbackMessage) =>
         errors.Count > 0 ? errors[0].Message : fallbackMessage;
+
+    private static string ResolveOperationId(string operationId) =>
+        string.IsNullOrWhiteSpace(operationId)
+            ? $"cut-plan-{Guid.NewGuid():N}"
+            : operationId;
 
     private sealed class NoOpPartEditorService : IPartEditorService
     {

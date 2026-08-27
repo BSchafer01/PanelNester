@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using PanelNester.Desktop.Bridge;
 using PanelNester.Desktop.Tests.Specifications;
+using PanelNester.Domain.Contracts;
 using PanelNester.Domain.Models;
 using PanelNester.Services.Import;
 using PanelNester.Services.Materials;
@@ -849,6 +850,85 @@ public sealed class ProjectBridgeSpecs : IDisposable
         return typed!;
     }
 
+    [Fact]
+    public async Task Active_Cut_Plan_generation_reports_progress_can_be_cancelled_and_does_not_block_saving_finalized_state()
+    {
+        var repository = new JsonMaterialRepository(Path.Combine(_workspacePath, "controlled-materials.json"));
+        var materialService = new MaterialService(repository);
+        var nesting = new ControllableNestingService();
+        var dispatcher = DesktopBridgeRegistration.CreateDefault(
+            new RecordingFileDialogService(),
+            materialService,
+            new ProjectService(materialService),
+            new CsvImportService(repository),
+            new PartEditorService(repository),
+            nesting,
+            () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true));
+        var project = new Project
+        {
+            ProjectId = "controlled-project",
+            ProjectKind = ProjectKind.StockLength,
+            State = new ProjectState
+            {
+                OptimizationGroups =
+                [
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "frames",
+                        Name = "Frames",
+                        StockLength = 120,
+                        RequiredPieces =
+                        [
+                            new RequiredPiece
+                            {
+                                RequiredPieceId = "piece-1",
+                                Quantity = 1,
+                                Length = 20,
+                                ProfileNumber = "P-100"
+                            }
+                        ]
+                    }
+                ]
+            }
+        };
+        const string operationId = "controlled-operation";
+
+        var generationTask = DispatchAsync<GenerateSelectedCutPlanResponse>(
+            dispatcher,
+            BridgeMessageTypes.GenerateSelectedCutPlan,
+            new GenerateSelectedCutPlanRequest(project, "frames", operationId));
+        await nesting.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var progress = await DispatchAsync<GetCutPlanGenerationProgressResponse>(
+            dispatcher,
+            BridgeMessageTypes.GetCutPlanGenerationProgress,
+            new GetCutPlanGenerationProgressRequest(operationId));
+        var saved = await DispatchAsync<SaveProjectResponse>(
+            dispatcher,
+            BridgeMessageTypes.SaveProject,
+            new SaveProjectRequest(project, Path.Combine(_workspacePath, "controlled.pnest")));
+        var cancellation = await DispatchAsync<CancelCutPlanGenerationResponse>(
+            dispatcher,
+            BridgeMessageTypes.CancelCutPlanGeneration,
+            new CancelCutPlanGenerationRequest(operationId));
+        var generated = await generationTask;
+        var released = await DispatchAsync<GetCutPlanGenerationProgressResponse>(
+            dispatcher,
+            BridgeMessageTypes.GetCutPlanGenerationProgress,
+            new GetCutPlanGenerationProgressRequest(operationId));
+
+        Assert.True(progress.Success);
+        Assert.Contains("Stock Group", progress.Progress?.Label, StringComparison.Ordinal);
+        Assert.True(saved.Success);
+        Assert.True(cancellation.CancellationRequested);
+        Assert.False(generated.Success);
+        Assert.Equal("cut-plan-generation-cancelled", generated.Error?.Code);
+        Assert.False(released.Success);
+        var group = Assert.Single(generated.Project!.State.OptimizationGroups);
+        Assert.Null(group.LastStockLengthOptimizationResult);
+        Assert.Equal(OptimizationResultStatus.None, group.ResultStatus);
+    }
+
     private static Task<UpdateOptimizationGroupsResponse> ChangeGroupsAsync(
         BridgeMessageDispatcher dispatcher,
         Project project,
@@ -906,6 +986,22 @@ public sealed class ProjectBridgeSpecs : IDisposable
                 _savePaths.Count == 0
                     ? SaveFileDialogResponse.Cancelled()
                     : new SaveFileDialogResponse(true, _savePaths.Dequeue(), null, "File path selected."));
+        }
+    }
+
+    private sealed class ControllableNestingService : INestingService
+    {
+        public TaskCompletionSource<bool> Started { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task<NestResponse> NestAsync(
+            NestRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            Started.TrySetResult(true);
+            cancellationToken.WaitHandle.WaitOne();
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(new NestResponse());
         }
     }
 }

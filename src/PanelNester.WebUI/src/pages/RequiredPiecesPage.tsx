@@ -5,6 +5,7 @@ import type {
   OptimizationGroup,
   RequiredPiece,
   RequiredPieceChange,
+  StockLengthGenerationProgress,
 } from '../types/contracts';
 import {
   assignSelectedWorksheetsToOptimizationGroup,
@@ -19,6 +20,8 @@ interface RequiredPiecesPageProps {
   activeOptimizationGroupId?: string;
   inchDisplayFormat: InchDisplayFormat;
   busy: boolean;
+  generationBusy?: boolean;
+  generationProgress?: StockLengthGenerationProgress;
   message?: string;
   onCreateOptimizationGroup: (name: string, stockLength: string) => void | Promise<void>;
   onUpdateStockLength: (optimizationGroupId: string, stockLength: string) => void | Promise<void>;
@@ -27,6 +30,7 @@ interface RequiredPiecesPageProps {
   onDeleteRequiredPiece: (optimizationGroupId: string, requiredPieceId: string) => void | Promise<void>;
   onGenerateSelected?: (optimizationGroupId: string) => void | Promise<void>;
   onGenerateAllStale?: () => void | Promise<void>;
+  onCancelGeneration?: () => void | Promise<void>;
   onInchDisplayFormatChange: (format: InchDisplayFormat) => void;
   mappingSession?: ImportMappingSession;
   onImportFile?: () => void | Promise<void>;
@@ -35,6 +39,8 @@ interface RequiredPiecesPageProps {
   onFinalizeImportMapping?: () => void | Promise<void>;
   onCancelImportMapping?: () => void | Promise<void>;
 }
+
+const largeQuantityWarningThreshold = 10_000;
 
 interface RequiredPieceFormValues {
   quantity: string;
@@ -124,6 +130,9 @@ export function RequiredPiecesPage({
   onDeleteRequiredPiece,
   onGenerateSelected,
   onGenerateAllStale,
+  onCancelGeneration,
+  generationBusy = false,
+  generationProgress,
   onInchDisplayFormatChange,
   mappingSession,
   onImportFile,
@@ -180,6 +189,11 @@ export function RequiredPiecesPage({
   const runAction = (action: () => void | Promise<void>) => {
     void Promise.resolve(action()).catch(() => undefined);
   };
+
+  const confirmLargeQuantity = (quantity: number): boolean =>
+    quantity <= largeQuantityWarningThreshold || window.confirm(
+      `${quantity.toLocaleString()} Piece Instances will be generated. This may take time and use significant memory. Continue?`,
+    );
 
   const activeImportDraft = mappingSession?.worksheets?.find(
     (worksheet) => worksheet.worksheet.worksheetName === mappingSession.activeWorksheetName,
@@ -347,13 +361,30 @@ export function RequiredPiecesPage({
             {onGenerateSelected ? <button
                 className="primary-button"
                 disabled={busy || !activeOptimizationGroup || activeOptimizationGroup.requiredPieces.length === 0 || !activeOptimizationGroup.stockLength || activeOptimizationGroup.stockLength <= 0}
-                onClick={() => activeOptimizationGroup && runAction(() => onGenerateSelected(activeOptimizationGroup.optimizationGroupId))}
+                onClick={() => {
+                  if (!activeOptimizationGroup) return;
+                  const quantity = activeOptimizationGroup.requiredPieces.reduce(
+                    (total, piece) => total + piece.quantity,
+                    0,
+                  );
+                  if (confirmLargeQuantity(quantity)) {
+                    runAction(() => onGenerateSelected(activeOptimizationGroup.optimizationGroupId));
+                  }
+                }}
                 type="button"
               >Generate Selected</button> : null}
             {onGenerateAllStale ? <button
                 className="secondary-button"
                 disabled={busy || staleGroupCount === 0}
-                onClick={() => runAction(onGenerateAllStale)}
+                onClick={() => {
+                  const quantity = optimizationGroups
+                    .filter((group) => group.requiredPieces.length > 0 && group.resultStatus !== 'valid')
+                    .flatMap((group) => group.requiredPieces)
+                    .reduce((total, piece) => total + piece.quantity, 0);
+                  if (confirmLargeQuantity(quantity)) {
+                    runAction(onGenerateAllStale);
+                  }
+                }}
                 type="button"
               >Generate All Stale</button> : null}
             <span className="section-note">
@@ -365,6 +396,31 @@ export function RequiredPiecesPage({
                   ? 'Current Cut Plan'
                   : 'Needs Generation'}
             </span>
+            {generationBusy && onCancelGeneration ? (
+              <button
+                className="secondary-button"
+                onClick={() => runAction(onCancelGeneration)}
+                type="button"
+              >Cancel Generation</button>
+            ) : null}
+          </div>
+        ) : null}
+        {generationBusy && generationProgress ? (
+          <div className="generation-progress" role="status">
+            <span>{generationProgress.label}</span>
+            <progress
+              aria-label="Cut Plan generation progress"
+              max={generationProgress.phase === 'pieceInstances'
+                ? generationProgress.totalPieceInstanceSteps || 1
+                : generationProgress.phase === 'stockGroups'
+                  ? generationProgress.totalStockGroups || 1
+                  : generationProgress.totalOptimizationGroups || 1}
+              value={generationProgress.phase === 'pieceInstances'
+                ? generationProgress.completedPieceInstanceSteps
+                : generationProgress.phase === 'stockGroups'
+                  ? generationProgress.completedStockGroups
+                  : generationProgress.completedOptimizationGroups}
+            />
           </div>
         ) : null}
       </header>

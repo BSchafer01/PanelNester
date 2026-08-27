@@ -43,6 +43,8 @@ export const bridgeMessageTypes = {
   updateRequiredPieces: 'update-required-pieces',
   generateSelectedCutPlan: 'generate-selected-cut-plan',
   generateAllStaleCutPlans: 'generate-all-stale-cut-plans',
+  cancelCutPlanGeneration: 'cancel-cut-plan-generation',
+  getCutPlanGenerationProgress: 'get-cut-plan-generation-progress',
   getDesktopAppSettings: 'get-desktop-app-settings',
   updateDesktopAppSettings: 'update-desktop-app-settings',
 } as const;
@@ -1226,6 +1228,7 @@ export interface UpdateRequiredPiecesResponse {
 export interface GenerateSelectedCutPlanRequest {
   project: ProjectRecord;
   optimizationGroupId: string;
+  operationId?: string;
 }
 
 export interface GenerateSelectedCutPlanResponse {
@@ -1242,8 +1245,21 @@ export interface StockLengthGenerationFailure {
   message: string;
 }
 
+export interface StockLengthGenerationProgress {
+  phase: 'optimizationGroups' | 'stockGroups' | 'pieceInstances';
+  completedOptimizationGroups: number;
+  totalOptimizationGroups: number;
+  optimizationGroupId?: string | null;
+  completedStockGroups: number;
+  totalStockGroups: number;
+  completedPieceInstanceSteps: number;
+  totalPieceInstanceSteps: number;
+  label: string;
+}
+
 export interface GenerateAllStaleCutPlansRequest {
   project: ProjectRecord;
+  operationId?: string;
 }
 
 export interface GenerateAllStaleCutPlansResponse {
@@ -1251,6 +1267,30 @@ export interface GenerateAllStaleCutPlansResponse {
   project: ProjectRecord;
   failures: StockLengthGenerationFailure[];
   message: string;
+}
+
+export interface CancelCutPlanGenerationRequest {
+  operationId: string;
+}
+
+export interface CancelCutPlanGenerationResponse {
+  success: boolean;
+  operationId: string;
+  cancellationRequested: boolean;
+  error?: BridgeError | null;
+  message: string;
+}
+
+export interface GetCutPlanGenerationProgressRequest {
+  operationId: string;
+}
+
+export interface GetCutPlanGenerationProgressResponse {
+  success: boolean;
+  operationId: string;
+  progress?: StockLengthGenerationProgress | null;
+  error?: BridgeError | null;
+  message?: string | null;
 }
 
 export interface StiffenerTakeoffLengthSummary {
@@ -1433,6 +1473,8 @@ export const requestedBridgeCapabilities: BridgeCapability[] = [
   bridgeMessageTypes.updateRequiredPieces,
   bridgeMessageTypes.generateSelectedCutPlan,
   bridgeMessageTypes.generateAllStaleCutPlans,
+  bridgeMessageTypes.cancelCutPlanGeneration,
+  bridgeMessageTypes.getCutPlanGenerationProgress,
   bridgeMessageTypes.getDesktopAppSettings,
   bridgeMessageTypes.updateDesktopAppSettings,
 ];

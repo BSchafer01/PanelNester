@@ -7,7 +7,21 @@ public sealed class ShelfNestingService : INestingService
 {
     private const decimal FitTolerance = 0.0001m;
 
-    public Task<NestResponse> NestAsync(NestRequest request, CancellationToken cancellationToken = default)
+    public Task<NestResponse> NestAsync(
+        NestRequest request,
+        CancellationToken cancellationToken = default) =>
+        NestCoreAsync(request, null, cancellationToken);
+
+    public Task<NestResponse> NestAsync(
+        NestRequest request,
+        IProgress<NestingProgress> progress,
+        CancellationToken cancellationToken = default) =>
+        NestCoreAsync(request, progress, cancellationToken);
+
+    private static Task<NestResponse> NestCoreAsync(
+        NestRequest request,
+        IProgress<NestingProgress>? progress,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -33,7 +47,15 @@ public sealed class ShelfNestingService : INestingService
         var sheets = new List<SheetState>();
         var placements = new List<NestPlacement>();
         var unplacedItems = new List<UnplacedItem>();
-        var parts = ExpandParts(request.Parts ?? Array.Empty<PartRow>(), material.Name, unplacedItems);
+        var totalItems = request.Parts.Sum(row => (long)Math.Max(row.Quantity, 1));
+        ReportProgress(progress, NestingProgressPhase.Preparing, 0, totalItems);
+        var parts = ExpandParts(
+            request.Parts ?? Array.Empty<PartRow>(),
+            material.Name,
+            unplacedItems,
+            progress,
+            totalItems,
+            cancellationToken);
         var spacingClearance = material.DefaultSpacing + Math.Max(request.KerfWidth, 0m);
         var usableLength = material.SheetLength - (material.DefaultEdgeMargin * 2);
         var usableWidth = material.SheetWidth - (material.DefaultEdgeMargin * 2);
@@ -42,9 +64,11 @@ public sealed class ShelfNestingService : INestingService
 
         if (groupedBatches.Count == 0)
         {
+            var processedParts = 0L;
             foreach (var part in SortParts(parts))
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                ReportProgress(progress, NestingProgressPhase.Placing, processedParts++, parts.Count);
 
                 if (!CanFitBlankSheet(part, material.AllowRotation, usableLength, usableWidth))
                 {
@@ -77,10 +101,12 @@ public sealed class ShelfNestingService : INestingService
                     ReasonDescription = "Part could not be placed with the current shelf heuristic."
                 });
             }
+            ReportProgress(progress, NestingProgressPhase.Placing, parts.Count, parts.Count);
         }
         else
         {
             SheetState? carryoverSheet = null;
+            var processedParts = 0L;
 
             foreach (var batch in groupedBatches)
             {
@@ -95,6 +121,7 @@ public sealed class ShelfNestingService : INestingService
                 foreach (var part in batch.Parts)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+                    ReportProgress(progress, NestingProgressPhase.Placing, processedParts++, parts.Count);
 
                     if (!CanFitBlankSheet(part, material.AllowRotation, usableLength, usableWidth))
                     {
@@ -133,6 +160,7 @@ public sealed class ShelfNestingService : INestingService
 
                 carryoverSheet = placedAnyInGroup ? openSheets[^1] : null;
             }
+            ReportProgress(progress, NestingProgressPhase.Placing, parts.Count, parts.Count);
         }
 
         var sheetArea = material.SheetLength * material.SheetWidth;
@@ -156,9 +184,13 @@ public sealed class ShelfNestingService : INestingService
     private static IReadOnlyList<ExpandedPart> ExpandParts(
         IEnumerable<PartRow> rows,
         string materialName,
-        ICollection<UnplacedItem> unplacedItems)
+        ICollection<UnplacedItem> unplacedItems,
+        IProgress<NestingProgress>? progress,
+        long totalItems,
+        CancellationToken cancellationToken)
     {
         var expandedParts = new List<ExpandedPart>();
+        var preparedItems = 0L;
 
         foreach (var row in rows)
         {
@@ -190,6 +222,11 @@ public sealed class ShelfNestingService : INestingService
 
             for (var instanceNumber = 1; instanceNumber <= row.Quantity; instanceNumber++)
             {
+                if ((instanceNumber & 255) == 0)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+
                 expandedParts.Add(new ExpandedPart
                 {
                     InstanceId = $"{row.RowId}:{instanceNumber}",
@@ -200,10 +237,35 @@ public sealed class ShelfNestingService : INestingService
                     MaterialName = row.MaterialName,
                     Group = NormalizeGroup(row.Group)
                 });
+                preparedItems++;
+                if ((preparedItems & 127) == 0)
+                {
+                    ReportProgress(progress, NestingProgressPhase.Preparing, preparedItems, totalItems);
+                }
             }
         }
 
+        ReportProgress(progress, NestingProgressPhase.Preparing, preparedItems, totalItems);
         return expandedParts;
+    }
+
+    private static void ReportProgress(
+        IProgress<NestingProgress>? progress,
+        NestingProgressPhase phase,
+        long completed,
+        long total)
+    {
+        if (completed != 0 && completed != total && (completed & 127) != 0)
+        {
+            return;
+        }
+
+        progress?.Report(new NestingProgress
+        {
+            Phase = phase,
+            CompletedItems = completed,
+            TotalItems = total
+        });
     }
 
     private static bool TryPlaceOnExistingSheets(

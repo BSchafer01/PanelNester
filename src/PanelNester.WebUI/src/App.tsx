@@ -72,6 +72,7 @@ import {
   type RequiredPieceChange,
   type StiffenerTakeoffReportData,
   type StiffenerTakeoffSettings,
+  type StockLengthGenerationProgress,
   type WorkbookImportProgress,
 } from './types/contracts';
 
@@ -152,6 +153,8 @@ interface AppState {
   activeOptimizationGroupId?: string;
   projectMessage: string;
   projectBusy: boolean;
+  generationBusy: boolean;
+  generationProgress?: StockLengthGenerationProgress;
   projectDirty: boolean;
   partMutationBusy: boolean;
   lastSavedAt?: string;
@@ -256,6 +259,9 @@ type AppAction =
   | { type: 'project-operation-started'; message: string }
   | { type: 'project-operation-finished'; message: string }
   | { type: 'project-operation-failed'; message: string }
+  | { type: 'generation-operation-started'; message: string }
+  | { type: 'generation-progressed'; progress: StockLengthGenerationProgress }
+  | { type: 'generation-operation-finished'; message: string }
   | { type: 'project-kind-changed'; project: ProjectRecord; message: string }
   | { type: 'optimization-group-activated'; optimizationGroupId: string }
   | {
@@ -558,6 +564,8 @@ const initialState: AppState = {
   activeOptimizationGroupId: undefined,
   projectMessage: defaultProjectMessage,
   projectBusy: false,
+  generationBusy: false,
+  generationProgress: undefined,
   projectDirty: false,
   partMutationBusy: false,
   lastSavedAt: undefined,
@@ -2038,6 +2046,26 @@ function reducer(state: AppState, action: AppAction): AppState {
         projectBusy: false,
         projectMessage: action.message,
       };
+    case 'generation-operation-started':
+      return {
+        ...state,
+        generationBusy: true,
+        generationProgress: undefined,
+        projectMessage: action.message,
+      };
+    case 'generation-progressed':
+      return {
+        ...state,
+        generationProgress: action.progress,
+        projectMessage: action.progress.label,
+      };
+    case 'generation-operation-finished':
+      return {
+        ...state,
+        generationBusy: false,
+        generationProgress: undefined,
+        projectMessage: action.message,
+      };
     case 'project-kind-changed':
       return {
         ...state,
@@ -2106,6 +2134,8 @@ function reducer(state: AppState, action: AppAction): AppState {
         {
           ...state,
           projectBusy: false,
+          generationBusy: false,
+          generationProgress: undefined,
           projectId: action.project.projectId,
           optimizationGroups: action.project.state.optimizationGroups,
           activeOptimizationGroupId: nextActiveOptimizationGroupId,
@@ -2251,6 +2281,7 @@ export default function App() {
     selectedMaterialId: state.selectedMaterialId,
   });
   const activeImportSessionIdRef = useRef<string>();
+  const activeGenerationOperationIdRef = useRef<string>();
   const hostReadyNotifiedRef = useRef(false);
   const createNewProjectRef = useRef<() => void | Promise<void>>(() => undefined);
   const startupProjectOpenRef = useRef<(request: OpenProjectRequest) => void | Promise<void>>(
@@ -2756,28 +2787,28 @@ export default function App() {
     }
   };
 
-  const trackImportOperation = async <T,>(
-    sessionId: string,
+  const trackProgressOperation = async <T, TProgress>(
+    enabled: boolean,
+    isCurrent: () => boolean,
+    readProgress: () => Promise<TProgress | undefined>,
+    publishProgress: (progress: TProgress) => void,
     operation: () => Promise<T>,
   ): Promise<T> => {
-    if (!hasCapability(bridgeMessageTypes.getImportSessionProgress)) {
-      return operation();
-    }
-
+    if (!enabled) return operation();
     let active = true;
     let pollInFlight = false;
     const poll = async () => {
-      if (!active || pollInFlight || activeImportSessionIdRef.current !== sessionId) {
+      if (!active || pollInFlight || !isCurrent()) {
         return;
       }
       pollInFlight = true;
       try {
-        const response = await hostBridge.getImportSessionProgress({ sessionId });
-        if (active && response.success && response.progress) {
-          dispatch({ type: 'import-progressed', progress: response.progress });
+        const progress = await readProgress();
+        if (active && progress) {
+          publishProgress(progress);
         }
       } catch {
-        // Progress is advisory; the operation response remains authoritative.
+        // Progress is advisory; the finalized operation response remains authoritative.
       } finally {
         pollInFlight = false;
       }
@@ -2790,6 +2821,76 @@ export default function App() {
     } finally {
       active = false;
       window.clearInterval(intervalId);
+    }
+  };
+
+  const trackImportOperation = async <T,>(
+    sessionId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> =>
+    trackProgressOperation(
+      hasCapability(bridgeMessageTypes.getImportSessionProgress),
+      () => activeImportSessionIdRef.current === sessionId,
+      async () => {
+        const response = await hostBridge.getImportSessionProgress({ sessionId });
+        return response.success ? response.progress ?? undefined : undefined;
+      },
+      (progress) => dispatch({ type: 'import-progressed', progress }),
+      operation,
+    );
+
+  const trackGenerationOperation = async <T,>(
+    operationId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> =>
+    trackProgressOperation(
+      hasCapability(bridgeMessageTypes.getCutPlanGenerationProgress),
+      () => activeGenerationOperationIdRef.current === operationId,
+      async () => {
+        const response = await hostBridge.getCutPlanGenerationProgress({ operationId });
+        return response.success ? response.progress ?? undefined : undefined;
+      },
+      (progress) => dispatch({ type: 'generation-progressed', progress }),
+      async () => {
+        try {
+          return await operation();
+        } finally {
+          if (activeGenerationOperationIdRef.current === operationId) {
+            activeGenerationOperationIdRef.current = undefined;
+          }
+        }
+      },
+    );
+
+  const createGenerationOperationId = (): string =>
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `cut-plan-${Date.now()}`;
+
+  const cancelCutPlanGeneration = async (): Promise<void> => {
+    const operationId = activeGenerationOperationIdRef.current;
+    if (!operationId || !hasCapability(bridgeMessageTypes.cancelCutPlanGeneration)) {
+      return;
+    }
+
+    const response = await hostBridge.cancelCutPlanGeneration({ operationId });
+    if (response.cancellationRequested) {
+      dispatch({
+        type: 'generation-progressed',
+        progress: {
+          phase: state.generationProgress?.phase ?? 'optimizationGroups',
+          completedOptimizationGroups:
+            state.generationProgress?.completedOptimizationGroups ?? 0,
+          totalOptimizationGroups: state.generationProgress?.totalOptimizationGroups ?? 0,
+          optimizationGroupId: state.generationProgress?.optimizationGroupId,
+          completedStockGroups: state.generationProgress?.completedStockGroups ?? 0,
+          totalStockGroups: state.generationProgress?.totalStockGroups ?? 0,
+          completedPieceInstanceSteps:
+            state.generationProgress?.completedPieceInstanceSteps ?? 0,
+          totalPieceInstanceSteps: state.generationProgress?.totalPieceInstanceSteps ?? 0,
+          label: 'Cancelling Cut Plan generation…',
+        },
+      });
     }
   };
 
@@ -4517,12 +4618,18 @@ export default function App() {
       throw new Error('Cut Plan generation is not available from the connected desktop host.');
     }
 
-    dispatch({ type: 'project-operation-started', message: 'Generating deterministic heuristic Cut Plan…' });
+    const operationId = createGenerationOperationId();
+    activeGenerationOperationIdRef.current = operationId;
+    dispatch({ type: 'generation-operation-started', message: 'Preparing Cut Plan generation…' });
     try {
-      const response = await hostBridge.generateSelectedCutPlan({
-        project: buildProjectRecord(state),
-        optimizationGroupId,
-      });
+      const response = await trackGenerationOperation(
+        operationId,
+        () => hostBridge.generateSelectedCutPlan({
+          project: buildProjectRecord(state),
+          optimizationGroupId,
+          operationId,
+        }),
+      );
       if (!response.success || !response.project || !response.result) {
         if (response.project) {
           dispatch({
@@ -4546,7 +4653,7 @@ export default function App() {
       });
     } catch (error) {
       const message = getErrorMessage(error, 'The selected Optimization Group could not generate a Cut Plan.');
-      dispatch({ type: 'project-operation-failed', message });
+      dispatch({ type: 'generation-operation-finished', message });
       throw new Error(message);
     }
   };
@@ -4556,11 +4663,20 @@ export default function App() {
       throw new Error('Generate All Stale is not available from the connected desktop host.');
     }
 
-    dispatch({ type: 'project-operation-started', message: 'Generating stale Optimization Groups independently…' });
+    const operationId = createGenerationOperationId();
+    activeGenerationOperationIdRef.current = operationId;
+    dispatch({
+      type: 'generation-operation-started',
+      message: 'Preparing Optimization Groups that Need Generation…',
+    });
     try {
-      const response = await hostBridge.generateAllStaleCutPlans({
-        project: buildProjectRecord(state),
-      });
+      const response = await trackGenerationOperation(
+        operationId,
+        () => hostBridge.generateAllStaleCutPlans({
+          project: buildProjectRecord(state),
+          operationId,
+        }),
+      );
       dispatch({
         type: 'optimization-groups-updated',
         project: response.project,
@@ -4568,8 +4684,11 @@ export default function App() {
         message: response.message,
       });
     } catch (error) {
-      const message = getErrorMessage(error, 'Stale Optimization Groups could not be generated.');
-      dispatch({ type: 'project-operation-failed', message });
+      const message = getErrorMessage(
+        error,
+        'Optimization Groups that Need Generation could not be generated.',
+      );
+      dispatch({ type: 'generation-operation-finished', message });
       throw new Error(message);
     }
   };
@@ -4934,11 +5053,14 @@ export default function App() {
       content = state.projectKind === 'stockLength' ? (
         <RequiredPiecesPage
           activeOptimizationGroupId={state.activeOptimizationGroupId}
-          busy={state.projectBusy || state.importBusy}
+          busy={state.projectBusy || state.importBusy || state.generationBusy}
+          generationBusy={state.generationBusy}
+          generationProgress={state.generationProgress}
           inchDisplayFormat={state.projectSettings.inchDisplayFormat}
           mappingSession={state.importMappingSession}
           message={state.projectMessage}
           onCancelImportMapping={cancelImportMapping}
+          onCancelGeneration={cancelCutPlanGeneration}
           onCreateOptimizationGroup={(name, stockLength) =>
             updateOptimizationGroups({ type: 'create', name, stockLength })
           }

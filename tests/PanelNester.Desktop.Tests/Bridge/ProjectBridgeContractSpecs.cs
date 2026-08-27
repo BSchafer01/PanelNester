@@ -64,6 +64,22 @@ public sealed class ProjectBridgeContractSpecs
         }
     }
 
+    [Fact]
+    public void Stock_Length_generation_exposes_progress_and_cancellation_operations()
+    {
+        var dispatcher = DesktopBridgeRegistration.CreateDefault(
+            new StubFileDialogService(),
+            new StubMaterialService(),
+            new ProjectService(new StubMaterialService(), idGenerator: () => "project-contract"),
+            new StubImportService(),
+            new PartEditorService(DemoMaterialCatalog.All),
+            new StubNestingService(),
+            () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true));
+
+        Assert.Contains("cancel-cut-plan-generation", dispatcher.RegisteredTypes);
+        Assert.Contains("get-cut-plan-generation-progress", dispatcher.RegisteredTypes);
+    }
+
     private sealed class StubFileDialogService : IFileDialogService
     {
         public Task<OpenFileDialogResponse> OpenAsync(

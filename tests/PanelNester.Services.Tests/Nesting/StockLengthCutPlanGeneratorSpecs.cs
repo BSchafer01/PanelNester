@@ -345,6 +345,81 @@ public sealed class StockLengthCutPlanGeneratorSpecs
         Assert.DoesNotContain("optimal", result.Description, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task Generate_reports_domain_Stock_Group_progress_without_adapter_details()
+    {
+        var reports = new List<StockLengthGenerationProgress>();
+        var generator = new SheetOptimizerStockLengthCutPlanGenerator(new ShelfNestingService());
+
+        await generator.GenerateAsync(
+            Request(
+                100,
+                0,
+                Piece("first", 1, 20, "P-100", "Clear"),
+                Piece("second", 1, 20, "P-200", null)),
+            new InlineProgress(reports.Add));
+
+        var stockGroupReports = reports
+            .Where(report => report.Phase == StockLengthGenerationProgressPhase.StockGroups)
+            .ToArray();
+        Assert.Equal([0, 1, 1, 2], stockGroupReports.Select(report => report.CompletedStockGroups));
+        Assert.All(stockGroupReports, report => Assert.Equal(2, report.TotalStockGroups));
+        Assert.All(reports, report =>
+        {
+            Assert.Contains("Stock Group", report.Label, StringComparison.Ordinal);
+            Assert.DoesNotContain("__stock__", report.Label, StringComparison.Ordinal);
+            Assert.DoesNotContain("sheet", report.Label, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
+    [Fact]
+    public async Task Generate_cancels_during_large_quantity_preparation_without_calling_the_engine()
+    {
+        var engineCalls = 0;
+        var generator = new SheetOptimizerStockLengthCutPlanGenerator(
+            new DelegatingNestingService(request =>
+            {
+                engineCalls++;
+                return new NestResponse();
+            }));
+        using var cancellation = new CancellationTokenSource();
+        var progress = new InlineProgress(_ => cancellation.Cancel());
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => generator.GenerateAsync(
+            Request(100, 0, Piece("large", 20_001, 1, "P-100", null)),
+            progress,
+            cancellation.Token));
+
+        Assert.Equal(0, engineCalls);
+    }
+
+    [Fact]
+    public async Task Generate_accepts_a_representative_quantity_above_the_warning_threshold()
+    {
+        var generator = new SheetOptimizerStockLengthCutPlanGenerator(new ShelfNestingService());
+        var reports = new List<StockLengthGenerationProgress>();
+
+        var result = await generator.GenerateAsync(
+            Request(1_000, 0, Piece("large", 10_001, 1, "P-100", null)),
+            new InlineProgress(reports.Add));
+
+        Assert.Equal(CutPlanStatus.Complete, result.Status);
+        Assert.Equal(
+            10_001,
+            Assert.Single(result.CutPlans).StockItems.Sum(item => item.CutSequence.Count));
+        var pieceProgress = reports
+            .Where(report => report.Phase == StockLengthGenerationProgressPhase.PieceInstances)
+            .ToArray();
+        Assert.Contains(pieceProgress, report =>
+            report.CompletedPieceInstanceSteps > 0 &&
+            report.CompletedPieceInstanceSteps < report.TotalPieceInstanceSteps);
+        Assert.All(pieceProgress, report => Assert.Equal(20_002, report.TotalPieceInstanceSteps));
+        Assert.Equal(
+            pieceProgress.Select(report => report.CompletedPieceInstanceSteps).Order(),
+            pieceProgress.Select(report => report.CompletedPieceInstanceSteps));
+        Assert.InRange(pieceProgress.Length, 4, 200);
+    }
+
     private static StockLengthCutPlanRequest Request(
         decimal stockLength,
         decimal sawKerf,
@@ -380,5 +455,11 @@ public sealed class StockLengthCutPlanGeneratorSpecs
             NestRequest request,
             CancellationToken cancellationToken = default) =>
             Task.FromResult(handler(request));
+    }
+
+    private sealed class InlineProgress(Action<StockLengthGenerationProgress> report)
+        : IProgress<StockLengthGenerationProgress>
+    {
+        public void Report(StockLengthGenerationProgress value) => report(value);
     }
 }
