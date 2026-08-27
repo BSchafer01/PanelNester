@@ -4524,6 +4524,14 @@ export default function App() {
         optimizationGroupId,
       });
       if (!response.success || !response.project || !response.result) {
+        if (response.project) {
+          dispatch({
+            type: 'optimization-groups-updated',
+            project: response.project,
+            activeOptimizationGroupId: optimizationGroupId,
+            message: response.message ?? 'Cut Plan generation reported an application error.',
+          });
+        }
         throw new Error(getBridgeErrorMessage(
           response.error,
           response.message ?? 'The selected Optimization Group could not generate a Cut Plan.',
@@ -4538,6 +4546,29 @@ export default function App() {
       });
     } catch (error) {
       const message = getErrorMessage(error, 'The selected Optimization Group could not generate a Cut Plan.');
+      dispatch({ type: 'project-operation-failed', message });
+      throw new Error(message);
+    }
+  };
+
+  const generateAllStaleCutPlans = async (): Promise<void> => {
+    if (!hasCapability(bridgeMessageTypes.generateAllStaleCutPlans)) {
+      throw new Error('Generate All Stale is not available from the connected desktop host.');
+    }
+
+    dispatch({ type: 'project-operation-started', message: 'Generating stale Optimization Groups independently…' });
+    try {
+      const response = await hostBridge.generateAllStaleCutPlans({
+        project: buildProjectRecord(state),
+      });
+      dispatch({
+        type: 'optimization-groups-updated',
+        project: response.project,
+        activeOptimizationGroupId: state.activeOptimizationGroupId,
+        message: response.message,
+      });
+    } catch (error) {
+      const message = getErrorMessage(error, 'Stale Optimization Groups could not be generated.');
       dispatch({ type: 'project-operation-failed', message });
       throw new Error(message);
     }
@@ -4921,6 +4952,7 @@ export default function App() {
           }
           onFinalizeImportMapping={finalizeImportMapping}
           onGenerateSelected={generateSelectedCutPlan}
+          onGenerateAllStale={generateAllStaleCutPlans}
           onImportFile={importFile}
           onInchDisplayFormatChange={(inchDisplayFormat: InchDisplayFormat) =>
             dispatch({

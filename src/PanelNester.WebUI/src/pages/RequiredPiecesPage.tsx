@@ -26,6 +26,7 @@ interface RequiredPiecesPageProps {
   onUpdateRequiredPiece: (change: RequiredPieceChange) => void | Promise<void>;
   onDeleteRequiredPiece: (optimizationGroupId: string, requiredPieceId: string) => void | Promise<void>;
   onGenerateSelected?: (optimizationGroupId: string) => void | Promise<void>;
+  onGenerateAllStale?: () => void | Promise<void>;
   onInchDisplayFormatChange: (format: InchDisplayFormat) => void;
   mappingSession?: ImportMappingSession;
   onImportFile?: () => void | Promise<void>;
@@ -122,6 +123,7 @@ export function RequiredPiecesPage({
   onUpdateRequiredPiece,
   onDeleteRequiredPiece,
   onGenerateSelected,
+  onGenerateAllStale,
   onInchDisplayFormatChange,
   mappingSession,
   onImportFile,
@@ -140,6 +142,8 @@ export function RequiredPiecesPage({
   const activeOptimizationGroup = optimizationGroups.find(
     (group) => group.optimizationGroupId === activeOptimizationGroupId,
   ) ?? optimizationGroups[0];
+  const staleGroupCount = optimizationGroups.filter((group) =>
+    group.requiredPieces.length > 0 && group.resultStatus !== 'valid').length;
 
   useEffect(() => {
     if (!draft.optimizationGroupId && optimizationGroups.length > 0) {
@@ -338,16 +342,24 @@ export function RequiredPiecesPage({
             ))}
           </select>
         </label>
-        {onGenerateSelected ? (
+        {onGenerateSelected || onGenerateAllStale ? (
           <div className="form-actions">
-            <button
-              className="primary-button"
-              disabled={busy || !activeOptimizationGroup || activeOptimizationGroup.requiredPieces.length === 0 || !activeOptimizationGroup.stockLength || activeOptimizationGroup.stockLength <= 0}
-              onClick={() => activeOptimizationGroup && runAction(() => onGenerateSelected(activeOptimizationGroup.optimizationGroupId))}
-              type="button"
-            >Generate Selected</button>
+            {onGenerateSelected ? <button
+                className="primary-button"
+                disabled={busy || !activeOptimizationGroup || activeOptimizationGroup.requiredPieces.length === 0 || !activeOptimizationGroup.stockLength || activeOptimizationGroup.stockLength <= 0}
+                onClick={() => activeOptimizationGroup && runAction(() => onGenerateSelected(activeOptimizationGroup.optimizationGroupId))}
+                type="button"
+              >Generate Selected</button> : null}
+            {onGenerateAllStale ? <button
+                className="secondary-button"
+                disabled={busy || staleGroupCount === 0}
+                onClick={() => runAction(onGenerateAllStale)}
+                type="button"
+              >Generate All Stale</button> : null}
             <span className="section-note">
-              {!activeOptimizationGroup || activeOptimizationGroup.requiredPieces.length === 0
+              {onGenerateAllStale && staleGroupCount > 0
+                ? `${staleGroupCount} stale Optimization Group${staleGroupCount === 1 ? '' : 's'}`
+                : !activeOptimizationGroup || activeOptimizationGroup.requiredPieces.length === 0
                 ? 'Empty Optimization Group'
                 : activeOptimizationGroup.resultStatus === 'valid'
                   ? 'Current Cut Plan'

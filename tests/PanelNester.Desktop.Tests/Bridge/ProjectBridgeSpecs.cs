@@ -203,6 +203,189 @@ public sealed class ProjectBridgeSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Generate_All_Stale_returns_successful_results_with_failed_group_diagnostics()
+    {
+        var repository = new JsonMaterialRepository(Path.Combine(_workspacePath, "all-stale-materials.json"));
+        var materialService = new MaterialService(repository);
+        var dispatcher = DesktopBridgeRegistration.CreateDefault(
+            new RecordingFileDialogService(),
+            materialService,
+            new ProjectService(materialService),
+            new CsvImportService(repository),
+            new PartEditorService(repository),
+            new ShelfNestingService(),
+            () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true));
+        var project = new Project
+        {
+            ProjectId = "all-stale-project",
+            ProjectKind = ProjectKind.StockLength,
+            State = new ProjectState
+            {
+                OptimizationGroups =
+                [
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "successful", Name = "Successful", Order = 0,
+                        StockLength = 120, ResultStatus = OptimizationResultStatus.Stale,
+                        RequiredPieces =
+                        [
+                            new RequiredPiece
+                            {
+                                RequiredPieceId = "successful-piece", Quantity = 1, Length = 40,
+                                ProfileNumber = "P-100"
+                            }
+                        ]
+                    },
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "failed", Name = "Failed", Order = 1,
+                        ResultStatus = OptimizationResultStatus.Stale,
+                        RequiredPieces =
+                        [
+                            new RequiredPiece
+                            {
+                                RequiredPieceId = "failed-piece", Quantity = 1, Length = 30,
+                                ProfileNumber = "P-200"
+                            }
+                        ]
+                    }
+                ]
+            }
+        };
+
+        var generated = await DispatchAsync<GenerateAllStaleCutPlansResponse>(
+            dispatcher,
+            BridgeMessageTypes.GenerateAllStaleCutPlans,
+            new GenerateAllStaleCutPlansRequest(project));
+
+        Assert.False(generated.Success);
+        Assert.NotNull(generated.Project);
+        Assert.Equal(CutPlanStatus.Complete,
+            generated.Project.State.OptimizationGroups[0].LastStockLengthOptimizationResult?.Status);
+        var failure = Assert.Single(generated.Failures);
+        Assert.Equal("failed", failure.OptimizationGroupId);
+        Assert.Equal("cut-plan-invalid-input", failure.Code);
+        Assert.Equal(failure.Code,
+            generated.Project.State.OptimizationGroups[1].LastStockLengthGenerationError?.Code);
+    }
+
+    [Fact]
+    public async Task Generate_Selected_returns_the_project_with_application_error_diagnostics()
+    {
+        var repository = new JsonMaterialRepository(Path.Combine(_workspacePath, "selected-failure-materials.json"));
+        var materialService = new MaterialService(repository);
+        var dispatcher = DesktopBridgeRegistration.CreateDefault(
+            new RecordingFileDialogService(), materialService, new ProjectService(materialService),
+            new CsvImportService(repository), new PartEditorService(repository),
+            new ShelfNestingService(),
+            () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true));
+        var project = new Project
+        {
+            ProjectId = "selected-failure", ProjectKind = ProjectKind.StockLength,
+            State = new ProjectState
+            {
+                OptimizationGroups =
+                [
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "frames", Name = "Frames",
+                        RequiredPieces =
+                        [
+                            new RequiredPiece
+                            {
+                                RequiredPieceId = "piece-1", Quantity = 1, Length = 20,
+                                ProfileNumber = "P-100"
+                            }
+                        ]
+                    }
+                ]
+            }
+        };
+
+        var generated = await DispatchAsync<GenerateSelectedCutPlanResponse>(
+            dispatcher, BridgeMessageTypes.GenerateSelectedCutPlan,
+            new GenerateSelectedCutPlanRequest(project, "frames"));
+        var projectPath = Path.Combine(_workspacePath, "selected-failure.pnest");
+        var saved = await DispatchAsync<SaveProjectResponse>(
+            dispatcher, BridgeMessageTypes.SaveProject,
+            new SaveProjectRequest(generated.Project!, projectPath));
+        var reopened = await DispatchAsync<OpenProjectResponse>(
+            dispatcher, BridgeMessageTypes.OpenProject,
+            new OpenProjectRequest(projectPath));
+
+        Assert.False(generated.Success);
+        var group = Assert.Single(generated.Project!.State.OptimizationGroups);
+        Assert.Equal("cut-plan-invalid-input", group.LastStockLengthGenerationError?.Code);
+        Assert.Equal(OptimizationResultStatus.None, group.ResultStatus);
+        Assert.True(saved.Success);
+        Assert.Equal("cut-plan-invalid-input",
+            Assert.Single(reopened.Project!.State.OptimizationGroups).LastStockLengthGenerationError?.Code);
+    }
+
+    [Fact]
+    public async Task Required_Piece_metadata_edits_preserve_current_results_but_geometry_edits_invalidate_them()
+    {
+        var repository = new JsonMaterialRepository(Path.Combine(_workspacePath, "freshness-materials.json"));
+        var materialService = new MaterialService(repository);
+        var dispatcher = DesktopBridgeRegistration.CreateDefault(
+            new RecordingFileDialogService(), materialService, new ProjectService(materialService),
+            new CsvImportService(repository), new PartEditorService(repository),
+            new ShelfNestingService(),
+            () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true));
+        var piece = new RequiredPiece
+        {
+            RequiredPieceId = "piece-1", Quantity = 1, Length = 40,
+            ProfileNumber = "P-100", PartName = "Original", PartNumber = "A-1",
+            IsManual = true
+        };
+        var project = new Project
+        {
+            ProjectId = "freshness-project", ProjectKind = ProjectKind.StockLength,
+            State = new ProjectState
+            {
+                OptimizationGroups =
+                [
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "frames", Name = "Frames", StockLength = 120,
+                        RequiredPieces = [piece]
+                    }
+                ]
+            }
+        };
+        var generated = await DispatchAsync<GenerateSelectedCutPlanResponse>(
+            dispatcher, BridgeMessageTypes.GenerateSelectedCutPlan,
+            new GenerateSelectedCutPlanRequest(project, "frames"));
+
+        var metadataEdited = await DispatchAsync<UpdateRequiredPiecesResponse>(
+            dispatcher, BridgeMessageTypes.UpdateRequiredPieces,
+            new UpdateRequiredPiecesRequest(generated.Project!, new RequiredPieceChange
+            {
+                Type = RequiredPieceChangeType.Update,
+                OptimizationGroupId = "frames", RequiredPieceId = "piece-1",
+                Quantity = "1", Length = "40", ProfileNumber = "P-100",
+                PartName = "Corrected", PartNumber = "A-2"
+            }));
+        var geometryEdited = await DispatchAsync<UpdateRequiredPiecesResponse>(
+            dispatcher, BridgeMessageTypes.UpdateRequiredPieces,
+            new UpdateRequiredPiecesRequest(metadataEdited.Project!, new RequiredPieceChange
+            {
+                Type = RequiredPieceChangeType.Update,
+                OptimizationGroupId = "frames", RequiredPieceId = "piece-1",
+                Quantity = "1", Length = "41", ProfileNumber = "P-100",
+                PartName = "Corrected", PartNumber = "A-2"
+            }));
+
+        var metadataGroup = Assert.Single(metadataEdited.Project!.State.OptimizationGroups);
+        Assert.Equal(OptimizationResultStatus.Valid, metadataGroup.ResultStatus);
+        Assert.NotNull(metadataGroup.LastStockLengthOptimizationResult);
+        Assert.Equal("Corrected", Assert.Single(metadataGroup.RequiredPieces).PartName);
+        Assert.Equal("A-2", Assert.Single(metadataGroup.RequiredPieces).PartNumber);
+        Assert.Equal(OptimizationResultStatus.Stale,
+            Assert.Single(geometryEdited.Project!.State.OptimizationGroups).ResultStatus);
+    }
+
+    [Fact]
     public void Phase_three_project_bridge_message_names_follow_the_existing_request_response_pattern()
     {
         var responseTypes = Phase03ProjectBridgeExpectations.ProjectMessageTypes

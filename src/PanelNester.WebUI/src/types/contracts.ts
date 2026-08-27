@@ -42,6 +42,7 @@ export const bridgeMessageTypes = {
   updateOptimizationGroups: 'update-optimization-groups',
   updateRequiredPieces: 'update-required-pieces',
   generateSelectedCutPlan: 'generate-selected-cut-plan',
+  generateAllStaleCutPlans: 'generate-all-stale-cut-plans',
   getDesktopAppSettings: 'get-desktop-app-settings',
   updateDesktopAppSettings: 'update-desktop-app-settings',
 } as const;
@@ -627,6 +628,7 @@ export interface OptimizationGroup {
   requiredPieces: RequiredPiece[];
   stockGroups: StockGroup[];
   lastStockLengthOptimizationResult?: StockLengthOptimizationResult | null;
+  lastStockLengthGenerationError?: ValidationError | null;
   lastNestingResult?: NestResponse | null;
   lastBatchNestingResult?: BatchNestResponse | null;
   resultStatus: OptimizationResultStatus;
@@ -1234,6 +1236,23 @@ export interface GenerateSelectedCutPlanResponse {
   message?: string;
 }
 
+export interface StockLengthGenerationFailure {
+  optimizationGroupId: string;
+  code: string;
+  message: string;
+}
+
+export interface GenerateAllStaleCutPlansRequest {
+  project: ProjectRecord;
+}
+
+export interface GenerateAllStaleCutPlansResponse {
+  success: boolean;
+  project: ProjectRecord;
+  failures: StockLengthGenerationFailure[];
+  message: string;
+}
+
 export interface StiffenerTakeoffLengthSummary {
   label: string;
   lengthInches: number;
@@ -1413,6 +1432,7 @@ export const requestedBridgeCapabilities: BridgeCapability[] = [
   bridgeMessageTypes.updateOptimizationGroups,
   bridgeMessageTypes.updateRequiredPieces,
   bridgeMessageTypes.generateSelectedCutPlan,
+  bridgeMessageTypes.generateAllStaleCutPlans,
   bridgeMessageTypes.getDesktopAppSettings,
   bridgeMessageTypes.updateDesktopAppSettings,
 ];

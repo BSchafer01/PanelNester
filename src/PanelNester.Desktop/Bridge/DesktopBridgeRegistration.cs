@@ -1016,9 +1016,30 @@ public static class DesktopBridgeRegistration
                         generated,
                         null,
                         $"Generated deterministic heuristic Cut Plan for '{request.OptimizationGroupId}'.")
-                    : GenerateSelectedCutPlanResponse.Failure(
-                        GetFirstErrorCode(result.Errors, "cut-plan-generation-failed"),
-                        GetFirstErrorMessage(result.Errors, "The selected Optimization Group could not generate a Cut Plan."));
+                    : result.Project is not null
+                        ? GenerateSelectedCutPlanResponse.Failure(
+                            result.Project,
+                            GetFirstErrorCode(result.Errors, "cut-plan-generation-failed"),
+                            GetFirstErrorMessage(result.Errors, "The selected Optimization Group could not generate a Cut Plan."))
+                        : GenerateSelectedCutPlanResponse.Failure(
+                            GetFirstErrorCode(result.Errors, "cut-plan-generation-failed"),
+                            GetFirstErrorMessage(result.Errors, "The selected Optimization Group could not generate a Cut Plan."));
+            });
+        dispatcher.Register<GenerateAllStaleCutPlansRequest>(
+            BridgeMessageTypes.GenerateAllStaleCutPlans,
+            async (request, cancellationToken) =>
+            {
+                var result = await stockLengthGenerationService
+                    .GenerateAllStaleAsync(request.Project, cancellationToken)
+                    .ConfigureAwait(false);
+                var message = result.Success
+                    ? "Generated every stale Optimization Group."
+                    : $"Generated available Cut Plans; {result.Failures.Count} Optimization Group(s) failed.";
+                return new GenerateAllStaleCutPlansResponse(
+                    result.Success,
+                    result.Project,
+                    result.Failures,
+                    message);
             });
 
         if (batchNestingService is not null &&

@@ -45,6 +45,7 @@ public static class BridgeMessageTypes
     public const string UpdateOptimizationGroups = "update-optimization-groups";
     public const string UpdateRequiredPieces = "update-required-pieces";
     public const string GenerateSelectedCutPlan = "generate-selected-cut-plan";
+    public const string GenerateAllStaleCutPlans = "generate-all-stale-cut-plans";
     public const string GetDesktopAppSettings = "get-desktop-app-settings";
     public const string UpdateDesktopAppSettings = "update-desktop-app-settings";
     public const string UpdateReportSettings = "update-report-settings";
@@ -830,7 +831,25 @@ public sealed record GenerateSelectedCutPlanResponse(
         var failure = BridgeFailure.Create(code, message, userMessage);
         return new(false, null, null, failure.Error, failure.ResponseMessage);
     }
+
+    public static GenerateSelectedCutPlanResponse Failure(
+        Project project,
+        string code,
+        string message,
+        string? userMessage = null)
+    {
+        var failure = BridgeFailure.Create(code, message, userMessage);
+        return new(false, project, null, failure.Error, failure.ResponseMessage);
+    }
 }
+
+public sealed record GenerateAllStaleCutPlansRequest(Project Project);
+
+public sealed record GenerateAllStaleCutPlansResponse(
+    bool Success,
+    Project Project,
+    IReadOnlyList<StockLengthGenerationFailure> Failures,
+    string Message);
 
 public sealed record UpdateReportSettingsRequest(Project Project, ReportSettings ReportSettings);
 

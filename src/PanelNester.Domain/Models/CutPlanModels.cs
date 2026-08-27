@@ -29,6 +29,25 @@ public sealed record StockLengthOptimizationResult
     public IReadOnlyList<CutPlan> CutPlans { get; init; } = Array.Empty<CutPlan>();
 }
 
+public sealed record StockLengthGenerationFailure
+{
+    public string OptimizationGroupId { get; init; } = string.Empty;
+
+    public string Code { get; init; } = string.Empty;
+
+    public string Message { get; init; } = string.Empty;
+}
+
+public sealed record StockLengthProjectGenerationResult
+{
+    public bool Success => Failures.Count == 0;
+
+    public Project Project { get; init; } = new();
+
+    public IReadOnlyList<StockLengthGenerationFailure> Failures { get; init; } =
+        Array.Empty<StockLengthGenerationFailure>();
+}
+
 public sealed record CutPlan
 {
     public string CutPlanId { get; init; } = string.Empty;

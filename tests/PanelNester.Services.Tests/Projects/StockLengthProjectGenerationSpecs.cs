@@ -38,6 +38,51 @@ public sealed class StockLengthProjectGenerationSpecs
         Assert.Equal(OptimizationResultStatus.None, project.State.OptimizationGroups[0].ResultStatus);
     }
 
+    [Fact]
+    public async Task Generate_All_Stale_retains_successes_and_records_each_application_error()
+    {
+        var service = new StockLengthProjectGenerationService(
+            new SheetOptimizerStockLengthCutPlanGenerator(new ShelfNestingService()));
+        var project = ProjectWithGroups(
+            Group("successful", Piece("successful-piece", 2, 40)) with
+            {
+                ResultStatus = OptimizationResultStatus.Stale
+            },
+            Group("failed", Piece("failed-piece", 1, 30)) with
+            {
+                StockLength = null,
+                ResultStatus = OptimizationResultStatus.Stale
+            },
+            Group("empty"),
+            Group("current", Piece("current-piece", 1, 20)) with
+            {
+                ResultStatus = OptimizationResultStatus.Valid,
+                LastStockLengthOptimizationResult = new StockLengthOptimizationResult
+                {
+                    OptimizationGroupId = "current",
+                    Status = CutPlanStatus.Partial,
+                    Description = "Existing current Cut Plan"
+                }
+            });
+
+        var generated = await service.GenerateAllStaleAsync(project);
+
+        Assert.False(generated.Success);
+        var groups = generated.Project.State.OptimizationGroups
+            .ToDictionary(group => group.OptimizationGroupId);
+        Assert.Equal(CutPlanStatus.Complete,
+            groups["successful"].LastStockLengthOptimizationResult?.Status);
+        Assert.Equal(OptimizationResultStatus.Valid, groups["successful"].ResultStatus);
+        Assert.Null(groups["successful"].LastStockLengthGenerationError);
+        Assert.Equal(OptimizationResultStatus.Stale, groups["failed"].ResultStatus);
+        Assert.Equal("cut-plan-invalid-input", groups["failed"].LastStockLengthGenerationError?.Code);
+        Assert.Equal(OptimizationResultStatus.None, groups["empty"].ResultStatus);
+        Assert.Null(groups["empty"].LastStockLengthGenerationError);
+        Assert.Equal("Existing current Cut Plan",
+            groups["current"].LastStockLengthOptimizationResult?.Description);
+        Assert.Equal(["failed"], generated.Failures.Select(failure => failure.OptimizationGroupId));
+    }
+
     private static Project ProjectWithGroups(params OptimizationGroup[] groups) =>
         new()
         {

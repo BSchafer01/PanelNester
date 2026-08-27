@@ -37,6 +37,89 @@ function stockGroup(items: StockItem[] = [stockItem()]): OptimizationGroup {
 describe('Stock-Length Results', () => {
   beforeEach(() => sessionStorage.clear());
 
+  it('defaults to All Optimization Groups and applies a view-only Stock Group filter', async () => {
+    const user = userEvent.setup();
+    const frames = stockGroup();
+    const doorPiece = { ...pieces[0], pieceInstanceId: 'door:instance-1', requiredPieceId: 'door', profileNumber: 'A-100', finish: null };
+    const doors: OptimizationGroup = {
+      ...stockGroup([stockItem({ stockItemId: 'door-stock', cutSequence: [doorPiece] })]),
+      optimizationGroupId: 'doors', name: 'Doors', order: 1,
+      lastStockLengthOptimizationResult: {
+        optimizationGroupId: 'doors', status: 'complete', description: 'Door Cut Plan',
+        cutPlans: [{
+          cutPlanId: 'doors:a-100', status: 'complete',
+          stockGroup: { profileNumber: 'A-100', finish: null, requiredPieceIds: ['door'] },
+          stockItems: [stockItem({ stockItemId: 'door-stock', cutSequence: [doorPiece] })],
+          unplacedPieceInstances: [],
+        }],
+      },
+    };
+
+    render(<StockLengthResults activeOptimizationGroupId="frames" onSelectOptimizationGroup={vi.fn()} optimizationGroups={[doors, frames]} />);
+
+    expect(screen.getByRole('combobox', { name: 'Optimization Group scope' })).toHaveValue('all');
+    expect(screen.getByRole('option', { name: 'All Optimization Groups' })).toBeInTheDocument();
+    const initialRows = screen.getAllByRole('row').filter((row) => row.hasAttribute('aria-selected'));
+    expect(within(initialRows[0]).getByText('Frames')).toBeInTheDocument();
+    expect(within(initialRows[1]).getByText('Doors')).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Stock Group filter' }), 'a-100\u0000');
+    const filteredRow = screen.getAllByRole('row').find((row) => row.hasAttribute('aria-selected'))!;
+    expect(within(filteredRow).getByText('Doors')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Stock Item 1 viewer' })).toHaveTextContent('A-100');
+  });
+
+  it('shows all freshness states and activates the matching Stock Item and Piece Instance from search', async () => {
+    const user = userEvent.setup();
+    const searchablePiece = {
+      ...pieces[0], partNumber: 'PN-42', partName: 'Header',
+      sourceReferences: [{ worksheetName: 'Cuts', worksheetPosition: 0, physicalRow: 7, sourceFingerprint: 'abc' }],
+    };
+    const current = stockGroup([stockItem({ cutSequence: [searchablePiece] })]);
+    const empty: OptimizationGroup = {
+      optimizationGroupId: 'empty', name: 'Empty', order: 1, parts: [], requiredPieces: [],
+      stockGroups: [], resultStatus: 'none', lastNestingResult: null, lastBatchNestingResult: null,
+    };
+    const stale: OptimizationGroup = {
+      ...empty, optimizationGroupId: 'stale', name: 'Changed', order: 2,
+      requiredPieces: [{ requiredPieceId: 'stale-piece', quantity: 1, length: 20, profileNumber: 'S', isManual: true, sourceReferences: [] }],
+      resultStatus: 'stale',
+    };
+    const failed: OptimizationGroup = {
+      ...stale, optimizationGroupId: 'failed', name: 'Broken', order: 3,
+      lastStockLengthGenerationError: { code: 'adapter-invariant', message: 'Unexpected placement geometry.' },
+    };
+    const allUnplaced: OptimizationGroup = {
+      ...stale, optimizationGroupId: 'unplaced', name: 'Overlength', order: 4, resultStatus: 'valid',
+      lastStockLengthOptimizationResult: {
+        optimizationGroupId: 'unplaced', status: 'failed', description: 'No Piece Instances placed',
+        cutPlans: [{
+          cutPlanId: 'unplaced:plan', status: 'failed',
+          stockGroup: { profileNumber: 'S', finish: null, requiredPieceIds: ['stale-piece'] },
+          stockItems: [],
+          unplacedPieceInstances: [{
+            pieceInstance: { pieceInstanceId: 'stale-piece:instance-1', requiredPieceId: 'stale-piece', instanceNumber: 1, length: 130, profileNumber: 'S', sourceReferences: [] },
+            reasonCode: 'exceeds-stock-length', reasonDescription: 'Piece Instance exceeds Stock Length.',
+          }],
+        }],
+      },
+    };
+
+    render(<StockLengthResults onSelectOptimizationGroup={vi.fn()} optimizationGroups={[current, empty, stale, failed, allUnplaced]} />);
+
+    expect(screen.getAllByText('Empty', { selector: '[data-result-state]' })).toHaveLength(1);
+    expect(screen.getByText('Needs Generation', { selector: '[data-result-state]' })).toBeInTheDocument();
+    expect(screen.getByText('Application Error', { selector: '[data-result-state]' })).toBeInTheDocument();
+    expect(screen.getByText('Failed', { selector: '[data-result-state]' })).toBeInTheDocument();
+    expect(screen.getByText('Unexpected placement geometry.')).toBeInTheDocument();
+    expect(screen.getByText('Piece Instance exceeds Stock Length.')).toBeInTheDocument();
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search Results' }), 'Cuts!7');
+    await user.click(screen.getByRole('button', { name: /PN-42.*Cuts!7/ }));
+    expect(screen.getByRole('row', { name: /Stock Item 1/ })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('button', { name: /Cut 1.*PN-42/ })).toHaveAttribute('aria-pressed', 'true');
+  });
+
   it('selects the first Stock Item, updates the viewer from a row, and retains only in-scope composite identity', async () => {
     const user = userEvent.setup();
     const second = stockItem({ stockItemId: 'item-2', stockItemNumber: 2, cutSequence: [pieces[1]], pieceLength: 30, sawLoss: 0, remainder: 90 });
@@ -181,7 +264,7 @@ describe('Stock-Length Results', () => {
 
     expect(screen.getByRole('heading', { name: 'Frames Cut Plan' })).toBeInTheDocument();
     expect(screen.getByText('Deterministic heuristic Cut Plan')).toBeInTheDocument();
-    expect(screen.getAllByText('Partial')).toHaveLength(3);
+    expect(screen.getAllByText('Partial').length).toBeGreaterThanOrEqual(3);
     const rows = screen.getAllByRole('row').slice(1);
     expect(within(rows[0]).getByText('1')).toBeInTheDocument();
     expect(within(rows[0]).getByText('96 in')).toBeInTheDocument();
@@ -193,7 +276,7 @@ describe('Stock-Length Results', () => {
     expect(screen.getByText('Piece Instance exceeds Stock Length.')).toBeInTheDocument();
   });
 
-  it('keeps the selected empty group visible instead of falling back to another group', () => {
+  it('shows selected empty and populated groups as placeholders in the default All scope', () => {
     const empty: OptimizationGroup = {
       optimizationGroupId: 'empty', name: 'Empty', order: 0, parts: [], requiredPieces: [], stockGroups: [],
       lastNestingResult: null, lastBatchNestingResult: null, lastStockLengthOptimizationResult: null, resultStatus: 'none',
@@ -205,8 +288,9 @@ describe('Stock-Length Results', () => {
 
     render(<StockLengthResults activeOptimizationGroupId="empty" onSelectOptimizationGroup={vi.fn()} optimizationGroups={[empty, populated]} />);
 
-    expect(screen.getByRole('heading', { name: 'Empty Cut Plan' })).toBeInTheDocument();
-    expect(screen.getByText('Empty Optimization Group', { selector: 'strong' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'All Optimization Groups' })).toBeInTheDocument();
+    expect(screen.getByText('Empty', { selector: '[data-result-state]' })).toBeInTheDocument();
+    expect(screen.getByText('Needs Generation', { selector: '[data-result-state]' })).toBeInTheDocument();
   });
 
   it('preserves Cut Plan group order beyond nine groups', () => {

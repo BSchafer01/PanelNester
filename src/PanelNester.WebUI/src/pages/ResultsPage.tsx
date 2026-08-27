@@ -84,41 +84,128 @@ function formatCutPlanStatus(status: string): string {
   return status.length > 0 ? `${status[0].toUpperCase()}${status.slice(1)}` : status;
 }
 
+const allOptimizationGroupsScope = 'all';
+const allStockGroupsScope = 'all';
+
+function stockGroupKey(profileNumber: string, finish?: string | null): string {
+  return `${profileNumber.trim().toLocaleLowerCase()}\u0000${(finish ?? '').trim().toLocaleLowerCase()}`;
+}
+
+function sourceReferenceLabel(piece: { sourceReferences: Array<{ worksheetName: string; physicalRow: number }> }): string {
+  return piece.sourceReferences
+    .map((reference) => `${reference.worksheetName}!${reference.physicalRow}`)
+    .join(', ');
+}
+
+function resultState(group: OptimizationGroup): string {
+  if (group.lastStockLengthGenerationError) return 'Application Error';
+  if (group.resultStatus === 'valid' && group.lastStockLengthOptimizationResult) {
+    return formatCutPlanStatus(group.lastStockLengthOptimizationResult.status);
+  }
+  if (group.requiredPieces.length === 0) return 'Empty';
+  return 'Needs Generation';
+}
+
 export function StockLengthResults({
   optimizationGroups,
   activeOptimizationGroupId,
   onSelectOptimizationGroup,
 }: StockLengthResultsProps) {
-  const orderedGroups = [...optimizationGroups]
-    .sort((left, right) => left.order - right.order);
-  const activeGroup = orderedGroups.find(
-    (group) => group.optimizationGroupId === activeOptimizationGroupId,
-  ) ?? orderedGroups[0];
-  const result = activeGroup?.resultStatus === 'valid'
-    ? activeGroup.lastStockLengthOptimizationResult
-    : null;
-  const stockItems = result?.cutPlans.flatMap((plan) => [...plan.stockItems]
-    .sort((left, right) => left.stockItemNumber - right.stockItemNumber)
-    .map((item) => ({ plan, item }))) ?? [];
-  const unplaced = result?.cutPlans.flatMap((plan) => plan.unplacedPieceInstances) ?? [];
+  const orderedGroups = useMemo(() => [...optimizationGroups]
+    .sort((left, right) => left.order - right.order), [optimizationGroups]);
+  const [optimizationGroupScope, setOptimizationGroupScope] = useState(() => {
+    if (orderedGroups.length <= 1) return activeOptimizationGroupId ?? orderedGroups[0]?.optimizationGroupId ?? '';
+    const remembered = sessionStorage.getItem('stock-length-results-group-scope');
+    return remembered && orderedGroups.some((group) => group.optimizationGroupId === remembered)
+      ? remembered
+      : allOptimizationGroupsScope;
+  });
+  const [stockGroupFilter, setStockGroupFilter] = useState(allStockGroupsScope);
+  const [searchQuery, setSearchQuery] = useState('');
   const [selectedStockItemKey, setSelectedStockItemKey] = useState<string>();
   const [selectedPieceInstanceId, setSelectedPieceInstanceId] = useState<string>();
-  const stockItemEntries = stockItems.map(({ plan, item }) => ({
-    plan,
-    item,
-    key: `${plan.cutPlanId}\u0000${item.stockItemId}`,
-  }));
-  const selectedStockItem = stockItemEntries.find(
+  const scopedGroups = optimizationGroupScope === allOptimizationGroupsScope
+    ? orderedGroups
+    : orderedGroups.filter((group) => group.optimizationGroupId === optimizationGroupScope);
+  const stockGroupOptions = useMemo(() => {
+    const options = new Map<string, string>();
+    for (const group of scopedGroups) {
+      if (group.resultStatus !== 'valid') continue;
+      for (const plan of group.lastStockLengthOptimizationResult?.cutPlans ?? []) {
+        const key = stockGroupKey(plan.stockGroup.profileNumber, plan.stockGroup.finish);
+        options.set(key, `${plan.stockGroup.profileNumber} — ${plan.stockGroup.finish || 'No finish specified'}`);
+      }
+    }
+    return [...options].map(([value, label]) => ({ value, label }))
+      .sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: 'base', numeric: true }));
+  }, [scopedGroups]);
+  const stockItemEntries = useMemo(() => scopedGroups.flatMap((group) => {
+    if (group.resultStatus !== 'valid' || !group.lastStockLengthOptimizationResult) return [];
+    return [...group.lastStockLengthOptimizationResult.cutPlans]
+      .sort((left, right) =>
+        left.stockGroup.profileNumber.trim().localeCompare(right.stockGroup.profileNumber.trim(), undefined, { sensitivity: 'base', numeric: true }) ||
+        (left.stockGroup.finish ?? '').trim().localeCompare((right.stockGroup.finish ?? '').trim(), undefined, { sensitivity: 'base', numeric: true }))
+      .flatMap((plan) => [...plan.stockItems]
+        .sort((left, right) => left.stockItemNumber - right.stockItemNumber)
+        .map((item) => ({
+          group,
+          plan,
+          item,
+          key: `${group.optimizationGroupId}\u0000${stockGroupKey(plan.stockGroup.profileNumber, plan.stockGroup.finish)}\u0000${item.stockItemId}`,
+        })));
+  }), [scopedGroups]);
+  const visibleStockItems = stockItemEntries.filter(({ plan }) =>
+    stockGroupFilter === allStockGroupsScope ||
+    stockGroupKey(plan.stockGroup.profileNumber, plan.stockGroup.finish) === stockGroupFilter);
+  const selectedStockItem = visibleStockItems.find(
     ({ key }) => key === selectedStockItemKey,
-  ) ?? stockItemEntries[0];
+  ) ?? visibleStockItems[0];
+  const visibleStockItemKeys = visibleStockItems.map(({ key }) => key).join('\u0001');
+  const unplaced = scopedGroups.flatMap((group) => {
+    if (group.resultStatus !== 'valid' || !group.lastStockLengthOptimizationResult) return [];
+    return [...group.lastStockLengthOptimizationResult.cutPlans]
+      .sort((left, right) =>
+        left.stockGroup.profileNumber.trim().localeCompare(right.stockGroup.profileNumber.trim(), undefined, { sensitivity: 'base', numeric: true }) ||
+        (left.stockGroup.finish ?? '').localeCompare(right.stockGroup.finish ?? '', undefined, { sensitivity: 'base', numeric: true }))
+      .filter((plan) => stockGroupFilter === allStockGroupsScope || stockGroupKey(plan.stockGroup.profileNumber, plan.stockGroup.finish) === stockGroupFilter)
+      .flatMap((plan) => plan.unplacedPieceInstances.map((item) => ({ group, plan, item })));
+  });
+  const searchResults = searchQuery.trim().length === 0 ? [] : visibleStockItems.flatMap((entry) =>
+    entry.item.cutSequence
+      .filter((piece) => [
+        entry.plan.stockGroup.profileNumber,
+        entry.plan.stockGroup.finish ?? '',
+        piece.partNumber ?? '',
+        piece.partName ?? '',
+        sourceReferenceLabel(piece),
+      ].some((value) => value.toLocaleLowerCase().includes(searchQuery.trim().toLocaleLowerCase())))
+      .map((piece) => ({ entry, piece })));
+
+  useEffect(() => {
+    const validScope = optimizationGroupScope === allOptimizationGroupsScope
+      ? orderedGroups.length > 1
+      : orderedGroups.some((group) => group.optimizationGroupId === optimizationGroupScope);
+    if (!validScope) {
+      setOptimizationGroupScope(orderedGroups.length > 1
+        ? allOptimizationGroupsScope
+        : orderedGroups[0]?.optimizationGroupId ?? '');
+    }
+  }, [optimizationGroupScope, orderedGroups]);
+
+  useEffect(() => {
+    if (stockGroupFilter !== allStockGroupsScope &&
+        !stockGroupOptions.some((option) => option.value === stockGroupFilter)) {
+      setStockGroupFilter(allStockGroupsScope);
+    }
+  }, [stockGroupFilter, stockGroupOptions]);
 
   useEffect(() => {
     setSelectedStockItemKey((current) => (
-      stockItemEntries.some(({ key }) => key === current)
+      visibleStockItems.some(({ key }) => key === current)
         ? current
-        : stockItemEntries[0]?.key
+        : visibleStockItems[0]?.key
     ));
-  }, [result]);
+  }, [visibleStockItemKeys]);
 
   useEffect(() => {
     setSelectedPieceInstanceId((current) => (
@@ -130,27 +217,100 @@ export function StockLengthResults({
     ));
   }, [selectedStockItem?.key]);
 
+  const changeOptimizationGroupScope = (scope: string) => {
+    setOptimizationGroupScope(scope);
+    setStockGroupFilter(allStockGroupsScope);
+    sessionStorage.setItem('stock-length-results-group-scope', scope);
+    if (scope !== allOptimizationGroupsScope) onSelectOptimizationGroup(scope);
+  };
+
+  const heading = optimizationGroupScope === allOptimizationGroupsScope
+    ? 'All Optimization Groups'
+    : `${scopedGroups[0]?.name ?? 'Selected Optimization Group'} Cut Plan`;
+  const overallResult = scopedGroups.length === 1 && scopedGroups[0]?.resultStatus === 'valid'
+    ? scopedGroups[0].lastStockLengthOptimizationResult
+    : null;
+  const summaries = scopedGroups.map((group) => {
+    const plans = group.resultStatus === 'valid'
+      ? (group.lastStockLengthOptimizationResult?.cutPlans ?? []).filter((plan) =>
+          stockGroupFilter === allStockGroupsScope ||
+          stockGroupKey(plan.stockGroup.profileNumber, plan.stockGroup.finish) === stockGroupFilter)
+      : [];
+    const stockItems = plans.flatMap((plan) => plan.stockItems);
+    const pieceCount = stockItems.reduce((total, item) => total + item.cutSequence.length, 0) +
+      plans.reduce((total, plan) => total + plan.unplacedPieceInstances.length, 0);
+    const pieceLength = stockItems.reduce((total, item) => total + item.pieceLength, 0);
+    const sawLoss = stockItems.reduce((total, item) => total + item.sawLoss, 0);
+    const remainder = stockItems.reduce((total, item) => total + item.remainder, 0);
+    const stockLength = stockItems.reduce((total, item) => total + item.stockLength, 0);
+    return {
+      group,
+      plans,
+      stockItemCount: stockItems.length,
+      pieceCount,
+      pieceLength,
+      sawLoss,
+      remainder,
+      utilization: stockLength > 0 ? pieceLength / stockLength * 100 : 0,
+    };
+  });
+
   return (
     <div className="results-explorer stock-length-results">
       <header className="page-header">
         <div>
           <p className="eyebrow">Stock-Length Results</p>
-          <h1>{activeGroup?.name ?? 'Selected Optimization Group'} Cut Plan</h1>
-          <p>{result?.description ?? (activeGroup?.requiredPieces.length ? 'Needs Generation' : 'Empty Optimization Group')}</p>
+          <h1>{heading}</h1>
+          <p>{overallResult?.description ?? 'Review persisted Cut Plans without combining Optimization Groups.'}</p>
         </div>
         <label className="project-field">
-          <span>Optimization Group</span>
-          <select aria-label="Select Optimization Group results" onChange={(event) => onSelectOptimizationGroup(event.target.value)} value={activeGroup?.optimizationGroupId ?? ''}>
+          <span>Optimization Group scope</span>
+          <select aria-label="Optimization Group scope" onChange={(event) => changeOptimizationGroupScope(event.target.value)} value={optimizationGroupScope}>
+            {orderedGroups.length > 1 ? <option value={allOptimizationGroupsScope}>All Optimization Groups</option> : null}
             {orderedGroups.map((group) => <option key={group.optimizationGroupId} value={group.optimizationGroupId}>{group.order + 1}. {group.name}</option>)}
           </select>
         </label>
+        <label className="project-field">
+          <span>Stock Group</span>
+          <select aria-label="Stock Group filter" onChange={(event) => setStockGroupFilter(event.target.value)} value={stockGroupFilter}>
+            <option value={allStockGroupsScope}>All Stock Groups</option>
+            {stockGroupOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+        </label>
       </header>
-      {result ? (
+      <section className="project-card stock-length-results__states">
+        <div className="project-card__header"><h2>Optimization Group Status</h2></div>
+        <div className="results-summary-grid">
+          {summaries.map((summary) => <div className="summary-card" key={summary.group.optimizationGroupId}>
+            <strong>{summary.group.name}</strong>
+            <span data-result-state>{resultState(summary.group)}</span>
+            <small>{summary.pieceCount} Piece Instances · {summary.stockItemCount} Stock Items · {summary.pieceLength} in pieces</small>
+            <small>{summary.sawLoss} in Saw Loss · {summary.remainder} in Remainder · {summary.utilization.toFixed(1)}% utilization</small>
+            {summary.group.lastStockLengthGenerationError ? <small>{summary.group.lastStockLengthGenerationError.message}</small> : null}
+            {summary.plans.map((plan) => {
+              const planItems = plan.stockItems;
+              const planPieceCount = planItems.reduce((total, item) => total + item.cutSequence.length, 0) + plan.unplacedPieceInstances.length;
+              const planPieceLength = planItems.reduce((total, item) => total + item.pieceLength, 0);
+              const planSawLoss = planItems.reduce((total, item) => total + item.sawLoss, 0);
+              const planRemainder = planItems.reduce((total, item) => total + item.remainder, 0);
+              const planStockLength = planItems.reduce((total, item) => total + item.stockLength, 0);
+              return <div className="stock-group-summary" key={`${summary.group.optimizationGroupId}\u0000${plan.cutPlanId}`}>
+                <strong>{plan.stockGroup.profileNumber} — {plan.stockGroup.finish || 'No finish specified'}</strong>
+                <span>{formatCutPlanStatus(plan.status)}</span>
+                <small>{planPieceCount} Piece Instances · {planItems.length} Stock Items · {planPieceLength} in pieces · {planSawLoss} in Saw Loss · {planRemainder} in Remainder · {(planStockLength > 0 ? planPieceLength / planStockLength * 100 : 0).toFixed(1)}% utilization</small>
+              </div>;
+            })}
+          </div>)}
+        </div>
+      </section>
+      {visibleStockItems.length > 0 ? (
         <>
           <section className="project-card">
-            <div className="project-card__header"><h2>Stock Items</h2><StatusPill label={formatCutPlanStatus(result.status)} tone={result.status === 'complete' ? 'ok' : result.status === 'partial' ? 'warn' : 'error'} /></div>
-            <div className="table-wrap"><table><thead><tr><th>Stock Item</th><th>Profile Number</th><th>Finish</th><th>Stock Length</th><th>Piece Length</th><th>Saw Loss</th><th>Remainder</th><th>Utilization</th><th>Status</th></tr></thead><tbody>
-              {stockItemEntries.map(({ plan, item, key }) => <tr aria-label={`Stock Item ${item.stockItemNumber}`} aria-selected={selectedStockItem?.key === key} key={key} onClick={() => setSelectedStockItemKey(key)} tabIndex={0}><td>{item.stockItemNumber}</td><td>{plan.stockGroup.profileNumber}</td><td>{plan.stockGroup.finish || 'No finish specified'}</td><td>{item.stockLength} in</td><td>{item.pieceLength} in</td><td>{item.sawLoss} in</td><td>{item.remainder} in</td><td>{item.utilizationPercent.toFixed(1)}%</td><td>{formatCutPlanStatus(plan.status)}</td></tr>)}
+            <div className="project-card__header"><h2>Stock Items</h2>{overallResult ? <StatusPill label={formatCutPlanStatus(overallResult.status)} tone={overallResult.status === 'complete' ? 'ok' : overallResult.status === 'partial' ? 'warn' : 'error'} /> : null}</div>
+            <label className="project-field stock-length-results__search"><span>Search Results</span><input aria-label="Search Results" onChange={(event) => setSearchQuery(event.target.value)} type="search" value={searchQuery} /></label>
+            {searchResults.length > 0 ? <div className="stock-length-results__search-results">{searchResults.map(({ entry, piece }) => <button aria-label={`${piece.partNumber || piece.profileNumber}, ${piece.partName || 'Unnamed Piece Instance'}, ${sourceReferenceLabel(piece) || 'No Source Reference'}`} className="secondary-button" key={`${entry.key}\u0000${piece.pieceInstanceId}`} onClick={() => { setSelectedStockItemKey(entry.key); setSelectedPieceInstanceId(piece.pieceInstanceId); }} type="button">{piece.partNumber || piece.profileNumber} · {piece.partName || 'Unnamed'} · {sourceReferenceLabel(piece) || 'No source'}</button>)}</div> : null}
+            <div className="table-wrap"><table><thead><tr>{optimizationGroupScope === allOptimizationGroupsScope ? <th>Optimization Group</th> : null}<th>Stock Item</th><th>Profile Number</th><th>Finish</th><th>Piece Count</th><th>Stock Length</th><th>Piece Length</th><th>Saw Loss</th><th>Remainder</th><th>Utilization</th><th>Status</th></tr></thead><tbody>
+              {visibleStockItems.map(({ group, plan, item, key }) => <tr aria-label={`Stock Item ${item.stockItemNumber}, ${group.name}`} aria-selected={selectedStockItem?.key === key} key={key} onClick={() => setSelectedStockItemKey(key)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setSelectedStockItemKey(key); }} tabIndex={0}>{optimizationGroupScope === allOptimizationGroupsScope ? <td>{group.name}</td> : null}<td>{item.stockItemNumber}</td><td>{plan.stockGroup.profileNumber}</td><td>{plan.stockGroup.finish || 'No finish specified'}</td><td>{item.cutSequence.length}</td><td>{item.stockLength} in</td><td>{item.pieceLength} in</td><td>{item.sawLoss} in</td><td>{item.remainder} in</td><td>{item.utilizationPercent.toFixed(1)}%</td><td>{formatCutPlanStatus(plan.status)}</td></tr>)}
             </tbody></table></div>
           </section>
           {selectedStockItem ? (
@@ -163,11 +323,11 @@ export function StockLengthResults({
               stockItem={selectedStockItem.item}
             />
           ) : null}
-          <section className="project-card"><div className="project-card__header"><h2>Unplaced</h2></div>
-            {unplaced.length > 0 ? <div className="table-wrap"><table><thead><tr><th>Piece Instance</th><th>Length</th><th>Reason</th></tr></thead><tbody>{unplaced.map((item) => <tr key={item.pieceInstance.pieceInstanceId}><td>{item.pieceInstance.pieceInstanceId}</td><td>{item.pieceInstance.length} in</td><td>{item.reasonDescription}</td></tr>)}</tbody></table></div> : <p className="section-note">Every Piece Instance was placed.</p>}
-          </section>
         </>
-      ) : <div className="empty-state"><strong>{activeGroup?.requiredPieces.length ? 'Needs Generation' : 'Empty Optimization Group'}</strong><span>{activeGroup?.requiredPieces.length ? 'Generate Selected to create a deterministic heuristic Cut Plan.' : 'Add Required Pieces before generating.'}</span></div>}
+      ) : <div className="empty-state"><strong>No Stock Items in scope</strong><span>Choose another scope or generate the Optimization Groups that need work.</span></div>}
+      <section className="project-card"><div className="project-card__header"><h2>Unplaced{optimizationGroupScope === allOptimizationGroupsScope ? ` (${unplaced.length} project-wide)` : ` (${unplaced.length})`}</h2></div>
+        {unplaced.length > 0 ? <div className="table-wrap"><table><thead><tr><th>Optimization Group</th><th>Stock Group</th><th>Piece Instance</th><th>Length</th><th>Source Reference</th><th>Reason</th></tr></thead><tbody>{unplaced.map(({ group, plan, item }) => <tr key={`${group.optimizationGroupId}\u0000${plan.cutPlanId}\u0000${item.pieceInstance.pieceInstanceId}`}><td>{group.name}</td><td>{plan.stockGroup.profileNumber} — {plan.stockGroup.finish || 'No finish specified'}</td><td>{item.pieceInstance.pieceInstanceId}</td><td>{item.pieceInstance.length} in</td><td>{sourceReferenceLabel(item.pieceInstance) || '—'}</td><td>{item.reasonDescription}</td></tr>)}</tbody></table></div> : <p className="section-note">Every current Piece Instance was placed.</p>}
+      </section>
     </div>
   );
 }

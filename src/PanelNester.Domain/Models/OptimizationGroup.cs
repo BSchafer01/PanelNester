@@ -20,6 +20,8 @@ public sealed record OptimizationGroup
 
     public StockLengthOptimizationResult? LastStockLengthOptimizationResult { get; init; }
 
+    public ValidationError? LastStockLengthGenerationError { get; init; }
+
     public NestResponse? LastNestingResult { get; init; }
 
     public BatchNestResponse? LastBatchNestingResult { get; init; }

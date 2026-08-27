@@ -67,6 +67,52 @@ describe('Stock-Length manual entry', () => {
     expect(screen.getByText('Empty Optimization Group')).toBeInTheDocument();
   });
 
+  it('generates every stale nonempty Optimization Group without including current or empty groups', async () => {
+    const user = userEvent.setup();
+    const onGenerateAllStale = vi.fn();
+    const staleGroup: OptimizationGroup = {
+      ...emptyGroup,
+      resultStatus: 'stale',
+      requiredPieces: [{
+        requiredPieceId: 'stale-piece', quantity: 1, length: 48,
+        profileNumber: 'P-100', isManual: true, sourceReferences: [],
+      }],
+    };
+    const currentGroup: OptimizationGroup = {
+      ...staleGroup,
+      optimizationGroupId: 'current', name: 'Current', order: 1, resultStatus: 'valid',
+      requiredPieces: [{
+        ...staleGroup.requiredPieces[0], requiredPieceId: 'current-piece',
+      }],
+    };
+    const anotherEmpty = {
+      ...emptyGroup,
+      optimizationGroupId: 'empty', name: 'Empty', order: 2,
+    };
+
+    render(
+      <RequiredPiecesPage
+        activeOptimizationGroupId="frames"
+        busy={false}
+        inchDisplayFormat="decimal"
+        onCreateOptimizationGroup={vi.fn()}
+        onCreateRequiredPiece={vi.fn()}
+        onDeleteRequiredPiece={vi.fn()}
+        onGenerateAllStale={onGenerateAllStale}
+        onInchDisplayFormatChange={vi.fn()}
+        onUpdateRequiredPiece={vi.fn()}
+        onUpdateStockLength={vi.fn()}
+        optimizationGroups={[staleGroup, currentGroup, anotherEmpty]}
+      />,
+    );
+
+    const button = screen.getByRole('button', { name: 'Generate All Stale' });
+    expect(button).toBeEnabled();
+    expect(screen.getByText('1 stale Optimization Group')).toBeInTheDocument();
+    await user.click(button);
+    expect(onGenerateAllStale).toHaveBeenCalledOnce();
+  });
+
   it('creates an Optimization Group with Stock Length', async () => {
     const user = userEvent.setup();
     const onCreateOptimizationGroup = vi.fn();

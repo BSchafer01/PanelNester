@@ -8,4 +8,8 @@ public interface IStockLengthProjectGenerationService
         Project project,
         string optimizationGroupId,
         CancellationToken cancellationToken = default);
+
+    Task<StockLengthProjectGenerationResult> GenerateAllStaleAsync(
+        Project project,
+        CancellationToken cancellationToken = default);
 }
