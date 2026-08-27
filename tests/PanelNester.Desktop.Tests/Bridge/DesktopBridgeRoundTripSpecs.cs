@@ -407,6 +407,296 @@ public sealed class DesktopBridgeRoundTripSpecs : IDisposable
                 Assert.StartsWith(group.OptimizationResultId, placement.PlacementId, StringComparison.Ordinal)));
     }
 
+    [Fact]
+    public async Task Stock_Length_Project_completes_the_desktop_lifecycle_without_embedding_the_Workbook()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var workbookPath = Path.Combine(_workspacePath, "stock-length-lifecycle.xlsx");
+        var projectPath = Path.Combine(_workspacePath, "stock-length-lifecycle.pnest");
+        var pdfPath = Path.Combine(_workspacePath, "stock-length-lifecycle.pdf");
+        var excelPath = Path.Combine(_workspacePath, "stock-length-lifecycle-report.xlsx");
+        WriteStockLengthWorkbook(
+            workbookPath,
+            frameQuantity: 3,
+            doorPartName: "Door rail",
+            doorProfileNumber: "P-200",
+            doorFinish: "Bronze");
+
+        var repository = new JsonMaterialRepository(Path.Combine(_workspacePath, "stock-length-materials.json"));
+        var materialService = new MaterialService(repository);
+        var nestingService = new ShelfNestingService();
+        var validator = new PartRowValidator();
+        var projectIds = new Queue<string>(["stock-length-lifecycle", "frames", "doors"]);
+        var dispatcher = DesktopBridgeRegistration.CreateDefault(
+            new StubFileDialogService(workbookPath),
+            materialService,
+            new ProjectService(materialService, idGenerator: projectIds.Dequeue),
+            new FileImportDispatcher(
+                new CsvImportService(repository, validator),
+                new XlsxImportService(repository, validator)),
+            new PartEditorService(repository, validator),
+            nestingService,
+            new BatchNestingService(nestingService),
+            new ReportDataService(),
+            new QuestPdfReportExporter(),
+            new ClosedXmlExcelReportExporter(),
+            () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true),
+            exportedPdfOpener: static _ => { });
+
+        var created = await DispatchAsync<NewProjectResponse>(
+            dispatcher,
+            BridgeMessageTypes.NewProject,
+            new NewProjectRequest(ProjectKind: ProjectKind.StockLength));
+        Assert.True(created.Success, created.Message);
+        var framesConfigured = await DispatchAsync<UpdateOptimizationGroupsResponse>(
+            dispatcher,
+            BridgeMessageTypes.UpdateOptimizationGroups,
+            new UpdateOptimizationGroupsRequest(created.Project!, new OptimizationGroupChange
+            {
+                Type = OptimizationGroupChangeType.Create,
+                Name = "Frames",
+                StockLength = "120"
+            }));
+        Assert.True(framesConfigured.Success, framesConfigured.Message);
+        var groupsConfigured = await DispatchAsync<UpdateOptimizationGroupsResponse>(
+            dispatcher,
+            BridgeMessageTypes.UpdateOptimizationGroups,
+            new UpdateOptimizationGroupsRequest(framesConfigured.Project!, new OptimizationGroupChange
+            {
+                Type = OptimizationGroupChangeType.Create,
+                Name = "Doors",
+                StockLength = "120"
+            }));
+        Assert.True(groupsConfigured.Success, groupsConfigured.Message);
+        var configuredProject = groupsConfigured.Project! with
+        {
+            Metadata = new ProjectMetadata { ProjectName = "Stock-Length Lifecycle" },
+            Settings = new ProjectSettings { KerfWidth = 0.125m }
+        };
+
+        const string initialSessionId = "stock-length-lifecycle-import";
+        var begun = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest
+            {
+                SessionId = initialSessionId,
+                ImportSourcePath = workbookPath,
+                ProjectKind = ProjectKind.StockLength
+            });
+        Assert.True(begun.Success, begun.Message);
+        Assert.Equal(["Frames", "Doors"], begun.Workbook?.Worksheets.Select(worksheet => worksheet.WorksheetName));
+
+        var framesPreview = await PreviewStockLengthWorksheetAsync(
+            dispatcher, initialSessionId, "Frames", 1, "frames", "Frames");
+        var doorsPreview = await PreviewStockLengthWorksheetAsync(
+            dispatcher, initialSessionId, "Doors", 2, "doors", "Doors");
+        var excludedPiece = Assert.Single(
+            framesPreview.Response.RequiredPieces,
+            piece => string.Equals(piece.PartNumber, "F-X", StringComparison.Ordinal));
+        var overriddenPiece = Assert.Single(
+            framesPreview.Response.RequiredPieces,
+            piece => string.Equals(piece.PartNumber, "F-2", StringComparison.Ordinal));
+        var framesSelection = framesPreview.Selection with
+        {
+            ExcludedSourceRows =
+            [
+                new ExcludedSourceRow
+                {
+                    RowId = excludedPiece.RequiredPieceId,
+                    SourceReference = Assert.Single(excludedPiece.SourceReferences),
+                    OriginalValidationError = new SourceRowValidationError
+                    {
+                        Code = "user-excluded",
+                        Message = "Excluded from the Import Configuration."
+                    }
+                }
+            ],
+            PartOverrides =
+            [
+                new PartOverride
+                {
+                    RowId = overriddenPiece.RequiredPieceId,
+                    ImportedRequiredPiece = overriddenPiece,
+                    CurrentRequiredPiece = overriddenPiece with { PartName = "Configured door rail" },
+                    SourceReferences = overriddenPiece.SourceReferences
+                }
+            ]
+        };
+        var doorsSelection = doorsPreview.Selection;
+        var finalized = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.FinalizeImportSession,
+            new FinalizeImportSessionRequest
+            {
+                SessionId = initialSessionId,
+                Project = configuredProject,
+                Worksheets = [framesSelection, doorsSelection]
+            });
+        Assert.True(finalized.Success, finalized.Message);
+        Assert.Equal(2, finalized.Project!.State.ImportConfiguration?.Worksheets.Count);
+        Assert.Single(finalized.Project.State.ImportConfiguration!.PartOverrides);
+        Assert.Single(finalized.Project.State.ImportConfiguration.Worksheets[0].ExcludedSourceRows);
+
+        var initialSave = await DispatchAsync<SaveProjectResponse>(
+            dispatcher,
+            BridgeMessageTypes.SaveProject,
+            new SaveProjectRequest(finalized.Project, projectPath));
+        Assert.True(initialSave.Success, initialSave.Message);
+
+        var generated = await DispatchAsync<GenerateAllStaleCutPlansResponse>(
+            dispatcher,
+            BridgeMessageTypes.GenerateAllStaleCutPlans,
+            new GenerateAllStaleCutPlansRequest(finalized.Project));
+        Assert.True(generated.Success, generated.Message);
+        var generatedProject = generated.Project;
+        var frames = Assert.Single(generatedProject.State.OptimizationGroups, group => group.OptimizationGroupId == "frames");
+        var doors = Assert.Single(generatedProject.State.OptimizationGroups, group => group.OptimizationGroupId == "doors");
+        Assert.Equal(CutPlanStatus.Partial, frames.LastStockLengthOptimizationResult?.Status);
+        Assert.True(Assert.Single(frames.LastStockLengthOptimizationResult!.CutPlans).StockItems.Count > 1);
+        Assert.Single(Assert.Single(frames.LastStockLengthOptimizationResult.CutPlans).UnplacedPieceInstances);
+        Assert.Equal(CutPlanStatus.Complete, doors.LastStockLengthOptimizationResult?.Status);
+
+        var pdf = await DispatchAsync<ExportPdfReportResponse>(
+            dispatcher,
+            BridgeMessageTypes.ExportPdfReport,
+            new ExportPdfReportRequest(generatedProject, FilePath: pdfPath));
+        var excel = await DispatchAsync<ExportExcelReportResponse>(
+            dispatcher,
+            BridgeMessageTypes.ExportExcelReport,
+            new ExportExcelReportRequest(generatedProject, FilePath: excelPath));
+        Assert.True(pdf.Success, pdf.Message);
+        Assert.True(excel.Success, excel.Message);
+        Assert.True(new FileInfo(pdfPath).Length > 0);
+        using (var reportWorkbook = new XLWorkbook(excelPath))
+        {
+            Assert.Contains(reportWorkbook.Worksheets, worksheet => worksheet.Name == "Summary");
+            Assert.Contains(reportWorkbook.Worksheets, worksheet => worksheet.Name == "Unplaced");
+        }
+
+        var resultSave = await DispatchAsync<SaveProjectResponse>(
+            dispatcher,
+            BridgeMessageTypes.SaveProject,
+            new SaveProjectRequest(generatedProject, projectPath));
+        Assert.True(resultSave.Success, resultSave.Message);
+        var reopened = await DispatchAsync<OpenProjectResponse>(
+            dispatcher,
+            BridgeMessageTypes.OpenProject,
+            new OpenProjectRequest(projectPath));
+        Assert.True(reopened.Success, reopened.Message);
+        Assert.All(reopened.Project!.State.OptimizationGroups, group =>
+        {
+            Assert.Equal(OptimizationResultStatus.Valid, group.ResultStatus);
+            Assert.NotNull(group.LastStockLengthOptimizationResult);
+        });
+        Assert.DoesNotContain(
+            "xl/worksheets/",
+            System.Text.Encoding.ASCII.GetString(await File.ReadAllBytesAsync(projectPath)),
+            StringComparison.OrdinalIgnoreCase);
+
+        WriteStockLengthWorkbook(
+            workbookPath,
+            frameQuantity: 4,
+            doorPartName: "Revised door rail",
+            doorProfileNumber: "p-200",
+            doorFinish: "bronze");
+        const string reimportSessionId = "stock-length-lifecycle-reimport";
+        var reimportBegun = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest
+            {
+                SessionId = reimportSessionId,
+                ImportSourcePath = workbookPath,
+                ProjectKind = ProjectKind.StockLength
+            });
+        Assert.True(reimportBegun.Success, reimportBegun.Message);
+
+        var savedGroups = reopened.Project.State.OptimizationGroups.ToDictionary(group => group.OptimizationGroupId);
+        var reimportSelections = new List<ImportWorksheetSelection>();
+        foreach (var savedWorksheet in reopened.Project.State.ImportConfiguration!.Worksheets)
+        {
+            var savedOverrides = reopened.Project.State.ImportConfiguration.PartOverrides
+                .Where(partOverride => partOverride.SourceReferences.Any(reference =>
+                    string.Equals(reference.WorksheetName, savedWorksheet.WorksheetName, StringComparison.Ordinal)))
+                .ToArray();
+            var preview = await PreviewStockLengthWorksheetAsync(
+                dispatcher,
+                reimportSessionId,
+                savedWorksheet.WorksheetName,
+                savedWorksheet.OriginalPosition,
+                savedWorksheet.OptimizationGroupId!,
+                savedGroups[savedWorksheet.OptimizationGroupId!].Name,
+                savedWorksheet.HeadingRange,
+                savedWorksheet.ColumnMappings);
+            reimportSelections.Add(preview.Selection with
+            {
+                ExcludedSourceRows = savedWorksheet.ExcludedSourceRows,
+                PartOverrides = savedOverrides
+            });
+        }
+
+        var reimported = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.FinalizeImportSession,
+            new FinalizeImportSessionRequest
+            {
+                SessionId = reimportSessionId,
+                Project = reopened.Project,
+                ReplaceExistingImportSource = true,
+                Worksheets = reimportSelections
+            });
+        Assert.True(reimported.Success, reimported.Message);
+        var revisedFrames = Assert.Single(reimported.Project!.State.OptimizationGroups, group => group.OptimizationGroupId == "frames");
+        var unchangedDoors = Assert.Single(reimported.Project.State.OptimizationGroups, group => group.OptimizationGroupId == "doors");
+        Assert.Equal(5, revisedFrames.RequiredPieces.Sum(piece => piece.Quantity));
+        Assert.Equal(OptimizationResultStatus.None, revisedFrames.ResultStatus);
+        Assert.Null(revisedFrames.LastStockLengthOptimizationResult);
+        Assert.Equal(OptimizationResultStatus.Valid, unchangedDoors.ResultStatus);
+        Assert.NotNull(unchangedDoors.LastStockLengthOptimizationResult);
+        var revisedDoor = Assert.Single(unchangedDoors.RequiredPieces);
+        Assert.Equal("Revised door rail", revisedDoor.PartName);
+        Assert.Equal("p-200", revisedDoor.ProfileNumber);
+        Assert.Equal("bronze", revisedDoor.Finish);
+        var unchangedDoorPlan = Assert.Single(unchangedDoors.LastStockLengthOptimizationResult!.CutPlans);
+        Assert.Equal("p-200", unchangedDoorPlan.StockGroup.ProfileNumber);
+        Assert.Equal("bronze", unchangedDoorPlan.StockGroup.Finish);
+        Assert.All(
+            unchangedDoors.LastStockLengthOptimizationResult.CutPlans
+                .SelectMany(plan => plan.StockItems)
+                .SelectMany(item => item.CutSequence),
+            piece =>
+            {
+                Assert.Equal("Revised door rail", piece.PartName);
+                Assert.Equal("p-200", piece.ProfileNumber);
+                Assert.Equal("bronze", piece.Finish);
+            });
+        Assert.Single(reimported.Project.State.ImportConfiguration!.PartOverrides);
+        Assert.Single(reimported.Project.State.ImportConfiguration.Worksheets[0].ExcludedSourceRows);
+        Assert.Equal(
+            reopened.Project.State.ImportConfiguration.Worksheets.Select(worksheet =>
+                (worksheet.WorksheetName, worksheet.HeadingRange, worksheet.OptimizationGroupId)),
+            reimported.Project.State.ImportConfiguration!.Worksheets.Select(worksheet =>
+                (worksheet.WorksheetName, worksheet.HeadingRange, worksheet.OptimizationGroupId)));
+
+        var reimportSave = await DispatchAsync<SaveProjectResponse>(
+            dispatcher,
+            BridgeMessageTypes.SaveProject,
+            new SaveProjectRequest(reimported.Project, projectPath));
+        Assert.True(reimportSave.Success, reimportSave.Message);
+        var reimportReopened = await DispatchAsync<OpenProjectResponse>(
+            dispatcher,
+            BridgeMessageTypes.OpenProject,
+            new OpenProjectRequest(projectPath));
+        Assert.True(reimportReopened.Success, reimportReopened.Message);
+        Assert.Single(reimportReopened.Project!.State.ImportConfiguration!.PartOverrides);
+        Assert.Single(reimportReopened.Project.State.ImportConfiguration.Worksheets[0].ExcludedSourceRows);
+        Assert.DoesNotContain(
+            "xl/worksheets/",
+            System.Text.Encoding.ASCII.GetString(await File.ReadAllBytesAsync(projectPath)),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_workspacePath))
@@ -500,6 +790,53 @@ public sealed class DesktopBridgeRoundTripSpecs : IDisposable
         };
     }
 
+    private static async Task<StockLengthWorksheetPreview> PreviewStockLengthWorksheetAsync(
+        BridgeMessageDispatcher dispatcher,
+        string sessionId,
+        string worksheetName,
+        int originalPosition,
+        string optimizationGroupId,
+        string optimizationGroupName,
+        string headingRange = "A1:F1",
+        IReadOnlyList<ImportColumnMapping>? savedMappings = null)
+    {
+        var options = new ImportOptions
+        {
+            ProjectKind = ProjectKind.StockLength,
+            ColumnMappings = savedMappings ??
+            [
+                new ImportColumnMapping { SourceColumn = "A", TargetField = ImportFieldNames.Quantity },
+                new ImportColumnMapping { SourceColumn = "B", TargetField = ImportFieldNames.Length },
+                new ImportColumnMapping { SourceColumn = "C", TargetField = ImportFieldNames.ProfileNumber },
+                new ImportColumnMapping { SourceColumn = "D", TargetField = ImportFieldNames.Finish },
+                new ImportColumnMapping { SourceColumn = "E", TargetField = ImportFieldNames.PartNumber },
+                new ImportColumnMapping { SourceColumn = "F", TargetField = ImportFieldNames.PartName }
+            ]
+        };
+        var preview = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.PreviewImportSession,
+            new PreviewImportSessionRequest
+            {
+                SessionId = sessionId,
+                WorksheetName = worksheetName,
+                HeadingRange = headingRange,
+                Options = options
+            });
+        Assert.True(preview.Success, preview.Message);
+        return new StockLengthWorksheetPreview(
+            new ImportWorksheetSelection
+            {
+                WorksheetName = worksheetName,
+                OriginalPosition = originalPosition,
+                HeadingRange = headingRange,
+                Options = options,
+                OptimizationGroupId = optimizationGroupId,
+                OptimizationGroupName = optimizationGroupName
+            },
+            preview);
+    }
+
     private static void WriteWorksheet(IXLWorksheet worksheet, string partId, int quantity)
     {
         string[] headings = ["Id", "Length", "Width", "Quantity", "Material"];
@@ -514,6 +851,56 @@ public sealed class DesktopBridgeRoundTripSpecs : IDisposable
         worksheet.Cell(2, 4).Value = quantity;
         worksheet.Cell(2, 5).Value = DemoMaterialCatalog.Phase1.Name;
     }
+
+    private static void WriteStockLengthWorkbook(
+        string path,
+        int frameQuantity,
+        string doorPartName,
+        string doorProfileNumber,
+        string doorFinish)
+    {
+        using var workbook = new XLWorkbook();
+        var frames = workbook.AddWorksheet("Frames");
+        WriteStockLengthHeadings(frames);
+        WriteStockLengthRow(frames, 2, frameQuantity, 48, "P-100", "Clear", "F-1", "Jamb");
+        WriteStockLengthRow(frames, 3, 1, 130, "P-100", "Clear", "F-2", "Overlength head");
+        WriteStockLengthRow(frames, 4, 1, 10, "P-X", "Clear", "F-X", "Excluded test piece");
+        var doors = workbook.AddWorksheet("Doors");
+        WriteStockLengthHeadings(doors);
+        WriteStockLengthRow(doors, 2, 2, 50, doorProfileNumber, doorFinish, "D-1", doorPartName);
+        workbook.SaveAs(path);
+    }
+
+    private static void WriteStockLengthHeadings(IXLWorksheet worksheet)
+    {
+        string[] headings = ["Quantity", "Length", "Profile Number", "Finish", "Part Number", "Part Name"];
+        for (var column = 0; column < headings.Length; column++)
+        {
+            worksheet.Cell(1, column + 1).Value = headings[column];
+        }
+    }
+
+    private static void WriteStockLengthRow(
+        IXLWorksheet worksheet,
+        int row,
+        int quantity,
+        decimal length,
+        string profileNumber,
+        string finish,
+        string partNumber,
+        string partName)
+    {
+        worksheet.Cell(row, 1).Value = quantity;
+        worksheet.Cell(row, 2).Value = length;
+        worksheet.Cell(row, 3).Value = profileNumber;
+        worksheet.Cell(row, 4).Value = finish;
+        worksheet.Cell(row, 5).Value = partNumber;
+        worksheet.Cell(row, 6).Value = partName;
+    }
+
+    private sealed record StockLengthWorksheetPreview(
+        ImportWorksheetSelection Selection,
+        ImportSessionResponse Response);
 
     private sealed class StubFileDialogService(string filePath) : IFileDialogService
     {

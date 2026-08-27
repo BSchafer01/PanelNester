@@ -459,10 +459,10 @@ internal static class ProjectImportFinalizer
         var groups = targetProject.State.OptimizationGroups
             .OrderBy(group => group.Order)
             .Select(group => selectedGroupIds.Contains(group.OptimizationGroupId)
-                ? ClearResults(group with
+                ? group with
                 {
                     RequiredPieces = group.RequiredPieces.Where(piece => piece.IsManual).ToArray()
-                })
+                }
                 : group)
             .ToList();
 
@@ -489,23 +489,47 @@ internal static class ProjectImportFinalizer
                     $"Optimization Group '{groups[groupIndex].Name}' requires a positive Stock Length before finalization.");
             }
 
-            groups[groupIndex] = ClearResults(groups[groupIndex] with
+            groups[groupIndex] = groups[groupIndex] with
             {
                 RequiredPieces = groups[groupIndex].RequiredPieces
                     .Concat(worksheetImport.Response.RequiredPieces)
                     .ToArray()
-            });
+            };
         }
 
+        var previousGroups = project.State.OptimizationGroups.ToDictionary(
+            group => group.OptimizationGroupId,
+            StringComparer.Ordinal);
         var normalizedGroups = groups
             .Select(group =>
             {
                 var pieces = CombineCompatibleImportedRequiredPieces(group.RequiredPieces, cancellationToken);
-                return group with
+                var updated = group with
                 {
                     RequiredPieces = pieces,
                     StockGroups = BuildStockGroups(pieces)
                 };
+                if (!previousGroups.TryGetValue(group.OptimizationGroupId, out var previous) ||
+                    !HasSameOptimizationInputs(previous.RequiredPieces, updated.RequiredPieces))
+                {
+                    return ClearResults(updated);
+                }
+
+                var preserved = updated with
+                {
+                    LastStockLengthOptimizationResult = previous.LastStockLengthOptimizationResult,
+                    LastStockLengthGenerationError = previous.LastStockLengthGenerationError,
+                    LastNestingResult = previous.LastNestingResult,
+                    LastBatchNestingResult = previous.LastBatchNestingResult,
+                    ResultStatus = previous.ResultStatus
+                };
+                return preserved.LastStockLengthOptimizationResult is null
+                    ? preserved
+                    : preserved with
+                    {
+                        LastStockLengthOptimizationResult = preserved.LastStockLengthOptimizationResult
+                            .RefreshRequiredPieceMetadata(previous.RequiredPieces, updated.RequiredPieces)
+                    };
             })
             .Select((group, order) => group with { Order = order })
             .ToArray();
@@ -788,10 +812,17 @@ internal static class ProjectImportFinalizer
         group with
         {
             LastStockLengthOptimizationResult = null,
+            LastStockLengthGenerationError = null,
             LastNestingResult = null,
             LastBatchNestingResult = null,
             ResultStatus = OptimizationResultStatus.None
         };
+
+    private static bool HasSameOptimizationInputs(
+        IReadOnlyList<RequiredPiece> left,
+        IReadOnlyList<RequiredPiece> right) =>
+        left.Count == right.Count && left.Zip(right).All(pair =>
+            pair.First.HasSameOptimizationInputs(pair.Second));
 
     private static IReadOnlyList<PartRow> CombineCompatibleImportedParts(
         IReadOnlyList<PartRow> parts,

@@ -257,6 +257,7 @@ public sealed class ProjectService : IProjectService
 
                 var piece = validation.Piece!;
                 RequiredPiece? importedPieceForOverride = null;
+                RequiredPiece? previousPiece = null;
                 var preserveCurrentResult = false;
                 if (change.Type == RequiredPieceChangeType.Create)
                 {
@@ -275,6 +276,7 @@ public sealed class ProjectService : IProjectService
 
                     var existingPiece = groups[sourceGroupIndex].RequiredPieces.First(item =>
                         item.RequiredPieceId == change.RequiredPieceId);
+                    previousPiece = existingPiece;
                     if (!existingPiece.IsManual && sourceGroupIndex != groupIndex)
                     {
                         result = Failure(
@@ -292,7 +294,7 @@ public sealed class ProjectService : IProjectService
                     importedPieceForOverride = existingPiece.IsManual ? null : existingPiece;
                     if (sourceGroupIndex == groupIndex)
                     {
-                        preserveCurrentResult = HasSameOptimizationInputs(existingPiece, piece);
+                        preserveCurrentResult = existingPiece.HasSameOptimizationInputs(piece);
                         var pieceIndex = pieces.FindIndex(item => item.RequiredPieceId == change.RequiredPieceId);
                         pieces[pieceIndex] = piece;
                     }
@@ -313,8 +315,16 @@ public sealed class ProjectService : IProjectService
                 {
                     RequiredPieces = pieces
                 });
+                if (preserveCurrentResult && updatedGroup.LastStockLengthOptimizationResult is { } currentResult)
+                {
+                    updatedGroup = updatedGroup with
+                    {
+                        LastStockLengthOptimizationResult = currentResult
+                            .RefreshRequiredPieceMetadata([previousPiece!], [piece])
+                    };
+                }
                 groups[groupIndex] = preserveCurrentResult
-                    ? RefreshResultMetadata(updatedGroup, piece)
+                    ? updatedGroup
                     : InvalidateOptimizationGroup(updatedGroup);
                 var updatedProject = ApplyOptimizationGroups(normalizedProject, groups);
                 if (change.Type == RequiredPieceChangeType.Update &&
@@ -579,54 +589,6 @@ public sealed class ProjectService : IProjectService
                 ? OptimizationResultStatus.None
                 : OptimizationResultStatus.Stale
         };
-
-    private static bool HasSameOptimizationInputs(RequiredPiece left, RequiredPiece right) =>
-        left.Quantity == right.Quantity &&
-        left.Length == right.Length &&
-        string.Equals(left.ProfileNumber.Trim(), right.ProfileNumber.Trim(), StringComparison.OrdinalIgnoreCase) &&
-        string.Equals(NormalizeOptional(left.Finish), NormalizeOptional(right.Finish), StringComparison.OrdinalIgnoreCase);
-
-    private static OptimizationGroup RefreshResultMetadata(
-        OptimizationGroup group,
-        RequiredPiece requiredPiece)
-    {
-        if (group.LastStockLengthOptimizationResult is null)
-        {
-            return group;
-        }
-
-        PieceInstance Refresh(PieceInstance instance) =>
-            !string.Equals(instance.RequiredPieceId, requiredPiece.RequiredPieceId, StringComparison.Ordinal)
-                ? instance
-                : instance with
-                {
-                    PartName = requiredPiece.PartName,
-                    PartNumber = requiredPiece.PartNumber,
-                    SourceReferences = requiredPiece.SourceReferences
-                };
-
-        var result = group.LastStockLengthOptimizationResult with
-        {
-            CutPlans = group.LastStockLengthOptimizationResult.CutPlans
-                .Select(plan => plan with
-                {
-                    StockItems = plan.StockItems
-                        .Select(item => item with
-                        {
-                            CutSequence = item.CutSequence.Select(Refresh).ToArray()
-                        })
-                        .ToArray(),
-                    UnplacedPieceInstances = plan.UnplacedPieceInstances
-                        .Select(unplaced => unplaced with
-                        {
-                            PieceInstance = Refresh(unplaced.PieceInstance)
-                        })
-                        .ToArray()
-                })
-                .ToArray()
-        };
-        return group with { LastStockLengthOptimizationResult = result };
-    }
 
     private static Project ApplyOptimizationGroups(Project project, IReadOnlyList<OptimizationGroup> groups)
     {

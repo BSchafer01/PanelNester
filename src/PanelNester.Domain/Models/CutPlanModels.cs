@@ -27,6 +27,71 @@ public sealed record StockLengthOptimizationResult
     public string Description { get; init; } = "Deterministic heuristic Cut Plan";
 
     public IReadOnlyList<CutPlan> CutPlans { get; init; } = Array.Empty<CutPlan>();
+
+    public StockLengthOptimizationResult RefreshRequiredPieceMetadata(
+        IReadOnlyList<RequiredPiece> previousRequiredPieces,
+        IReadOnlyList<RequiredPiece> requiredPieces)
+    {
+        ArgumentNullException.ThrowIfNull(previousRequiredPieces);
+        ArgumentNullException.ThrowIfNull(requiredPieces);
+        if (previousRequiredPieces.Count != requiredPieces.Count)
+        {
+            throw new ArgumentException("Previous and current Required Pieces must have matching correspondence.");
+        }
+
+        var piecesByPreviousId = previousRequiredPieces.Zip(requiredPieces).ToDictionary(
+            pair => pair.First.RequiredPieceId,
+            pair => pair.Second,
+            StringComparer.Ordinal);
+        PieceInstance Refresh(PieceInstance instance) =>
+            !piecesByPreviousId.TryGetValue(instance.RequiredPieceId, out var piece)
+                ? instance
+                : instance with
+                {
+                    PieceInstanceId = $"{piece.RequiredPieceId}:instance-{instance.InstanceNumber}",
+                    RequiredPieceId = piece.RequiredPieceId,
+                    Length = piece.Length,
+                    ProfileNumber = piece.ProfileNumber,
+                    Finish = piece.Finish,
+                    PartName = piece.PartName,
+                    PartNumber = piece.PartNumber,
+                    SourceReferences = piece.SourceReferences
+                };
+
+        return this with
+        {
+            CutPlans = CutPlans.Select(plan =>
+            {
+                var requiredPieceIds = plan.StockGroup.RequiredPieceIds
+                    .Select(id => piecesByPreviousId.TryGetValue(id, out var piece) ? piece.RequiredPieceId : id)
+                    .ToArray();
+                var representative = plan.StockGroup.RequiredPieceIds
+                    .Select(id => piecesByPreviousId.GetValueOrDefault(id))
+                    .FirstOrDefault(piece => piece is not null);
+                return plan with
+                {
+                    StockGroup = plan.StockGroup with
+                    {
+                        ProfileNumber = representative?.ProfileNumber ?? plan.StockGroup.ProfileNumber,
+                        Finish = representative?.Finish ?? plan.StockGroup.Finish,
+                        RequiredPieceIds = requiredPieceIds
+                    },
+                    StockItems = plan.StockItems
+                        .Select(item => item with
+                        {
+                            CutSequence = item.CutSequence.Select(Refresh).ToArray()
+                        })
+                        .ToArray(),
+                    UnplacedPieceInstances = plan.UnplacedPieceInstances
+                        .Select(unplaced => unplaced with
+                        {
+                            PieceInstance = Refresh(unplaced.PieceInstance)
+                        })
+                        .ToArray()
+                };
+            }).ToArray()
+        };
+    }
 }
 
 public sealed record StockLengthGenerationFailure

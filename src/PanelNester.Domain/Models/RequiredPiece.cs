@@ -27,4 +27,19 @@ public sealed record RequiredPiece
     public IReadOnlyList<string> ValidationMessages { get; init; } = Array.Empty<string>();
 
     public IReadOnlyList<SourceReference> SourceReferences { get; init; } = Array.Empty<SourceReference>();
+
+    public bool HasSameOptimizationInputs(RequiredPiece other)
+    {
+        ArgumentNullException.ThrowIfNull(other);
+        return Quantity == other.Quantity &&
+               Length == other.Length &&
+               string.Equals(ProfileNumber.Trim(), other.ProfileNumber.Trim(), StringComparison.OrdinalIgnoreCase) &&
+               string.Equals(NormalizeOptional(Finish), NormalizeOptional(other.Finish), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? NormalizeOptional(string? value)
+    {
+        var trimmed = value?.Trim();
+        return string.IsNullOrWhiteSpace(trimmed) ? null : trimmed;
+    }
 }
