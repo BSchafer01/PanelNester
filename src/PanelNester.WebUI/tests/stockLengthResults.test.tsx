@@ -89,6 +89,18 @@ describe('Stock-Length Results', () => {
     );
     expect(screen.getByRole('button', { name: /Cut 2.*B-1.*30 in/ })).toHaveAttribute('aria-pressed', 'true');
 
+    rerender(
+      <StockItemViewer
+        finish="Clear"
+        onSelectPieceInstance={onSelectPieceInstance}
+        pieceInstances={pieces}
+        profileNumber="P-100"
+        selectedPieceInstanceId={undefined}
+        stockItem={stockItem()}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /Cut 2.*B-1.*30 in/ })).toHaveAttribute('aria-pressed', 'false');
+
     const canvas = screen.getByRole('img', { name: /schematic for Stock Item 1/ });
     vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 600, bottom: 300, width: 600, height: 300, toJSON: () => ({}) });
     fireEvent.click(canvas, { clientX: 100, clientY: 150 });
