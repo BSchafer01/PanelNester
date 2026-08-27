@@ -913,7 +913,8 @@ public sealed record ExportExcelReportRequest(
     Project Project,
     BatchNestResponse? BatchResult = null,
     string? FilePath = null,
-    string? SuggestedFileName = null);
+    string? SuggestedFileName = null,
+    StockLengthReportScope? StockLengthScope = null);
 
 public sealed record ExportExcelReportResponse(bool Success, string? FilePath, BridgeError? Error, string? Message)
 {

@@ -1366,6 +1366,14 @@ export interface ExportExcelReportRequest {
   batchResult?: BatchNestResponse | null;
   filePath?: string | null;
   suggestedFileName?: string | null;
+  stockLengthScope?: StockLengthReportScope | null;
+}
+
+export interface StockLengthReportScope {
+  optimizationGroupId?: string | null;
+  hasStockGroupFilter: boolean;
+  stockGroupProfileNumber?: string | null;
+  stockGroupFinish?: string | null;
 }
 
 export interface ExportExcelReportResponse {

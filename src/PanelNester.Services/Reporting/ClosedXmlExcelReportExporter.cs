@@ -6,12 +6,35 @@ using System.IO;
 
 namespace PanelNester.Services.Reporting;
 
-public sealed class ClosedXmlExcelReportExporter : IExcelReportExporter
+public sealed class ClosedXmlExcelReportExporter : IExcelReportExporter, IStockLengthExcelReportExporter
 {
     private const string SummaryWorksheetName = "Summary";
     private const string ProjectSummaryWorksheetName = "Project Summary";
     private const int SummaryColumnCount = 6;
     private const int PatternColumnCount = 8;
+
+    public Task ExportAsync(
+        StockLengthReportData report,
+        string filePath,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var directoryPath = Path.GetDirectoryName(filePath);
+        if (!string.IsNullOrWhiteSpace(directoryPath))
+        {
+            Directory.CreateDirectory(directoryPath);
+        }
+
+        using var workbook = new XLWorkbook();
+        WriteStockLengthSummary(workbook.Worksheets.Add("Summary"), report, cancellationToken);
+        WriteStockLengthCutPlans(workbook.Worksheets.Add("Cut Plans"), report, cancellationToken);
+        WriteStockLengthUnplaced(workbook.Worksheets.Add("Unplaced"), report, cancellationToken);
+        workbook.SaveAs(filePath);
+        return Task.CompletedTask;
+    }
 
     public Task ExportAsync(
         ReportData report,
@@ -198,6 +221,232 @@ public sealed class ClosedXmlExcelReportExporter : IExcelReportExporter
         worksheet.SheetView.FreezeRows(3);
         return currentRow;
     }
+
+    private static void WriteStockLengthSummary(
+        IXLWorksheet worksheet,
+        StockLengthReportData report,
+        CancellationToken cancellationToken)
+    {
+        string[] headings =
+        [
+            "Optimization Group", "Stock Group", "Profile Number", "Finish", "Stock Item",
+            "Placed Piece Instances", "Stock Length", "Piece Length", "Saw Loss", "Remainder", "Utilization", "Status"
+        ];
+        WriteHeadings(worksheet, headings);
+
+        var row = 2;
+        foreach (var group in report.OptimizationGroups)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            foreach (var stockGroup in group.StockGroups)
+            {
+                foreach (var stockItem in stockGroup.StockItems)
+                {
+                    worksheet.Cell(row, 1).Value = group.Name;
+                    worksheet.Cell(row, 2).Value = StockGroupLabel(stockGroup.ProfileNumber, stockGroup.Finish);
+                    worksheet.Cell(row, 3).Value = stockGroup.ProfileNumber;
+                    worksheet.Cell(row, 4).Value = stockGroup.Finish ?? string.Empty;
+                    worksheet.Cell(row, 5).Value = stockItem.StockItemNumber;
+                    worksheet.Cell(row, 6).Value = stockItem.CutSequence.Count;
+                    worksheet.Cell(row, 7).Value = stockItem.StockLength;
+                    worksheet.Cell(row, 8).Value = stockItem.PieceLength;
+                    worksheet.Cell(row, 9).Value = stockItem.SawLoss;
+                    worksheet.Cell(row, 10).Value = stockItem.Remainder;
+                    worksheet.Cell(row, 11).Value = stockItem.UtilizationPercent / 100m;
+                    worksheet.Cell(row, 11).Style.NumberFormat.Format = "0.0%";
+                    worksheet.Cell(row, 12).Value = DisplayState(stockGroup.State);
+                    row++;
+                }
+            }
+        }
+
+        CreateFilterableTable(worksheet, headings.Length, row);
+        WriteScopeStatusTable(worksheet, report, row + 2);
+    }
+
+    private static void WriteStockLengthCutPlans(
+        IXLWorksheet worksheet,
+        StockLengthReportData report,
+        CancellationToken cancellationToken)
+    {
+        string[] headings =
+        [
+            "Optimization Group", "Stock Group", "Profile Number", "Finish", "Stock Item", "Cut Sequence",
+            "Piece Instance", "Quantity Instance", "Required Piece", "Part Number", "Part Name", "Length",
+            "Start Position", "End Position", "Source References", "Status"
+        ];
+        WriteHeadings(worksheet, headings);
+
+        var row = 2;
+        foreach (var group in report.OptimizationGroups)
+        {
+            foreach (var stockGroup in group.StockGroups)
+            {
+                foreach (var stockItem in stockGroup.StockItems)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var startPosition = 0m;
+                    var kerf = stockItem.CutSequence.Count > 1
+                        ? stockItem.SawLoss / (stockItem.CutSequence.Count - 1)
+                        : 0m;
+                    foreach (var piece in stockItem.CutSequence.OrderBy(piece => piece.Sequence))
+                    {
+                        var endPosition = startPosition + piece.Length;
+                        worksheet.Cell(row, 1).Value = group.Name;
+                        worksheet.Cell(row, 2).Value = StockGroupLabel(stockGroup.ProfileNumber, stockGroup.Finish);
+                        worksheet.Cell(row, 3).Value = stockGroup.ProfileNumber;
+                        worksheet.Cell(row, 4).Value = stockGroup.Finish ?? string.Empty;
+                        worksheet.Cell(row, 5).Value = stockItem.StockItemNumber;
+                        worksheet.Cell(row, 6).Value = piece.Sequence;
+                        worksheet.Cell(row, 7).Value = piece.PieceInstanceId;
+                        worksheet.Cell(row, 8).Value = piece.QuantityInstance;
+                        worksheet.Cell(row, 9).Value = piece.RequiredPieceId;
+                        worksheet.Cell(row, 10).Value = piece.PartNumber ?? string.Empty;
+                        worksheet.Cell(row, 11).Value = piece.PartName ?? string.Empty;
+                        worksheet.Cell(row, 12).Value = piece.Length;
+                        worksheet.Cell(row, 13).Value = startPosition;
+                        worksheet.Cell(row, 14).Value = endPosition;
+                        worksheet.Cell(row, 15).Value = FormatSourceReferences(piece.SourceReferences);
+                        worksheet.Cell(row, 16).Value = DisplayState(stockGroup.State);
+                        startPosition = endPosition + kerf;
+                        row++;
+                    }
+                }
+            }
+        }
+
+        CreateFilterableTable(worksheet, headings.Length, row);
+    }
+
+    private static void WriteStockLengthUnplaced(
+        IXLWorksheet worksheet,
+        StockLengthReportData report,
+        CancellationToken cancellationToken)
+    {
+        string[] headings =
+        [
+            "Optimization Group", "Stock Group", "Profile Number", "Finish", "Piece Instance",
+            "Quantity Instance", "Required Piece", "Part Number", "Part Name", "Length", "Source References",
+            "Reason Code", "Reason", "Status"
+        ];
+        WriteHeadings(worksheet, headings);
+
+        var row = 2;
+        foreach (var item in report.UnplacedPieceInstances)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            worksheet.Cell(row, 1).Value = item.OptimizationGroupName;
+            worksheet.Cell(row, 2).Value = StockGroupLabel(item.ProfileNumber, item.Finish);
+            worksheet.Cell(row, 3).Value = item.ProfileNumber;
+            worksheet.Cell(row, 4).Value = item.Finish ?? string.Empty;
+            worksheet.Cell(row, 5).Value = item.PieceInstance.PieceInstanceId;
+            worksheet.Cell(row, 6).Value = item.PieceInstance.QuantityInstance;
+            worksheet.Cell(row, 7).Value = item.PieceInstance.RequiredPieceId;
+            worksheet.Cell(row, 8).Value = item.PieceInstance.PartNumber ?? string.Empty;
+            worksheet.Cell(row, 9).Value = item.PieceInstance.PartName ?? string.Empty;
+            worksheet.Cell(row, 10).Value = item.PieceInstance.Length;
+            worksheet.Cell(row, 11).Value = FormatSourceReferences(item.PieceInstance.SourceReferences);
+            worksheet.Cell(row, 12).Value = item.ReasonCode;
+            worksheet.Cell(row, 13).Value = item.ReasonDescription;
+            worksheet.Cell(row, 14).Value = DisplayState(item.State);
+            row++;
+        }
+
+        CreateFilterableTable(worksheet, headings.Length, row);
+    }
+
+    private static void WriteScopeStatusTable(
+        IXLWorksheet worksheet,
+        StockLengthReportData report,
+        int titleRow)
+    {
+        worksheet.Cell(titleRow, 1).Value = "Scope Status";
+        worksheet.Cell(titleRow, 1).Style.Font.Bold = true;
+        string[] headings = ["Optimization Group", "Stock Group", "Profile Number", "Finish", "Status", "Details"];
+        var headingRow = titleRow + 1;
+        for (var column = 1; column <= headings.Length; column++)
+        {
+            worksheet.Cell(headingRow, column).Value = headings[column - 1];
+        }
+        worksheet.Range(headingRow, 1, headingRow, headings.Length).Style.Font.Bold = true;
+
+        var row = headingRow + 1;
+        foreach (var group in report.OptimizationGroups)
+        {
+            if (group.StockGroups.Count == 0)
+            {
+                WriteScopeStatusRow(worksheet, row++, group, stockGroup: null);
+                continue;
+            }
+
+            foreach (var stockGroup in group.StockGroups)
+            {
+                WriteScopeStatusRow(worksheet, row++, group, stockGroup);
+            }
+        }
+
+        if (row > headingRow + 1)
+        {
+            worksheet.Range(headingRow, 1, row - 1, headings.Length).CreateTable();
+        }
+    }
+
+    private static void WriteScopeStatusRow(
+        IXLWorksheet worksheet,
+        int row,
+        StockLengthReportOptimizationGroup group,
+        StockLengthReportStockGroup? stockGroup)
+    {
+        worksheet.Cell(row, 1).Value = group.Name;
+        if (stockGroup is not null)
+        {
+            worksheet.Cell(row, 2).Value = StockGroupLabel(stockGroup.ProfileNumber, stockGroup.Finish);
+            worksheet.Cell(row, 3).Value = stockGroup.ProfileNumber;
+            worksheet.Cell(row, 4).Value = stockGroup.Finish ?? string.Empty;
+        }
+        worksheet.Cell(row, 5).Value = DisplayState(stockGroup?.State ?? group.State);
+        worksheet.Cell(row, 6).Value = group.FailureMessage ?? string.Empty;
+    }
+
+    private static void WriteHeadings(IXLWorksheet worksheet, IReadOnlyList<string> headings)
+    {
+        for (var column = 1; column <= headings.Count; column++)
+        {
+            worksheet.Cell(1, column).Value = headings[column - 1];
+        }
+
+        var range = worksheet.Range(1, 1, 1, headings.Count);
+        range.Style.Font.Bold = true;
+        range.Style.Fill.BackgroundColor = XLColor.LightGray;
+        range.Style.Border.BottomBorder = XLBorderStyleValues.Thin;
+        worksheet.SheetView.FreezeRows(1);
+    }
+
+    private static void CreateFilterableTable(IXLWorksheet worksheet, int columnCount, int nextRow)
+    {
+        if (nextRow > 2)
+        {
+            worksheet.Range(1, 1, nextRow - 1, columnCount).CreateTable();
+        }
+        else
+        {
+            worksheet.Range(1, 1, 1, columnCount).SetAutoFilter();
+        }
+        worksheet.Columns().AdjustToContents();
+    }
+
+    private static string StockGroupLabel(string profileNumber, string? finish) =>
+        $"{profileNumber} — {(string.IsNullOrWhiteSpace(finish) ? "No finish specified" : finish)}";
+
+    private static string DisplayState(StockLengthReportState state) => state switch
+    {
+        StockLengthReportState.NeedsGeneration => "Needs Generation",
+        StockLengthReportState.ApplicationError => "Application Error",
+        _ => state.ToString()
+    };
+
+    private static string FormatSourceReferences(IEnumerable<SourceReference> sourceReferences) =>
+        string.Join("; ", sourceReferences.Select(reference => $"{reference.WorksheetName}!{reference.PhysicalRow}"));
 
     private static int WritePatternWorksheetSection(
         IXLWorksheet worksheet,

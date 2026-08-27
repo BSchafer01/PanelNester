@@ -26,6 +26,7 @@ import type {
   ProjectKind,
   ProjectMaterialSnapshot,
   ReportSettings,
+  StockLengthReportScope,
   StiffenerTakeoffReportData,
   StiffenerTakeoffSettings,
   UnplacedItem,
@@ -82,6 +83,9 @@ interface StockLengthResultsProps {
   activeOptimizationGroupId?: string;
   onSelectOptimizationGroup: (optimizationGroupId: string) => void;
   onReviewOptimizationGroup?: (optimizationGroupId: string) => void;
+  canExportExcelReport?: boolean;
+  reportBusy?: boolean;
+  onExportExcelReport?: (overrides?: ReportExportOverrides) => Promise<void>;
 }
 
 function formatCutPlanStatus(status: string): string {
@@ -116,6 +120,9 @@ export function StockLengthResults({
   activeOptimizationGroupId,
   onSelectOptimizationGroup,
   onReviewOptimizationGroup,
+  canExportExcelReport = false,
+  reportBusy = false,
+  onExportExcelReport = async () => undefined,
 }: StockLengthResultsProps) {
   const orderedGroups = useMemo(() => [...optimizationGroups]
     .sort((left, right) => left.order - right.order), [optimizationGroups]);
@@ -148,6 +155,11 @@ export function StockLengthResults({
     return [...options].map(([value, label]) => ({ value, label }))
       .sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: 'base', numeric: true }));
   }, [scopedGroups]);
+  const selectedStockGroup = scopedGroups
+    .flatMap((group) => group.lastStockLengthOptimizationResult?.cutPlans ?? [])
+    .map((plan) => plan.stockGroup)
+    .find((stockGroup) =>
+      stockGroupKey(stockGroup.profileNumber, stockGroup.finish) === stockGroupFilter);
   const stockItemEntries = useMemo(() => scopedGroups.flatMap((group) => {
     if (group.resultStatus !== 'valid' || !group.lastStockLengthOptimizationResult) return [];
     return [...group.lastStockLengthOptimizationResult.cutPlans]
@@ -288,6 +300,14 @@ export function StockLengthResults({
       utilization: stockLength > 0 ? pieceLength / stockLength * 100 : 0,
     };
   });
+  const exportScope: StockLengthReportScope = {
+    optimizationGroupId: optimizationGroupScope === allOptimizationGroupsScope
+      ? null
+      : optimizationGroupScope,
+    hasStockGroupFilter: stockGroupFilter !== allStockGroupsScope,
+    stockGroupProfileNumber: selectedStockGroup?.profileNumber ?? null,
+    stockGroupFinish: selectedStockGroup?.finish ?? null,
+  };
 
   return (
     <div className="results-explorer stock-length-results">
@@ -311,6 +331,14 @@ export function StockLengthResults({
             {stockGroupOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
         </label>
+        <button
+          className="secondary-button module-action-button"
+          disabled={!canExportExcelReport || reportBusy}
+          onClick={() => void onExportExcelReport({ stockLengthScope: exportScope })}
+          type="button"
+        >
+          {reportBusy ? 'Exporting…' : 'Export Excel'}
+        </button>
       </header>
       <section className="project-card stock-length-results__states">
         <div className="project-card__header"><h2>Optimization Group Status</h2></div>
@@ -402,6 +430,7 @@ interface StiffenerExportDraft extends ReportDraft {
 interface ReportExportOverrides {
   companyLogoPath?: string | null;
   reportSettings?: ReportSettings;
+  stockLengthScope?: StockLengthReportScope;
 }
 
 interface StiffenerExportOverrides {
@@ -1076,7 +1105,7 @@ export function ResultsPage({
     : 'Waiting for a nesting result';
 
   if (projectKind === 'stockLength') {
-    return <StockLengthResults projectId={projectId} optimizationGroups={optimizationGroups} activeOptimizationGroupId={activeOptimizationGroupId} onSelectOptimizationGroup={onSelectOptimizationGroup} onReviewOptimizationGroup={onReviewOptimizationGroup} />;
+    return <StockLengthResults projectId={projectId} optimizationGroups={optimizationGroups} activeOptimizationGroupId={activeOptimizationGroupId} onSelectOptimizationGroup={onSelectOptimizationGroup} onReviewOptimizationGroup={onReviewOptimizationGroup} canExportExcelReport={canExportExcelReport} reportBusy={reportBusy} onExportExcelReport={onExportExcelReport} />;
   }
 
   return (

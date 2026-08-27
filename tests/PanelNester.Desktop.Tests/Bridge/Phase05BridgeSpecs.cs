@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text;
 using System.Text.Json;
+using ClosedXML.Excel;
 using PanelNester.Desktop.Bridge;
 using PanelNester.Desktop.Tests.Specifications;
 using PanelNester.Domain.Contracts;
@@ -17,6 +18,49 @@ public sealed class Phase05BridgeSpecs : IDisposable
 {
     private static readonly JsonSerializerOptions SerializerOptions = BridgeJson.SerializerOptions;
     private readonly string _workspacePath = Path.Combine(Path.GetTempPath(), $"PanelNester.Phase05BridgeSpecs.{Guid.NewGuid():N}");
+
+    [Fact]
+    public async Task Stock_Length_Excel_export_uses_the_visible_scope_and_normal_save_dialog()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var xlsxPath = Path.Combine(_workspacePath, "visible-cut-plans.xlsx");
+        var dialogs = new RecordingFileDialogService(savePaths: [xlsxPath]);
+        var dispatcher = CreateDispatcher(
+            dialogs,
+            new QuestPdfReportExporter(),
+            excelReportExporter: new ClosedXmlExcelReportExporter());
+        var project = new Project
+        {
+            ProjectKind = ProjectKind.StockLength,
+            State = new ProjectState
+            {
+                OptimizationGroups =
+                [
+                    StockLengthGroup("frames", "Frames", 0, "P-100", "Clear"),
+                    StockLengthGroup("doors", "Doors", 1, "P-200", "Bronze")
+                ]
+            }
+        };
+
+        var response = await DispatchAsync<ExportExcelReportResponse>(
+            dispatcher,
+            BridgeMessageTypes.ExportExcelReport,
+            new ExportExcelReportRequest(
+                project,
+                StockLengthScope: new StockLengthReportScope
+                {
+                    OptimizationGroupId = "frames"
+                }));
+
+        Assert.True(response.Success);
+        Assert.Equal(xlsxPath, response.FilePath);
+        Assert.Contains(dialogs.SaveRequests, request =>
+            request.DefaultExtension == ".xlsx" && request.Title?.Contains("Excel", StringComparison.Ordinal) == true);
+        using var workbook = new XLWorkbook(xlsxPath);
+        var summary = workbook.Worksheet("Summary");
+        Assert.Equal("Frames", summary.Cell(2, 1).GetString());
+        Assert.DoesNotContain(summary.RowsUsed(), row => row.Cell(1).GetString() == "Doors");
+    }
 
     [Fact]
     public void Phase_five_bridge_message_names_follow_the_existing_request_response_pattern()
@@ -671,6 +715,56 @@ public sealed class Phase05BridgeSpecs : IDisposable
         var ids = new Queue<string>(["mat-birch", "mat-maple"]);
         return () => ids.Dequeue();
     }
+
+    private static OptimizationGroup StockLengthGroup(
+        string id,
+        string name,
+        int order,
+        string profileNumber,
+        string finish) =>
+        new()
+        {
+            OptimizationGroupId = id,
+            Name = name,
+            Order = order,
+            ResultStatus = OptimizationResultStatus.Valid,
+            LastStockLengthOptimizationResult = new StockLengthOptimizationResult
+            {
+                OptimizationGroupId = id,
+                Status = CutPlanStatus.Complete,
+                CutPlans =
+                [
+                    new CutPlan
+                    {
+                        StockGroup = new StockGroup { ProfileNumber = profileNumber, Finish = finish },
+                        Status = CutPlanStatus.Complete,
+                        StockItems =
+                        [
+                            new StockItem
+                            {
+                                StockItemNumber = 1,
+                                StockLength = 120m,
+                                PieceLength = 24m,
+                                Remainder = 96m,
+                                UtilizationPercent = 20m,
+                                CutSequence =
+                                [
+                                    new PieceInstance
+                                    {
+                                        PieceInstanceId = $"{id}-piece-1",
+                                        RequiredPieceId = $"{id}-required",
+                                        InstanceNumber = 1,
+                                        Length = 24m,
+                                        ProfileNumber = profileNumber,
+                                        Finish = finish
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        };
 
     private BridgeMessageDispatcher CreateDispatcher(
         IFileDialogService dialogs,

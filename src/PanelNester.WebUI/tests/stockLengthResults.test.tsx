@@ -37,6 +37,28 @@ function stockGroup(items: StockItem[] = [stockItem()]): OptimizationGroup {
 describe('Stock-Length Results', () => {
   beforeEach(() => sessionStorage.clear());
 
+  it('exports the visible semantic scope even when the Optimization Group needs generation', async () => {
+    const user = userEvent.setup();
+    const exportExcel = vi.fn(async () => undefined);
+    const needsGeneration: OptimizationGroup = {
+      optimizationGroupId: 'frames', name: 'Frames', order: 0, parts: [],
+      requiredPieces: [{ requiredPieceId: 'piece-1', quantity: 1, length: 20, profileNumber: 'P-100', finish: 'Clear', isManual: true, sourceReferences: [] }],
+      stockGroups: [], resultStatus: 'stale', lastNestingResult: null, lastBatchNestingResult: null,
+    };
+
+    render(<StockLengthResults activeOptimizationGroupId="frames" canExportExcelReport onExportExcelReport={exportExcel} onSelectOptimizationGroup={vi.fn()} optimizationGroups={[needsGeneration]} />);
+
+    await user.click(screen.getByRole('button', { name: 'Export Excel' }));
+    expect(exportExcel).toHaveBeenCalledWith({
+      stockLengthScope: {
+        optimizationGroupId: 'frames',
+        hasStockGroupFilter: false,
+        stockGroupProfileNumber: null,
+        stockGroupFinish: null,
+      },
+    });
+  });
+
   it('defaults to All Optimization Groups and applies a view-only Stock Group filter', async () => {
     const user = userEvent.setup();
     const frames = stockGroup();

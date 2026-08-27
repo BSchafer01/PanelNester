@@ -1550,6 +1550,36 @@ public static class DesktopBridgeRegistration
 
                     try
                     {
+                        if (request.Project.ProjectKind == ProjectKind.StockLength)
+                        {
+                            if (excelReportExporter is not IStockLengthExcelReportExporter stockLengthExporter)
+                            {
+                                return ExportExcelReportResponse.Failure(
+                                    filePath,
+                                    "stock-length-excel-export-unsupported",
+                                    "The configured Excel exporter does not support Stock-Length Projects.");
+                            }
+
+                            var stockLengthReport = await new StockLengthReportDataService()
+                                .BuildAsync(
+                                    new StockLengthReportDataRequest
+                                    {
+                                        Project = request.Project,
+                                        Scope = request.StockLengthScope ?? new StockLengthReportScope()
+                                    },
+                                    cancellationToken)
+                                .ConfigureAwait(false);
+                            await stockLengthExporter
+                                .ExportAsync(stockLengthReport, filePath, cancellationToken)
+                                .ConfigureAwait(false);
+
+                            return new ExportExcelReportResponse(
+                                true,
+                                filePath,
+                                null,
+                                $"Exported Stock-Length Excel report to '{Path.GetFileName(filePath)}'.");
+                        }
+
                         var reportData = await reportDataService
                             .BuildReportDataAsync(
                                 new ReportDataRequest

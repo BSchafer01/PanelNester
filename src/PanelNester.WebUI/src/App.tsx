@@ -169,6 +169,7 @@ interface StiffenerExportOverrides {
 interface ReportExportOverrides {
   companyLogoPath?: string | null;
   reportSettings?: ReportSettings;
+  stockLengthScope?: import('./types/contracts').StockLengthReportScope;
 }
 
 type AppAction =
@@ -4791,7 +4792,7 @@ export default function App() {
       return;
     }
 
-    if (!hasResult) {
+    if (state.projectKind !== 'stockLength' && !hasResult) {
       dispatch({
         type: 'report-operation-failed',
         message: 'Run nesting before exporting an Excel report.',
@@ -4818,6 +4819,7 @@ export default function App() {
         project,
         batchResult: project.state.lastBatchNestingResult ?? null,
         filePath: null,
+        stockLengthScope: overrides?.stockLengthScope ?? null,
       });
 
       if (!response.success) {
