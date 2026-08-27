@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BufferGeometry, CanvasTexture, Color, Group, LineBasicMaterial, LineDashedMaterial,
-  LineLoop, Mesh, MeshBasicMaterial, MOUSE, OrthographicCamera, PlaneGeometry, Scene,
+  LineLoop, LineSegments, Mesh, MeshBasicMaterial, MOUSE, OrthographicCamera, PlaneGeometry, Scene,
   Sprite, SpriteMaterial, TOUCH, Vector3, WebGLRenderer, type Material, type Object3D,
 } from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -99,17 +99,26 @@ export function StockItemViewer({
   const controlsRef = useRef<OrbitControls>();
   const rendererRef = useRef<WebGLRenderer>();
   const sceneRef = useRef<Scene>();
-  const stockGroupRef = useRef<Group>();
+  const stockItemRenderGroupRef = useRef<Group>();
   const [internalSelection, setInternalSelection] = useState<string>();
   const [collapsed, setCollapsed] = useState(readCollapsedState);
   const [tooltip, setTooltip] = useState<string>();
   const segments = useMemo(() => buildSegments(stockItem, pieceInstances), [pieceInstances, stockItem]);
-  const selection = selectedPieceInstanceId ?? internalSelection;
+  const isSelectionControlled = onSelectPieceInstance !== undefined;
+  const selection = isSelectionControlled ? selectedPieceInstanceId : internalSelection;
 
   const selectPiece = useCallback((pieceInstanceId?: string) => {
-    setInternalSelection(pieceInstanceId);
+    if (!isSelectionControlled) setInternalSelection(pieceInstanceId);
     onSelectPieceInstance?.(pieceInstanceId);
-  }, [onSelectPieceInstance]);
+  }, [isSelectionControlled, onSelectPieceInstance]);
+
+  const adjustZoom = useCallback((factor: number) => {
+    const camera = cameraRef.current;
+    if (!camera) return;
+    camera.zoom = Math.min(maxZoom, Math.max(minZoom, camera.zoom * factor));
+    camera.updateProjectionMatrix();
+    controlsRef.current?.update();
+  }, []);
 
   const fitView = useCallback(() => {
     const camera = cameraRef.current;
@@ -118,7 +127,7 @@ export function StockItemViewer({
     if (!camera || !controls || !canvas) return;
     const width = Math.max(canvas.clientWidth, 1);
     const height = Math.max(canvas.clientHeight, 1);
-    const overlaySafeArea = width < 780 ? 0 : Math.min(0.36, 340 / width);
+    const overlaySafeArea = width <= 900 ? 0 : Math.min(0.36, 340 / width);
     const framedWidth = (stockItem.stockLength + stockPadding * 2) / Math.max(1 - overlaySafeArea, 0.5);
     const framedHeight = Math.max(stockBarHeight + stockPadding * 2, framedWidth / (width / height));
     camera.left = -framedWidth / 2;
@@ -178,7 +187,7 @@ export function StockItemViewer({
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
-    if (stockGroupRef.current) { scene.remove(stockGroupRef.current); disposeObject(stockGroupRef.current); }
+    if (stockItemRenderGroupRef.current) { scene.remove(stockItemRenderGroupRef.current); disposeObject(stockItemRenderGroupRef.current); }
     const group = new Group();
     for (const segment of segments) {
       if (segment.length <= 0) continue;
@@ -193,8 +202,19 @@ export function StockItemViewer({
         if (label) group.add(label);
       } else if (segment.kind === 'saw-loss') {
         const mesh = new Mesh(new PlaneGeometry(Math.max(segment.length, 0.08), stockBarHeight), new MeshBasicMaterial({ color: '#d7ba7d' }));
-        mesh.position.set(segment.start + segment.length / 2, 0, 0.1);
-        group.add(mesh);
+        const centerX = segment.start + segment.length / 2;
+        mesh.position.set(centerX, 0, 0.1);
+        const cueHalfWidth = Math.max(segment.length / 2, stockItem.stockLength * 0.003);
+        const stripes = new LineSegments(
+          new BufferGeometry().setFromPoints([
+            new Vector3(centerX - cueHalfWidth, -stockBarHeight / 2, 0.2),
+            new Vector3(centerX + cueHalfWidth, stockBarHeight / 2, 0.2),
+            new Vector3(centerX - cueHalfWidth, stockBarHeight / 2, 0.2),
+            new Vector3(centerX + cueHalfWidth, -stockBarHeight / 2, 0.2),
+          ]),
+          new LineBasicMaterial({ color: '#2d281f' }),
+        );
+        group.add(mesh, stripes);
       } else {
         const outline = rectangleOutline(segment.length, stockBarHeight, '#8b8d91');
         outline.material = new LineDashedMaterial({ color: '#8b8d91', dashSize: 1.25, gapSize: 0.8 });
@@ -204,9 +224,9 @@ export function StockItemViewer({
       }
     }
     scene.add(group);
-    stockGroupRef.current = group;
+    stockItemRenderGroupRef.current = group;
     fitView();
-    return () => { scene.remove(group); disposeObject(group); if (stockGroupRef.current === group) stockGroupRef.current = undefined; };
+    return () => { scene.remove(group); disposeObject(group); if (stockItemRenderGroupRef.current === group) stockItemRenderGroupRef.current = undefined; };
   }, [fitView, segments, selection]);
 
   const segmentAt = (clientX: number, clientY: number): StockSegment | undefined => {
@@ -242,8 +262,8 @@ export function StockItemViewer({
       <header className="stock-item-viewer__header">
         <div><p className="eyebrow">Stock Item Viewer</p><h2>Stock Item {stockItem.stockItemNumber}</h2><p>{profileNumber} — {finish || 'No finish specified'} — {stockItem.stockLength} in</p></div>
         <div className="button-row">
-          <button className="secondary-button" onClick={() => { const camera = cameraRef.current; if (camera) { camera.zoom = Math.max(minZoom, camera.zoom / 1.2); camera.updateProjectionMatrix(); } }} type="button">Zoom out</button>
-          <button className="secondary-button" onClick={() => { const camera = cameraRef.current; if (camera) { camera.zoom = Math.min(maxZoom, camera.zoom * 1.2); camera.updateProjectionMatrix(); } }} type="button">Zoom in</button>
+          <button className="secondary-button" onClick={() => adjustZoom(1 / 1.2)} type="button">Zoom out</button>
+          <button className="secondary-button" onClick={() => adjustZoom(1.2)} type="button">Zoom in</button>
           <button className="secondary-button" onClick={fitView} type="button">Reset View</button>
         </div>
       </header>
