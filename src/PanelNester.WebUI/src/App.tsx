@@ -5114,6 +5114,8 @@ export default function App() {
     case 'results':
       content = (
         <ResultsPage
+          key={`results-${state.projectId}`}
+          projectId={state.projectId}
           projectKind={state.projectKind}
           optimizationGroups={state.optimizationGroups}
           activeOptimizationGroupId={state.activeOptimizationGroupId}
@@ -5165,6 +5167,10 @@ export default function App() {
           onSelectOptimizationGroup={(optimizationGroupId) =>
             dispatch({ type: 'optimization-group-activated', optimizationGroupId })
           }
+          onReviewOptimizationGroup={(optimizationGroupId) => {
+            dispatch({ type: 'optimization-group-activated', optimizationGroupId });
+            dispatch({ type: 'route-changed', route: 'import' });
+          }}
         />
       );
       break;

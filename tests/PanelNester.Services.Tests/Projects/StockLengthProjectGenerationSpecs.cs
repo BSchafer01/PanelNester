@@ -1,3 +1,4 @@
+using PanelNester.Domain.Contracts;
 using PanelNester.Domain.Models;
 using PanelNester.Services.Nesting;
 using PanelNester.Services.Projects;
@@ -83,6 +84,24 @@ public sealed class StockLengthProjectGenerationSpecs
         Assert.Equal(["failed"], generated.Failures.Select(failure => failure.OptimizationGroupId));
     }
 
+    [Fact]
+    public async Task Generate_All_Stale_isolates_unexpected_generator_failures()
+    {
+        var service = new StockLengthProjectGenerationService(new UnexpectedFailureGenerator());
+        var project = ProjectWithGroups(
+            Group("successful", Piece("successful-piece", 1, 20)),
+            Group("failed", Piece("failed-piece", 1, 30)));
+
+        var generated = await service.GenerateAllStaleAsync(project);
+
+        Assert.False(generated.Success);
+        var groups = generated.Project.State.OptimizationGroups
+            .ToDictionary(group => group.OptimizationGroupId);
+        Assert.Equal(OptimizationResultStatus.Valid, groups["successful"].ResultStatus);
+        Assert.Equal("cut-plan-generation-failed", groups["failed"].LastStockLengthGenerationError?.Code);
+        Assert.Equal("Unexpected generator failure.", groups["failed"].LastStockLengthGenerationError?.Message);
+    }
+
     private static Project ProjectWithGroups(params OptimizationGroup[] groups) =>
         new()
         {
@@ -109,4 +128,24 @@ public sealed class StockLengthProjectGenerationSpecs
             Length = length,
             ProfileNumber = "P-100"
         };
+
+    private sealed class UnexpectedFailureGenerator : IStockLengthCutPlanGenerator
+    {
+        public Task<StockLengthOptimizationResult> GenerateAsync(
+            StockLengthCutPlanRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            if (request.OptimizationGroupId == "failed")
+            {
+                throw new InvalidOperationException("Unexpected generator failure.");
+            }
+
+            return Task.FromResult(new StockLengthOptimizationResult
+            {
+                OptimizationGroupId = request.OptimizationGroupId,
+                Status = CutPlanStatus.Complete,
+                Description = "Generated"
+            });
+        }
+    }
 }

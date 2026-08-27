@@ -32,6 +32,7 @@ import type {
 } from '../types/contracts';
 
 interface ResultsPageProps {
+  projectId?: string;
   projectKind?: ProjectKind;
   optimizationGroups: OptimizationGroup[];
   activeOptimizationGroupId?: string;
@@ -72,12 +73,15 @@ interface ResultsPageProps {
     overrides?: StiffenerExportOverrides,
   ) => Promise<void>;
   onSelectOptimizationGroup: (optimizationGroupId: string) => void;
+  onReviewOptimizationGroup?: (optimizationGroupId: string) => void;
 }
 
 interface StockLengthResultsProps {
+  projectId?: string;
   optimizationGroups: OptimizationGroup[];
   activeOptimizationGroupId?: string;
   onSelectOptimizationGroup: (optimizationGroupId: string) => void;
+  onReviewOptimizationGroup?: (optimizationGroupId: string) => void;
 }
 
 function formatCutPlanStatus(status: string): string {
@@ -107,20 +111,25 @@ function resultState(group: OptimizationGroup): string {
 }
 
 export function StockLengthResults({
+  projectId,
   optimizationGroups,
   activeOptimizationGroupId,
   onSelectOptimizationGroup,
+  onReviewOptimizationGroup,
 }: StockLengthResultsProps) {
   const orderedGroups = useMemo(() => [...optimizationGroups]
     .sort((left, right) => left.order - right.order), [optimizationGroups]);
+  const sessionKey = `stock-length-results:${projectId || orderedGroups.map((group) => group.optimizationGroupId).join(',')}`;
   const [optimizationGroupScope, setOptimizationGroupScope] = useState(() => {
     if (orderedGroups.length <= 1) return activeOptimizationGroupId ?? orderedGroups[0]?.optimizationGroupId ?? '';
-    const remembered = sessionStorage.getItem('stock-length-results-group-scope');
+    const remembered = sessionStorage.getItem(`${sessionKey}:group-scope`);
     return remembered && orderedGroups.some((group) => group.optimizationGroupId === remembered)
       ? remembered
       : allOptimizationGroupsScope;
   });
-  const [stockGroupFilter, setStockGroupFilter] = useState(allStockGroupsScope);
+  const [stockGroupFilter, setStockGroupFilter] = useState(
+    () => sessionStorage.getItem(`${sessionKey}:stock-group`) ?? allStockGroupsScope,
+  );
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStockItemKey, setSelectedStockItemKey] = useState<string>();
   const [selectedPieceInstanceId, setSelectedPieceInstanceId] = useState<string>();
@@ -168,7 +177,15 @@ export function StockLengthResults({
         left.stockGroup.profileNumber.trim().localeCompare(right.stockGroup.profileNumber.trim(), undefined, { sensitivity: 'base', numeric: true }) ||
         (left.stockGroup.finish ?? '').localeCompare(right.stockGroup.finish ?? '', undefined, { sensitivity: 'base', numeric: true }))
       .filter((plan) => stockGroupFilter === allStockGroupsScope || stockGroupKey(plan.stockGroup.profileNumber, plan.stockGroup.finish) === stockGroupFilter)
-      .flatMap((plan) => plan.unplacedPieceInstances.map((item) => ({ group, plan, item })));
+      .flatMap((plan) => [...plan.unplacedPieceInstances]
+        .sort((left, right) => {
+          const leftSource = left.pieceInstance.sourceReferences[0];
+          const rightSource = right.pieceInstance.sourceReferences[0];
+          return (leftSource?.worksheetName ?? '').localeCompare(rightSource?.worksheetName ?? '', undefined, { sensitivity: 'base', numeric: true }) ||
+            (leftSource?.physicalRow ?? Number.MAX_SAFE_INTEGER) - (rightSource?.physicalRow ?? Number.MAX_SAFE_INTEGER) ||
+            left.pieceInstance.pieceInstanceId.localeCompare(right.pieceInstance.pieceInstanceId, undefined, { sensitivity: 'base', numeric: true });
+        })
+        .map((item) => ({ group, plan, item })));
   });
   const searchResults = searchQuery.trim().length === 0 ? [] : visibleStockItems.flatMap((entry) =>
     entry.item.cutSequence
@@ -180,6 +197,18 @@ export function StockLengthResults({
         sourceReferenceLabel(piece),
       ].some((value) => value.toLocaleLowerCase().includes(searchQuery.trim().toLocaleLowerCase())))
       .map((piece) => ({ entry, piece })));
+
+  useEffect(() => {
+    const rememberedScope = sessionStorage.getItem(`${sessionKey}:group-scope`);
+    setOptimizationGroupScope(
+      orderedGroups.length <= 1
+        ? activeOptimizationGroupId ?? orderedGroups[0]?.optimizationGroupId ?? ''
+        : rememberedScope && orderedGroups.some((group) => group.optimizationGroupId === rememberedScope)
+          ? rememberedScope
+          : allOptimizationGroupsScope,
+    );
+    setStockGroupFilter(sessionStorage.getItem(`${sessionKey}:stock-group`) ?? allStockGroupsScope);
+  }, [sessionKey]);
 
   useEffect(() => {
     const validScope = optimizationGroupScope === allOptimizationGroupsScope
@@ -198,6 +227,11 @@ export function StockLengthResults({
       setStockGroupFilter(allStockGroupsScope);
     }
   }, [stockGroupFilter, stockGroupOptions]);
+
+  useEffect(() => {
+    sessionStorage.setItem(`${sessionKey}:group-scope`, optimizationGroupScope);
+    sessionStorage.setItem(`${sessionKey}:stock-group`, stockGroupFilter);
+  }, [optimizationGroupScope, sessionKey, stockGroupFilter]);
 
   useEffect(() => {
     setSelectedStockItemKey((current) => (
@@ -220,7 +254,6 @@ export function StockLengthResults({
   const changeOptimizationGroupScope = (scope: string) => {
     setOptimizationGroupScope(scope);
     setStockGroupFilter(allStockGroupsScope);
-    sessionStorage.setItem('stock-length-results-group-scope', scope);
     if (scope !== allOptimizationGroupsScope) onSelectOptimizationGroup(scope);
   };
 
@@ -251,6 +284,7 @@ export function StockLengthResults({
       pieceLength,
       sawLoss,
       remainder,
+      stockLength,
       utilization: stockLength > 0 ? pieceLength / stockLength * 100 : 0,
     };
   });
@@ -284,9 +318,12 @@ export function StockLengthResults({
           {summaries.map((summary) => <div className="summary-card" key={summary.group.optimizationGroupId}>
             <strong>{summary.group.name}</strong>
             <span data-result-state>{resultState(summary.group)}</span>
-            <small>{summary.pieceCount} Piece Instances · {summary.stockItemCount} Stock Items · {summary.pieceLength} in pieces</small>
+            <small>{summary.pieceCount} Piece Instances · {summary.stockItemCount} Stock Items · {summary.stockLength} in Stock Length · {summary.pieceLength} in pieces</small>
             <small>{summary.sawLoss} in Saw Loss · {summary.remainder} in Remainder · {summary.utilization.toFixed(1)}% utilization</small>
             {summary.group.lastStockLengthGenerationError ? <small>{summary.group.lastStockLengthGenerationError.message}</small> : null}
+            {summary.group.requiredPieces.length === 0 ? <small>Add Piece Instances to generate a Cut Plan.</small> : null}
+            {summary.group.requiredPieces.length > 0 && summary.group.resultStatus !== 'valid' && !summary.group.lastStockLengthGenerationError ? <small>Generate a Cut Plan from Required Pieces.</small> : null}
+            {summary.group.resultStatus !== 'valid' && onReviewOptimizationGroup ? <button className="secondary-button" onClick={() => onReviewOptimizationGroup(summary.group.optimizationGroupId)} type="button">{summary.group.requiredPieces.length === 0 ? 'Add Piece Instances' : 'Review Required Pieces'}</button> : null}
             {summary.plans.map((plan) => {
               const planItems = plan.stockItems;
               const planPieceCount = planItems.reduce((total, item) => total + item.cutSequence.length, 0) + plan.unplacedPieceInstances.length;
@@ -297,7 +334,7 @@ export function StockLengthResults({
               return <div className="stock-group-summary" key={`${summary.group.optimizationGroupId}\u0000${plan.cutPlanId}`}>
                 <strong>{plan.stockGroup.profileNumber} — {plan.stockGroup.finish || 'No finish specified'}</strong>
                 <span>{formatCutPlanStatus(plan.status)}</span>
-                <small>{planPieceCount} Piece Instances · {planItems.length} Stock Items · {planPieceLength} in pieces · {planSawLoss} in Saw Loss · {planRemainder} in Remainder · {(planStockLength > 0 ? planPieceLength / planStockLength * 100 : 0).toFixed(1)}% utilization</small>
+                <small>{planPieceCount} Piece Instances · {planItems.length} Stock Items · {planStockLength} in Stock Length · {planPieceLength} in pieces · {planSawLoss} in Saw Loss · {planRemainder} in Remainder · {(planStockLength > 0 ? planPieceLength / planStockLength * 100 : 0).toFixed(1)}% utilization</small>
               </div>;
             })}
           </div>)}
@@ -601,6 +638,7 @@ function itemLabel(partId: string): string {
 }
 
 export function ResultsPage({
+  projectId,
   projectKind,
   optimizationGroups,
   activeOptimizationGroupId,
@@ -634,6 +672,7 @@ export function ResultsPage({
   onExportExcelReport,
   onExportStiffenerReport,
   onSelectOptimizationGroup,
+  onReviewOptimizationGroup,
 }: ResultsPageProps) {
   const orderedOptimizationGroups = useMemo(
     () => getResultsOptimizationGroups(optimizationGroups),
@@ -1037,7 +1076,7 @@ export function ResultsPage({
     : 'Waiting for a nesting result';
 
   if (projectKind === 'stockLength') {
-    return <StockLengthResults optimizationGroups={optimizationGroups} activeOptimizationGroupId={activeOptimizationGroupId} onSelectOptimizationGroup={onSelectOptimizationGroup} />;
+    return <StockLengthResults projectId={projectId} optimizationGroups={optimizationGroups} activeOptimizationGroupId={activeOptimizationGroupId} onSelectOptimizationGroup={onSelectOptimizationGroup} onReviewOptimizationGroup={onReviewOptimizationGroup} />;
   }
 
   return (

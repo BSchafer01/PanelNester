@@ -198,7 +198,7 @@ public sealed class ImportResultsRevisionGateSpecs
             """);
     }
 
-    [Fact(Skip = "Obsolete source-text gate; Results behavior is covered by rendered UI tests.")]
+    [Fact]
     public void Results_page_large_import_group_review_is_driven_by_nesting_payloads_not_full_import_rows()
     {
         var resultsPage = Normalize(ReadRepositoryText("src", "PanelNester.WebUI", "src", "pages", "ResultsPage.tsx"));
@@ -210,11 +210,12 @@ public sealed class ImportResultsRevisionGateSpecs
         Assert.DoesNotContain("const activeMaterialParts = useMemo(", resultsPage);
         Assert.DoesNotContain("const activeMaterialPlacementGroups = useMemo(", resultsPage);
 
-        Assert.Contains("const hasGroupedPlacements = useMemo(", resultsPage);
-        Assert.Contains("result.response.placements.some((placement) => normalizeGroup(placement.group) !== null),", resultsPage);
+        Assert.Contains("const materialResults = useMemo(", resultsPage);
+        Assert.Contains("() => buildMaterialResults(batchNestResponse, material, nestResponse),", resultsPage);
+        Assert.Contains("const batchSheets = useMemo(() => buildBatchSheets(materialResults), [materialResults]);", resultsPage);
         Assert.Contains("const activeMaterialPlacements = useMemo(", resultsPage);
-        Assert.Contains("() => (activeMaterialResult ? decoratePlacements(activeMaterialResult.response.placements) : []),", resultsPage);
-        Assert.Contains("() => buildGroupSummaries(activeMaterialPlacements),", resultsPage);
+        Assert.Contains("() => decoratePlacements(activeMaterialResult?.response.placements ?? []),", resultsPage);
+        Assert.Contains("const activeSheetPlacements = useMemo(", resultsPage);
     }
 
     [Fact]
@@ -386,51 +387,27 @@ public sealed class ImportResultsRevisionGateSpecs
             """);
     }
 
-    [Fact(Skip = "Obsolete source-text gate; Results behavior is covered by rendered UI tests.")]
-    public void Results_page_markup_keeps_workspace_then_splitter_then_viewer()
+    [Fact]
+    public void Results_page_markup_keeps_sidebar_before_the_sheet_viewer_stage()
     {
         var resultsPage = ReadRepositoryText("src", "PanelNester.WebUI", "src", "pages", "ResultsPage.tsx");
 
-        var workspaceIndex = resultsPage.IndexOf(
-            "<section aria-label=\"Results workspace\" className=\"panel results-workspace\">",
-            StringComparison.Ordinal);
-        var splitterIndex = resultsPage.IndexOf("className=\"results-splitter\"", StringComparison.Ordinal);
-        var viewerIndex = resultsPage.IndexOf("className=\"results-viewer-column\"", StringComparison.Ordinal);
+        var sidebarIndex = resultsPage.IndexOf("<aside className=\"results-sidebar\">", StringComparison.Ordinal);
+        var stageIndex = resultsPage.IndexOf("<section className=\"results-stage\">", StringComparison.Ordinal);
 
-        Assert.True(workspaceIndex >= 0, "Results workspace section should exist.");
-        Assert.True(splitterIndex > workspaceIndex, "The resize splitter should remain between workspace and viewer.");
-        Assert.True(viewerIndex > splitterIndex, "The viewer column should stay to the right of the splitter.");
+        Assert.True(sidebarIndex >= 0, "Results sidebar should exist.");
+        Assert.True(stageIndex > sidebarIndex, "The viewer stage should stay to the right of the sidebar.");
 
-        Assert.Contains("<div className=\"page-grid results-page\">", resultsPage);
-        Assert.Contains("const viewerPanel = activeSheet ? (", resultsPage);
+        Assert.Contains("<div className=\"results-explorer\">", resultsPage);
+        Assert.Contains("<div className=\"results-explorer__layout\">", resultsPage);
         Assert.Contains("<SheetViewer", resultsPage);
-        Assert.Contains("sheet={activeSheet}", resultsPage);
-        Assert.Contains("resetViewToken={viewerResetToken}", resultsPage);
-        Assert.Contains("style={splitLayoutStyle}", resultsPage);
-        Assert.Contains("'--results-workspace-width': `${workspaceWidth}px`,", resultsPage);
-        Assert.Contains("data-results-layout=\"workspace-left-viewer-right\"", resultsPage);
-        Assert.Contains("id=\"results-workspace-panel\"", resultsPage);
-        Assert.Contains("aria-label=\"Resize results workspace\"", resultsPage);
-        Assert.Contains("aria-orientation=\"vertical\"", resultsPage);
-        Assert.Contains("aria-valuemin={minWorkspaceWidth}", resultsPage);
-        Assert.Contains("aria-valuenow={Math.round(workspaceWidth)}", resultsPage);
-        Assert.Contains("role=\"separator\"", resultsPage);
-        Assert.Contains("const minWorkspaceWidth = 360;", resultsPage);
-        Assert.Contains("const minViewerWidth = 420;", resultsPage);
-        Assert.Contains("const resultsSplitterWidth = 14;", resultsPage);
-        Assert.Contains("const maxWidth = Math.max(", resultsPage);
-        Assert.Contains("bounds.width - minViewerWidth - resultsSplitterWidth,", resultsPage);
-        Assert.Contains("window.addEventListener('pointermove', handlePointerMove);", resultsPage);
-        Assert.Contains("window.removeEventListener('pointermove', handlePointerMove);", resultsPage);
-        Assert.Contains("onPointerDown={(event) => {", resultsPage);
-        Assert.Contains("event.preventDefault();", resultsPage);
-        Assert.Contains("setIsResizingWorkspace(true);", resultsPage);
-        Assert.Contains("aria-label=\"Current sheet viewer\"", resultsPage);
-        Assert.Contains("data-active-sheet-id={activeSheet?.sheetId}", resultsPage);
+        Assert.Contains("sheet={activeSheetView.sheet}", resultsPage);
+        Assert.Contains("selectedPlacementId={selectedPlacementId}", resultsPage);
+        Assert.Contains("onSelectPlacement={setSelectedPlacementId}", resultsPage);
     }
 
-    [Fact(Skip = "Obsolete source-text gate; Results behavior is covered by rendered UI tests.")]
-    public void Results_split_styles_keep_the_resize_handle_visible_and_workspace_scroll_independent()
+    [Fact]
+    public void Results_styles_keep_the_route_and_independent_result_regions_scroll_constrained()
     {
         var styles = Normalize(ReadRepositoryText("src", "PanelNester.WebUI", "src", "styles.css"));
 
@@ -439,9 +416,16 @@ public sealed class ImportResultsRevisionGateSpecs
             """
             .app-route--results {
               display: grid;
+              height: 100%;
               min-height: 100%;
+              overflow: hidden;
+              padding: 0;
             }
             """);
+        Assert.Contains(".results-explorer__layout {", styles);
+        Assert.Contains("  grid-template-columns: 500px minmax(0, 1fr);", styles);
+        Assert.Contains(".results-sidebar__sheet-list {", styles);
+        Assert.Contains(".results-stage {", styles);
         AssertContains(
             styles,
             """
@@ -616,22 +600,20 @@ public sealed class ImportResultsRevisionGateSpecs
         Assert.Contains("updateCameraLayout(true);", sheetViewer);
     }
 
-    [Fact(Skip = "Obsolete source-text gate; Results behavior is covered by rendered UI tests.")]
-    public void Results_page_only_adds_group_review_when_placements_expose_group_data()
+    [Fact]
+    public void Results_page_keeps_optimization_group_review_and_placement_group_metadata_visible()
     {
         var contracts = ReadRepositoryText("src", "PanelNester.WebUI", "src", "types", "contracts.ts");
         var resultsPage = ReadRepositoryText("src", "PanelNester.WebUI", "src", "pages", "ResultsPage.tsx");
 
         Assert.Contains("group?: string | null;", contracts);
-        Assert.Contains("const hasGroupedPlacements = useMemo(", resultsPage);
-        Assert.Contains("normalizeGroup(placement.group) !== null", resultsPage);
-        Assert.Contains("{ id: 'group-review', label: 'Review by group' },", resultsPage);
-        Assert.Contains("const activeMaterialGroupSummaries = useMemo(", resultsPage);
-        Assert.Contains("No grouped panels in the active material result", resultsPage);
+        Assert.Contains("const orderedOptimizationGroups = useMemo(", resultsPage);
+        Assert.Contains("ariaLabel=\"Select Optimization Group results\"", resultsPage);
+        Assert.Contains("onChange={onSelectOptimizationGroup}", resultsPage);
+        Assert.Contains("Panels are never shared between groups.", resultsPage);
         Assert.Contains("<th>Part Group</th>", resultsPage);
-        Assert.Contains("{selectedPlacement.displayGroup}", resultsPage);
         Assert.Contains("<td>{placement.displayGroup}</td>", resultsPage);
-        Assert.Contains("decoratePlacements(activeMaterialResult.response.placements)", resultsPage);
+        Assert.Contains("decoratePlacements(activeMaterialResult?.response.placements ?? [])", resultsPage);
     }
 
     // Search precision acceptance gate:
@@ -646,7 +628,7 @@ public sealed class ImportResultsRevisionGateSpecs
     // - removing useDeferredValue/useMemo and making large batch searches stall the UI
     // - breaking row click wiring so search hits stop driving viewer selection or sheet focus
     // - widening search scope beyond placed panels and batch-sheet review state
-    [Fact(Skip = "Obsolete source-text gate; Results behavior is covered by rendered UI tests.")]
+    [Fact]
     public void Results_page_batch_sheet_search_requires_exact_contiguous_normalized_panel_id_fragments()
     {
         var searchHelpers = ReadRepositoryText(
@@ -677,12 +659,8 @@ public sealed class ImportResultsRevisionGateSpecs
             searchHelpers);
         Assert.DoesNotContain("function splitNormalizedPanelSearchFragments", searchHelpers);
         Assert.DoesNotContain("function buildNormalizedPanelSearchValues", searchHelpers);
-        Assert.Contains(
-            "only exact panel ID fragments or contiguous fragment sequences count",
-            resultsPage);
-        Assert.Contains(
-            "Try an exact panel ID fragment or contiguous fragment sequence. Search",
-            resultsPage);
+        Assert.Contains("placeholder=\"Find panel ID...\"", resultsPage);
+        Assert.Contains("() => buildPanelSearchResults(panelSearchIndex, deferredPanelSearchQuery)", resultsPage);
     }
 
     [Fact]
@@ -720,7 +698,7 @@ public sealed class ImportResultsRevisionGateSpecs
         Assert.False(PanelIdMatchesQuery("PANEL-00045#1", "013"));
     }
 
-    [Fact(Skip = "Obsolete source-text gate; Results behavior is covered by rendered UI tests.")]
+    [Fact]
     public void Results_page_batch_sheet_search_keeps_deferred_and_memoized_rendering_for_large_batches()
     {
         var resultsPage = ReadRepositoryText("src", "PanelNester.WebUI", "src", "pages", "ResultsPage.tsx");
@@ -729,44 +707,28 @@ public sealed class ImportResultsRevisionGateSpecs
         Assert.Contains("() => buildBatchSheets(materialResults),", resultsPage);
         Assert.Contains("const panelSearchIndex = useMemo(", resultsPage);
         Assert.Contains("() => buildPanelSearchIndex(batchSheets),", resultsPage);
-        Assert.Contains("const deferredPanelSearchQueryLabel = useDeferredValue(panelSearchQueryLabel);", resultsPage);
+        Assert.Contains("const deferredPanelSearchQuery = useDeferredValue(panelSearchQuery.trim());", resultsPage);
         Assert.Contains("const panelSearchResults = useMemo(", resultsPage);
         Assert.Contains(
-            "() => buildPanelSearchResults(panelSearchIndex, deferredPanelSearchQueryLabel),",
+            "() => buildPanelSearchResults(panelSearchIndex, deferredPanelSearchQuery),",
             resultsPage);
-        Assert.Contains("Updating search results for “{panelSearchQueryLabel}”…", resultsPage);
+        Assert.Contains("panelSearchResults.totalMatchCount} match(es)", resultsPage);
     }
 
-    [Fact(Skip = "Obsolete source-text gate; Results behavior is covered by rendered UI tests.")]
+    [Fact]
     public void Results_page_batch_sheet_search_rows_still_drive_sheet_review_and_sheet_highlighting()
     {
         var resultsPage = ReadRepositoryText("src", "PanelNester.WebUI", "src", "pages", "ResultsPage.tsx");
 
-        Assert.Contains("const reviewBatchSheet = (", resultsPage);
-        Assert.Contains("setActiveMaterialKey(materialKey);", resultsPage);
-        Assert.Contains("setActiveSheetId(sheetId);", resultsPage);
-        Assert.Contains("setSelectedPlacementId(placementId);", resultsPage);
-        Assert.Contains("const reviewPanelMatch = (match: PanelSearchMatch) => {", resultsPage);
-        Assert.Contains("reviewBatchSheet(match.materialKey, match.sheetId, match.placementId);", resultsPage);
-        Assert.Contains("onClick={() => reviewPanelMatch(match)}", resultsPage);
-        Assert.Contains("function panelSearchMatchRowKey(match: PanelSearchMatch): string {", resultsPage);
-        Assert.Contains("return `${match.materialKey}:${match.sheetId}:${match.placementId}:${match.partId}`;", resultsPage);
-        Assert.DoesNotContain("key={`${match.placementId}:${match.sheetId}`}", resultsPage);
-        Assert.Contains("key={panelSearchMatchRowKey(match)}", resultsPage);
-        Assert.Contains("Search hits stay highlighted here without duplicating the sheet inventory", resultsPage);
-        Assert.Contains("const filteredPanelSearchResults = useMemo(() => {", resultsPage);
-        Assert.Contains("const batchSheetsByKey = new Map(", resultsPage);
-        Assert.Contains("const panelSearchMatchCount = filteredPanelSearchResults.matches.length;", resultsPage);
-        Assert.Contains("const panelSearchSheetCount = filteredPanelSearchResults.sheets.length;", resultsPage);
+        Assert.Contains("const [activeSheetKey, setActiveSheetKey] = useState<string>();", resultsPage);
+        Assert.Contains("const [selectedPlacementId, setSelectedPlacementId] = useState<string>();", resultsPage);
         Assert.Contains("const panelSearchResults = useMemo(", resultsPage);
-        Assert.Contains("{panelSearchMatchCount} panel match(es) across {panelSearchSheetCount}", resultsPage);
-        Assert.Contains("filteredPanelSearchResults.matches.map((match) => (", resultsPage);
-        Assert.Contains("const filteredSearchSheet =", resultsPage);
-        Assert.Contains("filteredPanelSearchResults.bySheetKey.get(sheetKey);", resultsPage);
-        Assert.Contains("const searchHitCount = filteredSearchSheet?.matches.length ?? 0;", resultsPage);
-        Assert.Contains("searchHitCount > 0 && 'table-row--search-hit'", resultsPage);
-        Assert.Contains("const firstMatch = filteredSearchSheet?.firstMatch;", resultsPage);
-        Assert.Contains("firstMatch?.placementId,", resultsPage);
+        Assert.Contains("panelSearchResults.firstMatchBySheet.has(", resultsPage);
+        Assert.Contains("setActiveSheetKey(key);", resultsPage);
+        Assert.Contains("const firstMatch =", resultsPage);
+        Assert.Contains("panelSearchResults.firstMatchBySheet.get(key);", resultsPage);
+        Assert.Contains("setSelectedPlacementId(firstMatch?.placementId);", resultsPage);
+        Assert.Contains("className={isActive ? 'table-row--active' : undefined}", resultsPage);
     }
 
     [Fact]
@@ -786,13 +748,14 @@ public sealed class ImportResultsRevisionGateSpecs
         Assert.Contains("Part Group: {getDisplayGroup(tooltip.placement.group, tooltip.placement.displayGroup)}", sheetViewer);
     }
 
-    [Fact(Skip = "Obsolete source-text gate; Results behavior is covered by rendered UI tests.")]
+    [Fact]
     public void Results_route_wraps_the_results_page_to_preserve_internal_split_scrolling()
     {
         var app = ReadRepositoryText("src", "PanelNester.WebUI", "src", "App.tsx");
 
         Assert.Contains("const contentClassName =", app);
-        Assert.Contains("state.activeRoute === 'results' ? 'app-route app-route--results' : 'app-route';", app);
+        Assert.Contains("state.activeRoute === 'results'", app);
+        Assert.Contains("? 'app-route app-route--results'", app);
         Assert.Contains("<div className={contentClassName}>{content}</div>", app);
     }
 

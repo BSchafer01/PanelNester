@@ -150,6 +150,22 @@ public sealed class StockLengthProjectGenerationService(IStockLengthCutPlanGener
                         failure.Message)
                 };
             }
+            catch (Exception exception)
+            {
+                var failure = new StockLengthGenerationFailure
+                {
+                    OptimizationGroupId = group.OptimizationGroupId,
+                    Code = "cut-plan-generation-failed",
+                    Message = exception.Message
+                };
+                failures.Add(failure);
+                groups[groupIndex] = group with
+                {
+                    LastStockLengthGenerationError = new ValidationError(
+                        failure.Code,
+                        failure.Message)
+                };
+            }
         }
 
         return new StockLengthProjectGenerationResult

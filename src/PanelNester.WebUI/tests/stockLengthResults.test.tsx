@@ -55,7 +55,7 @@ describe('Stock-Length Results', () => {
       },
     };
 
-    render(<StockLengthResults activeOptimizationGroupId="frames" onSelectOptimizationGroup={vi.fn()} optimizationGroups={[doors, frames]} />);
+    const firstRender = render(<StockLengthResults projectId="project-a" activeOptimizationGroupId="frames" onSelectOptimizationGroup={vi.fn()} optimizationGroups={[doors, frames]} />);
 
     expect(screen.getByRole('combobox', { name: 'Optimization Group scope' })).toHaveValue('all');
     expect(screen.getByRole('option', { name: 'All Optimization Groups' })).toBeInTheDocument();
@@ -67,6 +67,14 @@ describe('Stock-Length Results', () => {
     const filteredRow = screen.getAllByRole('row').find((row) => row.hasAttribute('aria-selected'))!;
     expect(within(filteredRow).getByText('Doors')).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Stock Item 1 viewer' })).toHaveTextContent('A-100');
+
+    firstRender.unmount();
+    const restoredRender = render(<StockLengthResults projectId="project-a" activeOptimizationGroupId="frames" onSelectOptimizationGroup={vi.fn()} optimizationGroups={[doors, frames]} />);
+    expect(screen.getByRole('combobox', { name: 'Stock Group filter' })).toHaveValue('a-100\u0000');
+
+    restoredRender.unmount();
+    render(<StockLengthResults projectId="project-b" activeOptimizationGroupId="frames" onSelectOptimizationGroup={vi.fn()} optimizationGroups={[doors, frames]} />);
+    expect(screen.getByRole('combobox', { name: 'Stock Group filter' })).toHaveValue('all');
   });
 
   it('shows all freshness states and activates the matching Stock Item and Piece Instance from search', async () => {
@@ -271,6 +279,7 @@ describe('Stock-Length Results', () => {
     expect(screen.getByRole('heading', { name: 'Frames Cut Plan' })).toBeInTheDocument();
     expect(screen.getByText('Deterministic heuristic Cut Plan')).toBeInTheDocument();
     expect(screen.getAllByText('Partial').length).toBeGreaterThanOrEqual(3);
+    expect(screen.getAllByText(/240 in Stock Length/).length).toBeGreaterThanOrEqual(2);
     const rows = screen.getAllByRole('row').slice(1);
     expect(within(rows[0]).getByText('1')).toBeInTheDocument();
     expect(within(rows[0]).getByText('96 in')).toBeInTheDocument();
@@ -283,6 +292,7 @@ describe('Stock-Length Results', () => {
   });
 
   it('shows selected empty and populated groups as placeholders in the default All scope', () => {
+    const onReviewOptimizationGroup = vi.fn();
     const empty: OptimizationGroup = {
       optimizationGroupId: 'empty', name: 'Empty', order: 0, parts: [], requiredPieces: [], stockGroups: [],
       lastNestingResult: null, lastBatchNestingResult: null, lastStockLengthOptimizationResult: null, resultStatus: 'none',
@@ -292,11 +302,15 @@ describe('Stock-Length Results', () => {
       requiredPieces: [{ requiredPieceId: 'piece-1', quantity: 1, length: 20, profileNumber: 'P-100', sourceReferences: [] }],
     };
 
-    render(<StockLengthResults activeOptimizationGroupId="empty" onSelectOptimizationGroup={vi.fn()} optimizationGroups={[empty, populated]} />);
+    render(<StockLengthResults activeOptimizationGroupId="empty" onReviewOptimizationGroup={onReviewOptimizationGroup} onSelectOptimizationGroup={vi.fn()} optimizationGroups={[empty, populated]} />);
 
     expect(screen.getByRole('heading', { name: 'All Optimization Groups' })).toBeInTheDocument();
     expect(screen.getByText('Empty', { selector: '[data-result-state]' })).toBeInTheDocument();
     expect(screen.getByText('Needs Generation', { selector: '[data-result-state]' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Add Piece Instances' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review Required Pieces' }));
+    expect(onReviewOptimizationGroup).toHaveBeenNthCalledWith(1, 'empty');
+    expect(onReviewOptimizationGroup).toHaveBeenNthCalledWith(2, 'populated');
   });
 
   it('preserves Cut Plan group order beyond nine groups', () => {
