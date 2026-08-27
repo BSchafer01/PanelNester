@@ -2,6 +2,7 @@ import { useEffect, useReducer, useRef, useState } from 'react';
 import { AppShell } from './components/AppShell';
 import { NewProjectDialog } from './components/ProjectKindControls';
 import { hostBridge } from './bridge/hostBridge';
+import { reconcileCutPlanGenerationResponse } from './cutPlanGenerationGuard';
 import {
   guardProjectRoute,
   projectKindLabels,
@@ -2270,6 +2271,8 @@ function reducer(state: AppState, action: AppAction): AppState {
 
 export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const [desktopAppSettings, setDesktopAppSettings] =
     useState<DesktopAppSettings>(emptyDesktopAppSettings);
   const [desktopAppSettingsLoaded, setDesktopAppSettingsLoaded] = useState(false);
@@ -4614,44 +4617,76 @@ export default function App() {
     }
   };
 
+  const applyCutPlanGenerationResponse = (
+    startedProject: ProjectRecord,
+    responseProject: ProjectRecord,
+    targetOptimizationGroupIds: readonly string[],
+    activeOptimizationGroupId: string | undefined,
+    message: string,
+  ): boolean => {
+    const reconciliation = reconcileCutPlanGenerationResponse(
+      startedProject,
+      buildProjectRecord(stateRef.current),
+      responseProject,
+      targetOptimizationGroupIds,
+    );
+    const acceptedCount = targetOptimizationGroupIds.length -
+      reconciliation.discardedOptimizationGroupIds.length;
+    if (acceptedCount <= 0) {
+      dispatch({
+        type: 'generation-operation-finished',
+        message: 'Cut Plan generation finished after its inputs changed. The obsolete result was ignored.',
+      });
+      return false;
+    }
+
+    const discardedMessage = reconciliation.discardedOptimizationGroupIds.length > 0
+      ? ` Ignored ${reconciliation.discardedOptimizationGroupIds.length} obsolete Optimization Group result(s).`
+      : '';
+    dispatch({
+      type: 'optimization-groups-updated',
+      project: reconciliation.project,
+      activeOptimizationGroupId,
+      message: `${message}${discardedMessage}`,
+    });
+    return true;
+  };
+
   const generateSelectedCutPlan = async (optimizationGroupId: string): Promise<void> => {
     if (!hasCapability(bridgeMessageTypes.generateSelectedCutPlan)) {
       throw new Error('Cut Plan generation is not available from the connected desktop host.');
     }
 
     const operationId = createGenerationOperationId();
+    const generationProject = buildProjectRecord(state);
     activeGenerationOperationIdRef.current = operationId;
     dispatch({ type: 'generation-operation-started', message: 'Preparing Cut Plan generation…' });
     try {
       const response = await trackGenerationOperation(
         operationId,
         () => hostBridge.generateSelectedCutPlan({
-          project: buildProjectRecord(state),
+          project: generationProject,
           optimizationGroupId,
           operationId,
         }),
       );
+      if (response.project && !applyCutPlanGenerationResponse(
+        generationProject,
+        response.project,
+        [optimizationGroupId],
+        optimizationGroupId,
+        response.message ?? (response.success
+          ? 'Generated deterministic heuristic Cut Plan.'
+          : 'Cut Plan generation reported an application error.'),
+      )) {
+        return;
+      }
       if (!response.success || !response.project || !response.result) {
-        if (response.project) {
-          dispatch({
-            type: 'optimization-groups-updated',
-            project: response.project,
-            activeOptimizationGroupId: optimizationGroupId,
-            message: response.message ?? 'Cut Plan generation reported an application error.',
-          });
-        }
         throw new Error(getBridgeErrorMessage(
           response.error,
           response.message ?? 'The selected Optimization Group could not generate a Cut Plan.',
         ));
       }
-
-      dispatch({
-        type: 'optimization-groups-updated',
-        project: response.project,
-        activeOptimizationGroupId: optimizationGroupId,
-        message: response.message ?? 'Generated deterministic heuristic Cut Plan.',
-      });
     } catch (error) {
       const message = getErrorMessage(error, 'The selected Optimization Group could not generate a Cut Plan.');
       dispatch({ type: 'generation-operation-finished', message });
@@ -4665,6 +4700,10 @@ export default function App() {
     }
 
     const operationId = createGenerationOperationId();
+    const generationProject = buildProjectRecord(state);
+    const targetOptimizationGroupIds = generationProject.state.optimizationGroups
+      .filter((group) => group.requiredPieces.length > 0 && group.resultStatus !== 'valid')
+      .map((group) => group.optimizationGroupId);
     activeGenerationOperationIdRef.current = operationId;
     dispatch({
       type: 'generation-operation-started',
@@ -4674,16 +4713,17 @@ export default function App() {
       const response = await trackGenerationOperation(
         operationId,
         () => hostBridge.generateAllStaleCutPlans({
-          project: buildProjectRecord(state),
+          project: generationProject,
           operationId,
         }),
       );
-      dispatch({
-        type: 'optimization-groups-updated',
-        project: response.project,
-        activeOptimizationGroupId: state.activeOptimizationGroupId,
-        message: response.message,
-      });
+      applyCutPlanGenerationResponse(
+        generationProject,
+        response.project,
+        targetOptimizationGroupIds,
+        state.activeOptimizationGroupId,
+        response.message,
+      );
     } catch (error) {
       const message = getErrorMessage(
         error,
