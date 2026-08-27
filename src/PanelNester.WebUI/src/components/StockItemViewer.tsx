@@ -272,7 +272,6 @@ export function StockItemViewer({
         <span onMouseEnter={() => setTooltip(`${stockItem.sawLoss} in consumed by ${kerfCount} kerf${kerfCount === 1 ? '' : 's'}`)} onMouseLeave={() => setTooltip(undefined)}><i className="stock-legend__saw-loss" />Saw Loss <small>Striped gaps</small></span>
         <span onMouseEnter={() => setTooltip(`${stockItem.remainder} in remains after all cuts`)} onMouseLeave={() => setTooltip(undefined)}><i className="stock-legend__remainder" />Remainder <small>Dotted tail</small></span>
       </div>
-      {tooltip ? <div className="stock-item-viewer__tooltip" role="tooltip">{tooltip}</div> : null}
       <div className="stock-item-viewer__surface">
         <canvas
           aria-label={`Proportional schematic for Stock Item ${stockItem.stockItemNumber}`}
@@ -283,6 +282,7 @@ export function StockItemViewer({
           ref={canvasRef}
           role="img"
         />
+        {tooltip ? <div className="stock-item-viewer__tooltip" role="tooltip">{tooltip}</div> : null}
         <aside aria-label="Cut Sequence" className={`cut-sequence-card${collapsed ? ' cut-sequence-card--collapsed' : ''}`}>
           <header className="cut-sequence-card__header">
             <div><strong>Cut Sequence</strong><span>{pieceInstances.length} cuts · {stockItem.pieceLength} in</span></div>
