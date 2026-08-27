@@ -300,6 +300,9 @@ describe('Stock-Length Results', () => {
 
     expect(screen.getByRole('heading', { name: 'Frames Cut Plan' })).toBeInTheDocument();
     expect(screen.getByText('Deterministic heuristic Cut Plan')).toBeInTheDocument();
+    expect(screen.getByLabelText('Optimization preview')).toHaveClass('stock-length-results__preview');
+    expect(screen.getByLabelText('Stock Items table')).toHaveClass('stock-length-results__table-scroll');
+    expect(screen.getByLabelText('Optimization preview').previousElementSibling).toHaveClass('stock-length-results__details');
     expect(screen.getAllByText('Partial').length).toBeGreaterThanOrEqual(3);
     expect(screen.getAllByText(/240 in Stock Length/).length).toBeGreaterThanOrEqual(2);
     const rows = screen.getAllByRole('row').slice(1);

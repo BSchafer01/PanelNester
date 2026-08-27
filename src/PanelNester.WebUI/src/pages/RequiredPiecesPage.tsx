@@ -41,6 +41,11 @@ interface RequiredPiecesPageProps {
 }
 
 const largeQuantityWarningThreshold = 10_000;
+const stockLengthMaterialErrorCodes = new Set([
+  'material-not-found',
+  'material-name-required',
+  'missing-material',
+]);
 
 interface RequiredPieceFormValues {
   quantity: string;
@@ -145,7 +150,9 @@ export function RequiredPiecesPage({
   const [newStockLength, setNewStockLength] = useState('');
   const [stockLengthDrafts, setStockLengthDrafts] = useState<Record<string, string>>({});
   const [bulkWorksheetGroupId, setBulkWorksheetGroupId] = useState('');
-  const [sharedStockLengthDraft, setSharedStockLengthDraft] = useState('');
+  const [worksheetStockLengthDrafts, setWorksheetStockLengthDrafts] = useState<Record<string, string>>({});
+  const [collapsedWorksheetPreviews, setCollapsedWorksheetPreviews] = useState<Set<string>>(new Set());
+  const [pieceDrawerOpen, setPieceDrawerOpen] = useState(false);
   const [draft, setDraft] = useState<RequiredPieceDraft>(emptyDraft);
   const [importCorrection, setImportCorrection] = useState<ImportCorrectionDraft | null>(null);
   const activeOptimizationGroup = optimizationGroups.find(
@@ -162,6 +169,15 @@ export function RequiredPiecesPage({
       }));
     }
   }, [draft.optimizationGroupId, optimizationGroups]);
+
+  useEffect(() => {
+    if (!pieceDrawerOpen) return undefined;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPieceDrawerOpen(false);
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [pieceDrawerOpen]);
 
   const updateDraft = (field: keyof RequiredPieceDraft, value: string) =>
     setDraft((current) => ({ ...current, [field]: value }));
@@ -184,6 +200,7 @@ export function RequiredPiecesPage({
       await onCreateRequiredPiece(change);
     }
     setDraft({ ...emptyDraft, optimizationGroupId: draft.optimizationGroupId });
+    setPieceDrawerOpen(false);
   };
 
   const runAction = (action: () => void | Promise<void>) => {
@@ -206,16 +223,24 @@ export function RequiredPiecesPage({
     mappingSession?.filePath.toLowerCase().endsWith('.xlsx') ||
     mappingSession?.filePath.toLowerCase().endsWith('.xlsm'),
   );
-  const assignedOptimizationGroup = optimizationGroups.find(
-    (group) => group.optimizationGroupId === activeImportDraft?.optimizationGroupId,
-  );
-  useEffect(() => {
-    setSharedStockLengthDraft(
-      assignedOptimizationGroup?.stockLength == null ? '' : String(assignedOptimizationGroup.stockLength),
-    );
-  }, [assignedOptimizationGroup?.optimizationGroupId, assignedOptimizationGroup?.stockLength]);
+  const worksheetOptimizationGroupMap = new Map<
+    string,
+    Pick<OptimizationGroup, 'optimizationGroupId' | 'name' | 'stockLength'>
+  >();
+  for (const worksheet of worksheetDrafts) {
+    worksheetOptimizationGroupMap.set(worksheet.optimizationGroupId, {
+      optimizationGroupId: worksheet.optimizationGroupId,
+      name: worksheet.optimizationGroupName,
+      stockLength: worksheet.stockLength,
+    });
+  }
+  for (const group of optimizationGroups) {
+    worksheetOptimizationGroupMap.set(group.optimizationGroupId, group);
+  }
+  const worksheetOptimizationGroups = Array.from(worksheetOptimizationGroupMap.values());
   const unresolvedImportErrors = activeImportDraft
     ? activeImportDraft.preview.errors.filter((error) =>
+        !stockLengthMaterialErrorCodes.has(error.code) &&
         !activeImportDraft.excludedSourceRows.some((excluded) => excluded.rowId === error.rowId) &&
         !activeImportDraft.partOverrides.some((override) => override.rowId === error.rowId))
     : [];
@@ -254,23 +279,37 @@ export function RequiredPiecesPage({
     publishWorksheetDrafts(worksheets, updatedDraft.worksheet.worksheetName);
   };
 
+  const updateWorksheetDraft = (
+    worksheetName: string,
+    update: (draft: NonNullable<ImportMappingSession['worksheets']>[number]) =>
+      NonNullable<ImportMappingSession['worksheets']>[number],
+  ) => {
+    if (!mappingSession?.worksheets) return;
+    publishWorksheetDrafts(
+      mappingSession.worksheets.map((worksheet) =>
+        worksheet.worksheet.worksheetName === worksheetName ? update(worksheet) : worksheet),
+      worksheetName,
+    );
+  };
+
   const assignSelectedWorksheets = () => {
-    const group = optimizationGroups.find((item) => item.optimizationGroupId === bulkWorksheetGroupId);
+    const group = worksheetOptimizationGroups.find((item) => item.optimizationGroupId === bulkWorksheetGroupId);
     if (!group) return;
     publishWorksheetDrafts(assignSelectedWorksheetsToOptimizationGroup(worksheetDrafts, group));
   };
 
-  const saveSharedStockLength = () => {
-    if (!activeImportDraft || !assignedOptimizationGroup) return;
-    const worksheetNames = worksheetDrafts
-      .filter((item) => item.optimizationGroupId === assignedOptimizationGroup.optimizationGroupId)
-      .map((item) => item.worksheet.worksheetName);
-    const message = `Change the shared Stock Length for ${assignedOptimizationGroup.name}? This updates every assigned Worksheet: ${worksheetNames.join(', ')}.`;
-    if (window.confirm(message)) {
-      runAction(() => onUpdateStockLength(
-        assignedOptimizationGroup.optimizationGroupId,
-        sharedStockLengthDraft || String(assignedOptimizationGroup.stockLength ?? ''),
-      ));
+  const saveWorksheetStockLength = (worksheetName: string) => {
+    const worksheet = worksheetDrafts.find((item) => item.worksheet.worksheetName === worksheetName);
+    if (!worksheet) return;
+    const rawValue = worksheetStockLengthDrafts[worksheetName] ?? String(worksheet.stockLength ?? '');
+    const stockLength = Number(rawValue);
+    const worksheets = worksheetDrafts.map((item) =>
+      item.optimizationGroupId === worksheet.optimizationGroupId
+        ? { ...item, stockLength: Number.isFinite(stockLength) ? stockLength : null }
+        : item);
+    publishWorksheetDrafts(worksheets, worksheetName);
+    if (optimizationGroups.some((group) => group.optimizationGroupId === worksheet.optimizationGroupId)) {
+      runAction(() => onUpdateStockLength(worksheet.optimizationGroupId, rawValue));
     }
   };
 
@@ -343,7 +382,7 @@ export function RequiredPiecesPage({
           <p>Configure Stock Length by Optimization Group, then enter the pieces to cut.</p>
           {message ? <p className="section-note" role="status">{message}</p> : null}
         </div>
-        <label className="project-field stock-length-import__format">
+        <label className="project-field stock-length-import__format stock-length-import__format--compact">
           <span>Length Display</span>
           <select
             aria-label="Length Display"
@@ -425,205 +464,6 @@ export function RequiredPiecesPage({
         ) : null}
       </header>
 
-      <section className="project-card stock-length-import__csv">
-        <div className="project-card__header">
-          <div>
-            <h2>{isWorkbookImport ? 'Import Stock-Length Workbook' : 'Import Stock-Length CSV'}</h2>
-            <p className="section-note">Configure each Worksheet independently, assign an Optimization Group, then review its Required Pieces.</p>
-          </div>
-          <button className="secondary-button" disabled={busy} onClick={() => onImportFile && runAction(onImportFile)} type="button">
-            Import CSV or Workbook
-          </button>
-        </div>
-        {mappingSession && activeImportDraft ? (
-          <div className="stock-length-import__csv-review">
-            {isWorkbookImport ? (
-              <div className="workbook-discovery">
-                <div className="mapping-resolution-list">
-                  {worksheetDrafts.map((draft) => (
-                    <div className="mapping-resolution-card" key={`${draft.worksheet.originalPosition}-${draft.worksheet.worksheetName}`}>
-                      <label className="checkbox-field">
-                        <input
-                          checked={draft.selected}
-                          disabled={busy}
-                          onChange={(event) => publishWorksheetDrafts(
-                            setWorkbookWorksheetSelected(
-                              worksheetDrafts,
-                              draft.worksheet.worksheetName,
-                              event.target.checked,
-                            ),
-                            event.target.checked
-                              ? draft.worksheet.worksheetName
-                              : mappingSession.activeWorksheetName,
-                          )}
-                          type="checkbox"
-                        />
-                        <span>{draft.worksheet.originalPosition}. {draft.worksheet.worksheetName}</span>
-                      </label>
-                      <button
-                        className="secondary-button"
-                        disabled={busy || !draft.selected}
-                        onClick={() => publishWorksheetDrafts(worksheetDrafts, draft.worksheet.worksheetName)}
-                        type="button"
-                      >
-                        {draft.worksheet.worksheetName === activeImportDraft.worksheet.worksheetName ? 'Configuring' : 'Configure'}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-                <div className="form-actions">
-                  <label className="project-field">
-                    <span>Move selected Worksheets to</span>
-                    <select
-                      aria-label="Optimization Group for selected Worksheets"
-                      disabled={busy || selectedWorksheetDrafts.length === 0}
-                      onChange={(event) => setBulkWorksheetGroupId(event.target.value)}
-                      value={bulkWorksheetGroupId}
-                    >
-                      <option value="">Choose an Optimization Group</option>
-                      {optimizationGroups.map((group) => <option key={group.optimizationGroupId} value={group.optimizationGroupId}>{group.name}</option>)}
-                    </select>
-                  </label>
-                  <button className="secondary-button" disabled={busy || !bulkWorksheetGroupId} onClick={assignSelectedWorksheets} type="button">
-                    Assign selected Worksheets
-                  </button>
-                </div>
-              </div>
-            ) : null}
-            <label className="project-field">
-              <span>Optimization Group for {activeImportDraft.worksheet.worksheetName}</span>
-              <select
-                aria-label={`Optimization Group for ${activeImportDraft.worksheet.worksheetName}`}
-                disabled={busy}
-                onChange={(event) => {
-                  const group = optimizationGroups.find((item) => item.optimizationGroupId === event.target.value);
-                  updateActiveImportDraft((draft) => ({
-                    ...draft,
-                    optimizationGroupId: group?.optimizationGroupId ?? '',
-                    optimizationGroupName: group?.name ?? '',
-                  }));
-                }}
-                value={activeImportDraft.optimizationGroupId}
-              >
-                <option value="">Choose an Optimization Group</option>
-                {optimizationGroups.map((group) => (
-                  <option key={group.optimizationGroupId} value={group.optimizationGroupId}>
-                    {group.name}{group.stockLength && group.stockLength > 0 ? ` — ${group.stockLength} in` : ' — Stock Length required'}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {assignedOptimizationGroup ? (
-              <div className="stock-length-import__group-row">
-                <span>Shared by {worksheetDrafts.filter((item) => item.optimizationGroupId === assignedOptimizationGroup.optimizationGroupId).map((item) => item.worksheet.worksheetName).join(', ')}</span>
-                <label>
-                  <span>Stock Length</span>
-                  <input
-                    aria-label={`Shared Stock Length for ${assignedOptimizationGroup.name}`}
-                    disabled={busy}
-                    onChange={(event) => setSharedStockLengthDraft(event.target.value)}
-                    placeholder={String(assignedOptimizationGroup.stockLength ?? '')}
-                    value={sharedStockLengthDraft}
-                  />
-                </label>
-                <button className="secondary-button" disabled={busy} onClick={saveSharedStockLength} type="button">Save shared Stock Length</button>
-              </div>
-            ) : null}
-            {isWorkbookImport ? (
-              <div className="project-form-grid">
-                <label className="project-field">
-                  <span>Heading Range (A1)</span>
-                  <input
-                    aria-label={`Heading Range for ${activeImportDraft.worksheet.worksheetName}`}
-                    disabled={busy}
-                    onChange={(event) => updateActiveImportDraft((draft) => ({
-                      ...draft,
-                      headingRange: event.target.value.toUpperCase(),
-                      headingRangeConfirmed: event.target.value.trim().length > 0,
-                      hasPendingChanges: true,
-                    }))}
-                    value={activeImportDraft.headingRange}
-                  />
-                </label>
-                <button
-                  className="secondary-button"
-                  disabled={busy}
-                  onClick={() => {
-                    const result = copyColumnMappingsFromPreviousSelectedWorksheet(
-                      worksheetDrafts,
-                      activeImportDraft.worksheet.worksheetName,
-                    );
-                    if (!result.error) publishWorksheetDrafts(result.drafts, activeImportDraft.worksheet.worksheetName);
-                  }}
-                  type="button"
-                >Copy Mappings from Previous</button>
-              </div>
-            ) : null}
-            <div className="stock-length-import__mapping-grid">
-              {activeImportDraft.preview.columnMappings.map((mapping) => (
-                <label className="project-field" key={mapping.targetField}>
-                  <span>{mapping.targetField}</span>
-                  <select
-                    aria-label={`CSV column for ${mapping.targetField}`}
-                    disabled={busy}
-                    onChange={(event) => updateActiveImportDraft((draft) => ({
-                      ...draft,
-                      hasPendingChanges: true,
-                      options: {
-                        ...draft.options,
-                        projectKind: 'stockLength',
-                        columnMappings: [
-                          ...draft.options.columnMappings.filter((item) => item.targetField !== mapping.targetField),
-                          ...(event.target.value ? [{ sourceColumn: event.target.value, targetField: mapping.targetField }] : []),
-                        ],
-                      },
-                    }))}
-                    value={mapping.sourceColumn ?? ''}
-                  >
-                    <option value="">Not mapped</option>
-                    {activeImportDraft.preview.availableColumns.map((column) => <option key={column} value={column}>{column}</option>)}
-                  </select>
-                </label>
-              ))}
-            </div>
-            <div className="table-wrap">
-              <table><thead><tr><th>Source Reference</th><th>Quantity</th><th>Length</th><th>Profile Number</th><th>Part Number</th><th>Status</th><th>Actions</th></tr></thead><tbody>
-                {importedRequiredPieces.map((piece) => {
-                  const excluded = activeImportDraft.excludedSourceRows.some((row) => row.rowId === piece.requiredPieceId);
-                  const overridden = activeImportDraft.partOverrides.some((partOverride) => partOverride.rowId === piece.requiredPieceId);
-                  return <tr key={piece.requiredPieceId}><td>{piece.sourceReferences[0] ? `${piece.sourceReferences[0].worksheetName}!${piece.sourceReferences[0].physicalRow}` : '—'}</td><td>{piece.quantityText ?? piece.quantity}</td><td>{piece.lengthText ?? piece.length}</td><td>{piece.profileNumber}</td><td>{piece.partNumber || '—'}</td><td>{excluded ? 'Excluded' : overridden ? 'Corrected' : piece.validationStatus ?? 'valid'}</td><td>{piece.validationStatus === 'error' && !excluded ? <div className="form-actions"><button aria-label={`Correct source row ${piece.sourceReferences[0]?.physicalRow}`} className="secondary-button" onClick={() => beginImportCorrection(piece)} type="button">Correct</button><button aria-label={`Exclude source row ${piece.sourceReferences[0]?.physicalRow}`} className="danger-button" onClick={() => excludeImportedPiece(piece)} type="button">Exclude</button></div> : null}</td></tr>;
-                })}
-              </tbody></table>
-            </div>
-            {importCorrection ? (
-              <div className="stock-length-import__correction">
-                <h3>Correct source row {importCorrection.piece.sourceReferences[0]?.physicalRow}</h3>
-                <div className="project-form-grid stock-length-import__piece-form">
-                  {(['quantity', 'length', 'profileNumber', 'partName', 'finish', 'partNumber'] as const).map((field) => {
-                    const label = {
-                      quantity: 'Quantity', length: 'Length', profileNumber: 'Profile Number',
-                      partName: 'Part Name', finish: 'Finish', partNumber: 'Part Number',
-                    }[field];
-                    return <label className="project-field" key={field}><span>{label}</span><input aria-label={`Corrected ${label}`} disabled={busy} onChange={(event) => setImportCorrection((current) => current ? { ...current, [field]: event.target.value } : current)} value={importCorrection[field]} /></label>;
-                  })}
-                </div>
-                <div className="form-actions">
-                  <button className="primary-button" disabled={busy} onClick={saveImportCorrection} type="button">Save Correction</button>
-                  <button className="secondary-button" disabled={busy} onClick={() => setImportCorrection(null)} type="button">Cancel Correction</button>
-                </div>
-              </div>
-            ) : null}
-            {unresolvedImportErrors.length > 0 ? <p className="section-note" role="alert">Correct or explicitly exclude every invalid Required Piece before finalization.</p> : null}
-            {!assignedOptimizationGroup?.stockLength || assignedOptimizationGroup.stockLength <= 0 ? <p className="section-note">Assign the Worksheet to an Optimization Group with a positive Stock Length.</p> : null}
-            <div className="form-actions">
-              <button className="secondary-button" disabled={busy || !activeImportDraft.hasPendingChanges} onClick={() => onPreviewImportMapping && runAction(() => onPreviewImportMapping(mappingSession))} type="button">Refresh Preview</button>
-              <button className="primary-button" disabled={busy || !canFinalizeImport} onClick={() => onFinalizeImportMapping && runAction(onFinalizeImportMapping)} type="button">{isWorkbookImport ? 'Finalize Workbook Import' : 'Finalize CSV Import'}</button>
-              <button className="secondary-button" disabled={busy} onClick={() => onCancelImportMapping && runAction(onCancelImportMapping)} type="button">Cancel Import</button>
-            </div>
-          </div>
-        ) : <p className="section-note">Choose a CSV to begin an Import Session.</p>}
-      </section>
-
       <section className="project-card stock-length-import__group-create">
         <div className="project-card__header"><h2>Optimization Groups</h2></div>
         <div className="project-form-grid">
@@ -673,8 +513,217 @@ export function RequiredPiecesPage({
         })}
       </section>
 
-      <section className="project-card">
-        <div className="project-card__header"><h2>{draft.requiredPieceId ? 'Edit Required Piece' : 'Add Required Piece'}</h2></div>
+      <section className="project-card stock-length-import__csv">
+        <div className="project-card__header">
+          <div>
+            <h2>{isWorkbookImport ? 'Import Stock-Length Workbook' : 'Import Stock-Length CSV'}</h2>
+            <p className="section-note">Configure each Worksheet independently, assign an Optimization Group, then review its Required Pieces.</p>
+          </div>
+          <button className="secondary-button" disabled={busy} onClick={() => onImportFile && runAction(onImportFile)} type="button">
+            Import CSV or Workbook
+          </button>
+        </div>
+        {mappingSession && activeImportDraft ? (
+          <div className="stock-length-import__csv-review">
+            {isWorkbookImport ? <div className="form-actions">
+              <label className="project-field">
+                <span>Move selected Worksheets to</span>
+                <select
+                  aria-label="Optimization Group for selected Worksheets"
+                  disabled={busy || selectedWorksheetDrafts.length === 0}
+                  onChange={(event) => setBulkWorksheetGroupId(event.target.value)}
+                  value={bulkWorksheetGroupId}
+                >
+                  <option value="">Choose an Optimization Group</option>
+                  {worksheetOptimizationGroups.map((group) => <option key={group.optimizationGroupId} value={group.optimizationGroupId}>{group.name}</option>)}
+                </select>
+              </label>
+              <button className="secondary-button" disabled={busy || !bulkWorksheetGroupId} onClick={assignSelectedWorksheets} type="button">
+                Assign selected Worksheets
+              </button>
+            </div> : null}
+            <div className="mapping-resolution-list">
+              {(isWorkbookImport ? worksheetDrafts : [activeImportDraft]).map((worksheetDraft) => {
+                const worksheetName = worksheetDraft.worksheet.worksheetName;
+                const sourceColumns = worksheetDraft.preview.sourceColumns.length > 0
+                  ? worksheetDraft.preview.sourceColumns
+                  : worksheetDraft.preview.availableColumns.map((column) => ({ address: column, heading: column }));
+                return <div className="mapping-resolution-card" key={`${worksheetDraft.worksheet.originalPosition}-${worksheetName}`}>
+                  <div className="mapping-resolution-card__header">
+                    {isWorkbookImport ? <label className="checkbox-field">
+                      <input
+                        checked={worksheetDraft.selected}
+                        disabled={busy}
+                        onChange={(event) => publishWorksheetDrafts(
+                          setWorkbookWorksheetSelected(worksheetDrafts, worksheetName, event.target.checked),
+                          event.target.checked ? worksheetName : mappingSession.activeWorksheetName,
+                        )}
+                        type="checkbox"
+                      />
+                      <span>{worksheetDraft.worksheet.originalPosition}. {worksheetName}</span>
+                    </label> : <strong>{worksheetName}</strong>}
+                  </div>
+                  {worksheetDraft.selected ? <div className="worksheet-configuration">
+                    <div className="stock-length-import__worksheet-fields">
+                      <label className="project-field">
+                        <span>Optimization Group</span>
+                        <select
+                          aria-label={`Optimization Group for ${worksheetName}`}
+                          disabled={busy}
+                          onChange={(event) => {
+                            const group = worksheetOptimizationGroups.find((item) => item.optimizationGroupId === event.target.value);
+                            updateWorksheetDraft(worksheetName, (current) => ({
+                              ...current,
+                              optimizationGroupId: group?.optimizationGroupId ?? '',
+                              optimizationGroupName: group?.name ?? '',
+                              stockLength: group?.stockLength,
+                            }));
+                          }}
+                          value={worksheetDraft.optimizationGroupId}
+                        >
+                          {worksheetOptimizationGroups.map((group) => <option key={group.optimizationGroupId} value={group.optimizationGroupId}>{group.name}</option>)}
+                        </select>
+                      </label>
+                      <label className="project-field">
+                        <span>Stock Length (in)</span>
+                        <input
+                          aria-label={`Stock Length for ${worksheetName}`}
+                          disabled={busy}
+                          inputMode="decimal"
+                          onChange={(event) => setWorksheetStockLengthDrafts((current) => ({ ...current, [worksheetName]: event.target.value }))}
+                          value={worksheetStockLengthDrafts[worksheetName] ?? String(worksheetDraft.stockLength ?? '')}
+                        />
+                      </label>
+                      <button className="secondary-button" disabled={busy} onClick={() => saveWorksheetStockLength(worksheetName)} type="button">Save Stock Length</button>
+                      {isWorkbookImport ? <label className="project-field">
+                        <span>Heading Range (A1)</span>
+                        <input
+                          aria-label={`Heading Range for ${worksheetName}`}
+                          disabled={busy}
+                          onChange={(event) => updateWorksheetDraft(worksheetName, (current) => ({
+                            ...current,
+                            headingRange: event.target.value.toUpperCase(),
+                            headingRangeConfirmed: event.target.value.trim().length > 0,
+                            hasPendingChanges: true,
+                          }))}
+                          value={worksheetDraft.headingRange}
+                        />
+                      </label> : null}
+                    </div>
+                    {isWorkbookImport ? <button
+                      className="secondary-button"
+                      disabled={busy}
+                      onClick={() => {
+                        const result = copyColumnMappingsFromPreviousSelectedWorksheet(worksheetDrafts, worksheetName);
+                        if (!result.error) publishWorksheetDrafts(result.drafts, worksheetName);
+                      }}
+                      type="button"
+                    >Copy Mappings from Previous</button> : null}
+                    <div className="stock-length-import__mapping-grid">
+                      {worksheetDraft.preview.columnMappings.map((mapping) => {
+                        const selectedSource = worksheetDraft.options.columnMappings.find((item) => item.targetField === mapping.targetField)?.sourceColumn ?? mapping.sourceColumn ?? '';
+                        return <label className="project-field" key={mapping.targetField}>
+                          <span>{mapping.targetField}</span>
+                          <select
+                            aria-label={`${worksheetName} column for ${mapping.targetField}`}
+                            disabled={busy}
+                            onChange={(event) => updateWorksheetDraft(worksheetName, (current) => ({
+                              ...current,
+                              hasPendingChanges: true,
+                              options: {
+                                ...current.options,
+                                projectKind: 'stockLength',
+                                columnMappings: [
+                                  ...current.options.columnMappings.filter((item) => item.targetField !== mapping.targetField),
+                                  ...(event.target.value ? [{ sourceColumn: event.target.value, targetField: mapping.targetField }] : []),
+                                ],
+                              },
+                            }))}
+                            value={selectedSource}
+                          >
+                            <option value="">Not mapped</option>
+                            {sourceColumns.map((column) => <option key={column.address} value={column.address}>{column.address} — {column.heading}</option>)}
+                          </select>
+                        </label>;
+                      })}
+                    </div>
+                    {isWorkbookImport ? <>
+                      <button
+                        aria-expanded={!collapsedWorksheetPreviews.has(worksheetName)}
+                        className="secondary-button"
+                        onClick={() => setCollapsedWorksheetPreviews((current) => {
+                          const next = new Set(current);
+                          if (next.has(worksheetName)) next.delete(worksheetName); else next.add(worksheetName);
+                          return next;
+                        })}
+                        type="button"
+                      >{collapsedWorksheetPreviews.has(worksheetName) ? 'Expand preview' : 'Collapse preview'}</button>
+                      {!collapsedWorksheetPreviews.has(worksheetName) ? <div className="worksheet-preview" role="region" aria-label={`${worksheetName} cell preview`}>
+                        <table><tbody>{(worksheetDraft.worksheet.previewRows ?? []).map((row) => <tr key={row.rowNumber}>
+                          <th scope="row">{row.rowNumber}</th>
+                          {row.cells.map((cell) => <td key={cell.address} title={cell.address}>{cell.value}</td>)}
+                        </tr>)}</tbody></table>
+                      </div> : null}
+                    </> : null}
+                  </div> : null}
+                </div>;
+              })}
+            </div>
+            <div className="table-wrap">
+              <table><thead><tr><th>Source Reference</th><th>Quantity</th><th>Length</th><th>Profile Number</th><th>Part Number</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+                {importedRequiredPieces.map((piece) => {
+                  const excluded = activeImportDraft.excludedSourceRows.some((row) => row.rowId === piece.requiredPieceId);
+                  const overridden = activeImportDraft.partOverrides.some((partOverride) => partOverride.rowId === piece.requiredPieceId);
+                  return <tr key={piece.requiredPieceId}><td>{piece.sourceReferences[0] ? `${piece.sourceReferences[0].worksheetName}!${piece.sourceReferences[0].physicalRow}` : '—'}</td><td>{piece.quantityText ?? piece.quantity}</td><td>{piece.lengthText ?? piece.length}</td><td>{piece.profileNumber}</td><td>{piece.partNumber || '—'}</td><td>{excluded ? 'Excluded' : overridden ? 'Corrected' : piece.validationStatus ?? 'valid'}</td><td>{piece.validationStatus === 'error' && !excluded ? <div className="form-actions"><button aria-label={`Correct source row ${piece.sourceReferences[0]?.physicalRow}`} className="secondary-button" onClick={() => beginImportCorrection(piece)} type="button">Correct</button><button aria-label={`Exclude source row ${piece.sourceReferences[0]?.physicalRow}`} className="danger-button" onClick={() => excludeImportedPiece(piece)} type="button">Exclude</button></div> : null}</td></tr>;
+                })}
+              </tbody></table>
+            </div>
+            {importCorrection ? (
+              <div className="stock-length-import__correction">
+                <h3>Correct source row {importCorrection.piece.sourceReferences[0]?.physicalRow}</h3>
+                <div className="project-form-grid stock-length-import__piece-form">
+                  {(['quantity', 'length', 'profileNumber', 'partName', 'finish', 'partNumber'] as const).map((field) => {
+                    const label = {
+                      quantity: 'Quantity', length: 'Length', profileNumber: 'Profile Number',
+                      partName: 'Part Name', finish: 'Finish', partNumber: 'Part Number',
+                    }[field];
+                    return <label className="project-field" key={field}><span>{label}</span><input aria-label={`Corrected ${label}`} disabled={busy} onChange={(event) => setImportCorrection((current) => current ? { ...current, [field]: event.target.value } : current)} value={importCorrection[field]} /></label>;
+                  })}
+                </div>
+                <div className="form-actions">
+                  <button className="primary-button" disabled={busy} onClick={saveImportCorrection} type="button">Save Correction</button>
+                  <button className="secondary-button" disabled={busy} onClick={() => setImportCorrection(null)} type="button">Cancel Correction</button>
+                </div>
+              </div>
+            ) : null}
+            {unresolvedImportErrors.length > 0 ? <p className="section-note" role="alert">Correct or explicitly exclude every invalid Required Piece before finalization.</p> : null}
+            {!activeImportDraft.stockLength || activeImportDraft.stockLength <= 0 ? <p className="section-note">Set a positive Stock Length for this Worksheet's Optimization Group.</p> : null}
+            <div className="form-actions">
+              <button className="secondary-button" disabled={busy || !activeImportDraft.hasPendingChanges} onClick={() => onPreviewImportMapping && runAction(() => onPreviewImportMapping(mappingSession))} type="button">Refresh Preview</button>
+              <button className="primary-button" disabled={busy || !canFinalizeImport} onClick={() => onFinalizeImportMapping && runAction(onFinalizeImportMapping)} type="button">{isWorkbookImport ? 'Finalize Workbook Import' : 'Finalize CSV Import'}</button>
+              <button className="secondary-button" disabled={busy} onClick={() => onCancelImportMapping && runAction(onCancelImportMapping)} type="button">Cancel Import</button>
+            </div>
+          </div>
+        ) : <p className="section-note">Choose a CSV to begin an Import Session.</p>}
+      </section>
+
+      <section className="project-card stock-length-import__piece-launcher">
+        <div className="project-card__header">
+          <div>
+            <h2>Required Piece entry</h2>
+            <p className="section-note">Add a piece without expanding the main workspace.</p>
+          </div>
+          <button className="primary-button" onClick={() => setPieceDrawerOpen(true)} type="button">Add Required Piece</button>
+        </div>
+      </section>
+
+      {pieceDrawerOpen ? <div className="stock-length-import__drawer-layer">
+        <button aria-label="Dismiss Required Piece drawer" className="stock-length-import__drawer-backdrop" onClick={() => setPieceDrawerOpen(false)} type="button" />
+        <aside aria-label={draft.requiredPieceId ? 'Edit Required Piece' : 'Add Required Piece'} aria-modal="true" className="stock-length-import__piece-drawer" role="dialog">
+        <div className="project-card__header">
+          <h2>{draft.requiredPieceId ? 'Edit Required Piece' : 'Add Required Piece'}</h2>
+          <button aria-label="Close Required Piece drawer" className="secondary-button" onClick={() => setPieceDrawerOpen(false)} type="button">Close</button>
+        </div>
         <div className="project-form-grid stock-length-import__piece-form">
           <label className="project-field">
             <span>Optimization Group</span>
@@ -704,21 +753,22 @@ export function RequiredPiecesPage({
         </div>
         <div className="form-actions">
           <button className="primary-button" disabled={busy} onClick={() => runAction(submitRequiredPiece)} type="button">
-            {draft.requiredPieceId ? 'Save Required Piece' : 'Add Required Piece'}
+            {draft.requiredPieceId ? 'Save Required Piece' : 'Save New Required Piece'}
           </button>
           {draft.requiredPieceId ? <button className="secondary-button" onClick={() => setDraft({ ...emptyDraft, optimizationGroupId: draft.optimizationGroupId })} type="button">Cancel</button> : null}
         </div>
-      </section>
+        </aside>
+      </div> : null}
 
-      <section className="project-card">
+      <section className="project-card stock-length-import__saved-pieces">
         <div className="project-card__header"><h2>Saved Required Pieces</h2></div>
         {optimizationGroups.every((group) => group.requiredPieces.length === 0) ? (
           <p className="section-note">No Required Pieces yet.</p>
         ) : (
-          <div className="table-wrap"><table><thead><tr><th>Optimization Group</th><th>Qty</th><th>Length</th><th>Profile Number</th><th>Finish</th><th>Part Name</th><th>Part Number</th><th>Actions</th></tr></thead><tbody>
+          <div aria-label="Saved Required Pieces table" className="table-wrap stock-length-import__saved-pieces-scroll"><table><thead><tr><th>Optimization Group</th><th>Qty</th><th>Length</th><th>Profile Number</th><th>Finish</th><th>Part Name</th><th>Part Number</th><th>Actions</th></tr></thead><tbody>
             {optimizationGroups.flatMap((group) => group.requiredPieces.map((piece) => {
               const stockGroup = group.stockGroups.find((item) => item.requiredPieceIds.includes(piece.requiredPieceId));
-              return <tr key={piece.requiredPieceId}><td>{group.name}</td><td>{piece.quantity}</td><td>{formatInches(piece.length, inchDisplayFormat)}</td><td>{piece.profileNumber}</td><td>{stockGroup?.finish || piece.finish || 'No finish specified'}</td><td>{piece.partName || '—'}</td><td>{piece.partNumber || '—'}</td><td><div className="table-actions"><button aria-label={`Edit Required Piece ${piece.requiredPieceId}`} className="secondary-button" onClick={() => setDraft(toDraft(group.optimizationGroupId, piece))} type="button">Edit</button><button aria-label={`Delete Required Piece ${piece.requiredPieceId}`} className="danger-button" onClick={() => runAction(() => onDeleteRequiredPiece(group.optimizationGroupId, piece.requiredPieceId))} type="button">Delete</button></div></td></tr>;
+              return <tr key={piece.requiredPieceId}><td>{group.name}</td><td>{piece.quantity}</td><td>{formatInches(piece.length, inchDisplayFormat)}</td><td>{piece.profileNumber}</td><td>{stockGroup?.finish || piece.finish || 'No finish specified'}</td><td>{piece.partName || '—'}</td><td>{piece.partNumber || '—'}</td><td><div className="table-actions"><button aria-label={`Edit Required Piece ${piece.requiredPieceId}`} className="secondary-button" onClick={() => { setDraft(toDraft(group.optimizationGroupId, piece)); setPieceDrawerOpen(true); }} type="button">Edit</button><button aria-label={`Delete Required Piece ${piece.requiredPieceId}`} className="danger-button" onClick={() => runAction(() => onDeleteRequiredPiece(group.optimizationGroupId, piece.requiredPieceId))} type="button">Delete</button></div></td></tr>;
             }))}
           </tbody></table></div>
         )}

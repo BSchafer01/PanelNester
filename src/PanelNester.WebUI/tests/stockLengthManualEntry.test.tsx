@@ -45,6 +45,9 @@ describe('Stock-Length manual entry', () => {
       />,
     );
 
+    expect(screen.getByRole('heading', { name: 'Optimization Groups' }).closest('section')).toHaveClass('stock-length-import__group-create');
+    expect(screen.getByRole('heading', { name: 'Required Piece entry' }).closest('section')).toHaveClass('stock-length-import__piece-launcher');
+    expect(screen.getByLabelText('Saved Required Pieces table')).toHaveClass('stock-length-import__saved-pieces-scroll');
     await user.click(screen.getByRole('button', { name: 'Generate Selected' }));
     expect(onGenerateSelected).toHaveBeenCalledWith('frames');
 
@@ -230,13 +233,14 @@ describe('Stock-Length manual entry', () => {
       />,
     );
 
+    await user.click(screen.getByRole('button', { name: 'Add Required Piece' }));
     await user.type(screen.getByRole('textbox', { name: 'Quantity' }), '3');
     await user.type(screen.getByRole('textbox', { name: 'Length' }), '12 3/8');
     await user.type(screen.getByRole('textbox', { name: 'Profile Number' }), ' H-120 ');
     await user.type(screen.getByRole('textbox', { name: 'Part Name' }), 'Header');
     await user.type(screen.getByRole('textbox', { name: 'Finish' }), 'Clear');
     await user.type(screen.getByRole('textbox', { name: 'Part Number' }), 'P-17');
-    await user.click(screen.getByRole('button', { name: 'Add Required Piece' }));
+    await user.click(screen.getByRole('button', { name: 'Save New Required Piece' }));
 
     expect(onCreateRequiredPiece).toHaveBeenCalledWith({
       type: 'create',
@@ -517,7 +521,7 @@ describe('Stock-Length manual entry', () => {
     expect(partOverride.sourceReferences).toEqual(requiredPiece.sourceReferences);
   });
 
-  it('configures multiple Workbook Worksheets in bulk and confirms a shared Stock Length edit', async () => {
+  it('presents the Workbook import per Worksheet and keeps secondary controls compact', async () => {
     const user = userEvent.setup();
     const onUpdateImportMappingSession = vi.fn();
     const onUpdateStockLength = vi.fn();
@@ -533,12 +537,24 @@ describe('Stock-Length manual entry', () => {
       headingRange: 'A1:C1',
       headingRangeDetectionStatus: 'unique-high-confidence' as const,
       headingRangeCandidates: [],
-      previewRows: [],
+      previewRows: [{
+        rowNumber: 1,
+        cells: [
+          { address: 'A1', columnNumber: 1, value: 'Quantity', isHidden: false, isFormula: false },
+          { address: 'B1', columnNumber: 2, value: 'Length', isHidden: false, isFormula: false },
+          { address: 'C1', columnNumber: 3, value: 'Profile', isHidden: false, isFormula: false },
+        ],
+      }],
     }));
     const makePreview = (index: number) => ({
-      success: true, filePath: 'F:\\stock.xlsx', parts: [], requiredPieces: [], errors: [], warnings: [],
-      availableColumns: ['A', 'B', 'C'], sourceColumns: [], columnMappings: requiredMappings,
-      materialResolutions: [], worksheet: descriptors[index],
+      success: true, filePath: 'F:\\stock.xlsx', parts: [], requiredPieces: [],
+      errors: [{ code: 'material-not-found', message: 'Sheet-only material mapping is unavailable.' }], warnings: [],
+      availableColumns: ['A', 'B', 'C'], sourceColumns: [
+        { address: 'A', heading: 'Quantity' },
+        { address: 'B', heading: 'Length' },
+        { address: 'C', heading: 'Profile' },
+      ], columnMappings: requiredMappings,
+      materialResolutions: [{ sourceMaterialName: 'Sheet Material', status: 'unresolved' as const }], worksheet: descriptors[index],
     });
     const mappingSession: ImportMappingSession = {
       sessionId: 'workbook', filePath: 'F:\\stock.xlsx', preview: makePreview(0),
@@ -548,8 +564,9 @@ describe('Stock-Length manual entry', () => {
       worksheets: descriptors.map((worksheet, index) => ({
         worksheet, selected: true, optimizationGroupId: index === 0 ? 'frames' : 'doors',
         optimizationGroupName: index === 0 ? 'Frames' : 'Doors', preview: makePreview(index),
+        stockLength: index === 0 ? 240 : 120,
         options: { projectKind: 'stockLength', columnMappings: requiredMappings, materialMappings: [] },
-        newMaterials: [], hasPendingChanges: false, headingRange: 'A1:C1', headingRangeConfirmed: true,
+        newMaterials: [], hasPendingChanges: false, headingRange: 'A1:C1', headingRangeConfirmed: false,
         excludedSourceRows: [], ignoredMaterialNames: [], partOverrides: [],
       })),
     };
@@ -576,21 +593,35 @@ describe('Stock-Length manual entry', () => {
       <RequiredPiecesPage {...pageProps} />,
     );
 
-    expect(screen.getByRole('heading', { name: 'Import Stock-Length Workbook' })).toBeInTheDocument();
+    const groupsHeading = screen.getByRole('heading', { name: 'Optimization Groups' });
+    const importHeading = screen.getByRole('heading', { name: 'Import Stock-Length Workbook' });
+    expect(groupsHeading.compareDocumentPosition(importHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText('1. First')).toBeInTheDocument();
     expect(screen.getByText('2. Second')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'First cell preview' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Second cell preview' })).toBeInTheDocument();
+    expect(screen.getAllByRole('option', { name: 'A — Quantity' }).length).toBeGreaterThan(0);
+    expect(screen.getByRole('textbox', { name: 'Stock Length for First' })).toHaveValue('240');
+    expect(screen.getByRole('textbox', { name: 'Stock Length for Second' })).toHaveValue('120');
+    expect(screen.getByRole('button', { name: 'Finalize Workbook Import' })).toBeEnabled();
+    expect(screen.queryByText('Correct or explicitly exclude every invalid Required Piece before finalization.')).not.toBeInTheDocument();
+
+    const addPieceButton = screen.getByRole('button', { name: 'Add Required Piece' });
+    expect(screen.queryByRole('dialog', { name: 'Add Required Piece' })).not.toBeInTheDocument();
+    await user.click(addPieceButton);
+    expect(screen.getByRole('dialog', { name: 'Add Required Piece' })).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'Add Required Piece' })).not.toBeInTheDocument();
+    await user.click(addPieceButton);
+    await user.click(screen.getByRole('button', { name: 'Close Required Piece drawer' }));
+    expect(screen.queryByRole('dialog', { name: 'Add Required Piece' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Length Display').closest('label')).toHaveClass('stock-length-import__format--compact');
+
     await user.selectOptions(screen.getByRole('combobox', { name: 'Optimization Group for selected Worksheets' }), 'frames');
     await user.click(screen.getByRole('button', { name: 'Assign selected Worksheets' }));
     const assigned = onUpdateImportMappingSession.mock.calls.at(-1)![0] as ImportMappingSession;
     expect(assigned.worksheets?.map((draft) => draft.optimizationGroupId)).toEqual(['frames', 'frames']);
-    rerender(<RequiredPiecesPage {...pageProps} mappingSession={assigned} />);
-
-    const stockLength = screen.getByRole('textbox', { name: 'Shared Stock Length for Frames' });
-    await user.clear(stockLength);
-    await user.type(stockLength, '288');
-    await user.click(screen.getByRole('button', { name: 'Save shared Stock Length' }));
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('First, Second'));
-    expect(onUpdateStockLength).toHaveBeenCalledWith('frames', '288');
+    expect(assigned.worksheets?.map((draft) => draft.stockLength)).toEqual([240, 240]);
     confirm.mockRestore();
   });
 });

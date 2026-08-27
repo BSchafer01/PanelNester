@@ -166,7 +166,7 @@ test('bulk Stock-Length assignment adopts one group without changing independent
   assert.deepEqual(assigned.map((draft) => draft.options.columnMappings), mappings);
 });
 
-test('Stock-Length Workbook finalization requires every selected Worksheet to be ready with positive shared Stock Length', () => {
+test('Stock-Length Workbook finalization accepts ready per-Worksheet groups with positive Stock Length', () => {
   const requiredMappings = [
     { sourceColumn: 'A', targetField: 'Quantity' },
     { sourceColumn: 'B', targetField: 'Length' },
@@ -174,24 +174,35 @@ test('Stock-Length Workbook finalization requires every selected Worksheet to be
   ];
   const readyDrafts = createWorkbookWorksheetDrafts('fixture', workbook, preview, options)
     .slice(0, 2)
-    .map((draft) => ({
+    .map((draft, index) => ({
       ...draft,
       selected: true,
-      optimizationGroupId: 'shared',
+      stockLength: index === 0 ? 240 : 120,
       headingRangeConfirmed: true,
       hasPendingChanges: false,
       options: { projectKind: 'stockLength', columnMappings: requiredMappings, materialMappings: [] },
     }));
 
-  assert.equal(canFinalizeStockLengthWorkbook(readyDrafts, [
-    { optimizationGroupId: 'shared', stockLength: 240 },
-  ]), true);
-  assert.equal(canFinalizeStockLengthWorkbook(readyDrafts, [
-    { optimizationGroupId: 'shared', stockLength: 0 },
-  ]), false);
+  assert.equal(canFinalizeStockLengthWorkbook(readyDrafts, []), true);
   assert.equal(canFinalizeStockLengthWorkbook([
-    readyDrafts[0], { ...readyDrafts[1], hasPendingChanges: true },
-  ], [{ optimizationGroupId: 'shared', stockLength: 240 }]), false);
+    { ...readyDrafts[0], headingRangeConfirmed: false, headingRange: 'B10:L10' },
+  ], []), true);
+  assert.equal(canFinalizeStockLengthWorkbook([
+    { ...readyDrafts[0], hasPendingChanges: true },
+  ], []), true);
+  assert.equal(canFinalizeStockLengthWorkbook([
+    {
+      ...readyDrafts[0],
+      preview: {
+        ...readyDrafts[0].preview,
+        materialResolutions: [{ sourceMaterialName: 'Unmapped Material', status: 'unresolved' }],
+        errors: [{ code: 'material-not-found', message: 'Material mapping is not required here.' }],
+      },
+    },
+  ], []), true);
+  assert.equal(canFinalizeStockLengthWorkbook([
+    readyDrafts[0], { ...readyDrafts[1], stockLength: 0 },
+  ], []), false);
   assert.equal(canFinalizeStockLengthWorkbook([
     {
       ...readyDrafts[0],

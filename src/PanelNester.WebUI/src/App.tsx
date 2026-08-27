@@ -3973,6 +3973,7 @@ export default function App() {
                 options: draft.options,
                 optimizationGroupId: draft.optimizationGroupId,
                 optimizationGroupName: draft.optimizationGroupName,
+                stockLength: draft.stockLength,
                 headingRange: draft.headingRange,
                 excludedSourceRows: draft.excludedSourceRows,
                 ignoredMaterialNames: draft.ignoredMaterialNames,

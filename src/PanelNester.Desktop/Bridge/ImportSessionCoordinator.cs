@@ -606,9 +606,10 @@ internal sealed class ImportSessionCoordinator
                 {
                     return;
                 }
-                var materialResolutions = BuildReadyMaterialResolutions(
-                    response,
-                    newMaterials);
+                var projectKind = options?.ProjectKind ?? ProjectKind.Sheet;
+                var materialResolutions = projectKind == ProjectKind.StockLength
+                    ? Array.Empty<ReadyMaterialResolution>()
+                    : BuildReadyMaterialResolutions(response, newMaterials);
                 if (materialResolutions is null)
                 {
                     return;
@@ -643,11 +644,12 @@ internal sealed class ImportSessionCoordinator
                 var mappingSignature = BuildColumnMappingSignature(
                     (selection.Options?.ColumnMappings ?? Array.Empty<ImportColumnMapping>())
                         .Select(mapping => (mapping.TargetField, (string?)mapping.SourceColumn)));
+                var isStockLength = selection.Options?.ProjectKind == ProjectKind.StockLength;
                 if (!_readyWorksheetPreviews.TryGetValue(selection.WorksheetName, out var preview) ||
                     preview.OriginalPosition != selection.OriginalPosition ||
                     !string.Equals(preview.HeadingRange, selection.HeadingRange, StringComparison.OrdinalIgnoreCase) ||
                     !string.Equals(preview.ColumnMappingSignature, mappingSignature, StringComparison.Ordinal) ||
-                    !MaterialResolutionsMatch(preview, selection, newMaterials))
+                    (!isStockLength && !MaterialResolutionsMatch(preview, selection, newMaterials)))
                 {
                     throw new ImportSessionException(
                         "import-worksheet-not-ready",
@@ -655,6 +657,7 @@ internal sealed class ImportSessionCoordinator
                 }
 
                 var unresolvedError = preview.Errors.FirstOrDefault(error =>
+                    !(isStockLength && IsMaterialValidationError(error.Code)) &&
                     !string.Equals(error.Code, "material-not-found", StringComparison.Ordinal) &&
                     !IsResolved(error, selection, preview.SourceReferencesByRowId));
                 if (unresolvedError is not null)
@@ -665,6 +668,11 @@ internal sealed class ImportSessionCoordinator
                 }
             }
         }
+
+        private static bool IsMaterialValidationError(string code) =>
+            string.Equals(code, "material-not-found", StringComparison.Ordinal) ||
+            string.Equals(code, "material-name-required", StringComparison.Ordinal) ||
+            string.Equals(code, "missing-material", StringComparison.Ordinal);
 
         private static bool IsResolved(
             ValidationError error,

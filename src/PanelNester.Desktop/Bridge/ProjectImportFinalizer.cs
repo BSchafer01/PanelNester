@@ -465,6 +465,24 @@ internal static class ProjectImportFinalizer
                 }
                 : group)
             .ToList();
+        var requestedStockLengths = orderedImports
+            .Where(item => item.Selection.StockLength is > 0)
+            .GroupBy(item => item.Selection.OptimizationGroupId, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(item => item.Selection.StockLength!.Value).Distinct().ToArray(),
+                StringComparer.Ordinal);
+        var conflictingGroup = requestedStockLengths.FirstOrDefault(item => item.Value.Length > 1);
+        if (!string.IsNullOrEmpty(conflictingGroup.Key))
+        {
+            throw new ImportSessionException(
+                "import-stock-length-conflict",
+                "Worksheets assigned to the same Optimization Group must use the same Stock Length.");
+        }
+        groups = groups.Select(group =>
+            requestedStockLengths.TryGetValue(group.OptimizationGroupId, out var lengths)
+                ? group with { StockLength = lengths[0] }
+                : group).ToList();
 
         reportProgress?.Invoke(WorkbookImportPhase.CombiningParts, "Combining Required Pieces");
         foreach (var worksheetImport in orderedImports)
@@ -477,9 +495,18 @@ internal static class ProjectImportFinalizer
                 StringComparison.Ordinal));
             if (groupIndex < 0)
             {
-                throw new ImportSessionException(
-                    "import-optimization-group-not-found",
-                    $"Optimization Group '{selection.OptimizationGroupName}' must exist before importing Required Pieces.");
+                var requestedName = string.IsNullOrWhiteSpace(selection.OptimizationGroupName)
+                    ? selection.WorksheetName
+                    : selection.OptimizationGroupName.Trim();
+                groupIndex = groups.Count;
+                groups.Add(new OptimizationGroup
+                {
+                    OptimizationGroupId = selection.OptimizationGroupId,
+                    Name = MakeUniqueGroupName(requestedName, groups),
+                    Order = groupIndex,
+                    Origin = OptimizationGroupOrigin.ImportSource,
+                    StockLength = selection.StockLength
+                });
             }
 
             if (groups[groupIndex].StockLength is null or <= 0)

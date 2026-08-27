@@ -392,6 +392,7 @@ export interface ImportWorksheetSelection {
   options?: ImportOptions | null;
   optimizationGroupId: string;
   optimizationGroupName: string;
+  stockLength?: number | null;
   headingRange: string;
   excludedSourceRows?: ExcludedSourceRow[];
   ignoredMaterialNames?: string[];
@@ -500,6 +501,7 @@ export interface ImportWorksheetDraft {
   selected: boolean;
   optimizationGroupId: string;
   optimizationGroupName: string;
+  stockLength?: number | null;
   preview: ImportFileResponse;
   options: ImportOptions;
   newMaterials: ImportNewMaterialRequest[];

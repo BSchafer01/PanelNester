@@ -411,7 +411,10 @@ public static class DesktopBridgeRegistration
                         foreach (var selection in orderedSelections)
                         {
                             finalization.CancellationToken.ThrowIfCancellationRequested();
-                            finalization.EnsureWorksheetReady(selection, request.NewMaterials);
+                            if (request.Project.ProjectKind != ProjectKind.StockLength)
+                            {
+                                finalization.EnsureWorksheetReady(selection, request.NewMaterials);
+                            }
                         }
 
                         var workbookPreparation = await PrepareImportOptionsAsync(

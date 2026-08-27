@@ -84,7 +84,7 @@ export function createWorkbookWorksheetDrafts(
   firstPreview: ImportFileResponse,
   firstOptions: ImportOptions,
   savedConfiguration?: ImportConfiguration,
-  optimizationGroups: Array<Pick<OptimizationGroup, 'optimizationGroupId' | 'name'>> = [],
+  optimizationGroups: Array<Pick<OptimizationGroup, 'optimizationGroupId' | 'name' | 'stockLength'>> = [],
 ): ImportWorksheetDraft[] {
   const initialWorksheetName =
     workbook.initialWorksheetName || workbook.worksheets[0]?.worksheetName;
@@ -96,6 +96,9 @@ export function createWorkbookWorksheetDrafts(
       saved.worksheetName === worksheet.worksheetName));
   const groupNames = new Map(
     optimizationGroups.map((group) => [group.optimizationGroupId, group.name]),
+  );
+  const groupStockLengths = new Map(
+    optimizationGroups.map((group) => [group.optimizationGroupId, group.stockLength]),
   );
 
   return workbook.worksheets.map((worksheet) => {
@@ -116,6 +119,7 @@ export function createWorkbookWorksheetDrafts(
       selected: saved ? true : !hasRestoredWorksheet && isInitial,
       optimizationGroupId,
       optimizationGroupName: worksheet.worksheetName,
+      stockLength: groupStockLengths.get(optimizationGroupId),
       ...(saved ? {
         optimizationGroupName: groupNames.get(optimizationGroupId) ?? worksheet.worksheetName,
       } : {}),
@@ -141,13 +145,14 @@ export function createWorkbookWorksheetDrafts(
 
 export function assignSelectedWorksheetsToOptimizationGroup(
   drafts: ImportWorksheetDraft[],
-  group: Pick<OptimizationGroup, 'optimizationGroupId' | 'name'>,
+  group: Pick<OptimizationGroup, 'optimizationGroupId' | 'name' | 'stockLength'>,
 ): ImportWorksheetDraft[] {
   return drafts.map((draft) => draft.selected
     ? {
         ...draft,
         optimizationGroupId: group.optimizationGroupId,
         optimizationGroupName: group.name,
+        stockLength: group.stockLength,
       }
     : draft);
 }
@@ -177,10 +182,18 @@ export function canFinalizeStockLengthWorkbook(
       : draft.preview.columnMappings.flatMap((mapping) => mapping.sourceColumn
         ? [{ sourceColumn: mapping.sourceColumn, targetField: mapping.targetField }]
         : []);
-    return Boolean(group?.stockLength && group.stockLength > 0) &&
-      draft.headingRangeConfirmed &&
-      !draft.hasPendingChanges &&
-      draft.preview.errors.every((error) => Boolean(error.rowId && resolvedRowIds.has(error.rowId))) &&
+    const headingRange = /^([A-Z]+)([1-9]\d*):([A-Z]+)([1-9]\d*)$/i.exec(
+      draft.headingRange.trim(),
+    );
+    const hasUsableHeadingRange = Boolean(
+      draft.headingRangeConfirmed || (headingRange && headingRange[2] === headingRange[4]),
+    );
+    const stockLength = draft.stockLength ?? group?.stockLength;
+    return Boolean(stockLength && stockLength > 0) &&
+      hasUsableHeadingRange &&
+      draft.preview.errors.every((error) =>
+        ['material-not-found', 'material-name-required', 'missing-material'].includes(error.code) ||
+        Boolean(error.rowId && resolvedRowIds.has(error.rowId))) &&
       requiredFields.every((field) => mappings.some(
         (mapping) => mapping.targetField === field && mapping.sourceColumn.trim().length > 0,
       ));

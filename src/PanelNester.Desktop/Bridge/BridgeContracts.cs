@@ -384,6 +384,8 @@ public sealed record ImportWorksheetSelection
 
     public string OptimizationGroupName { get; init; } = string.Empty;
 
+    public decimal? StockLength { get; init; }
+
     public string HeadingRange { get; init; } = string.Empty;
 
     public IReadOnlyList<ExcludedSourceRow> ExcludedSourceRows { get; init; } =

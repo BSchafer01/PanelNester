@@ -315,83 +315,80 @@ export function StockLengthResults({
 
   return (
     <div className="results-explorer stock-length-results">
-      <header className="page-header">
-        <div>
-          <p className="eyebrow">Stock-Length Results</p>
-          <h1>{heading}</h1>
-          <p>{overallResult?.description ?? 'Review persisted Cut Plans without combining Optimization Groups.'}</p>
-        </div>
-        <label className="project-field">
-          <span>Optimization Group scope</span>
-          <select aria-label="Optimization Group scope" onChange={(event) => changeOptimizationGroupScope(event.target.value)} value={optimizationGroupScope}>
-            {orderedGroups.length > 1 ? <option value={allOptimizationGroupsScope}>All Optimization Groups</option> : null}
-            {orderedGroups.map((group) => <option key={group.optimizationGroupId} value={group.optimizationGroupId}>{group.order + 1}. {group.name}</option>)}
-          </select>
-        </label>
-        <label className="project-field">
-          <span>Stock Group</span>
-          <select aria-label="Stock Group filter" onChange={(event) => setStockGroupFilter(event.target.value)} value={stockGroupFilter}>
-            <option value={allStockGroupsScope}>All Stock Groups</option>
-            {stockGroupOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </select>
-        </label>
-        <div className="form-actions">
-          <button
-            className="primary-button module-action-button"
-            disabled={!canExportReport || reportBusy}
-            onClick={() => void onExportReport({ stockLengthScope: exportScope })}
-            type="button"
-          >
-            {reportBusy ? 'Exporting…' : 'Export PDF'}
-          </button>
-          <button
-            className="secondary-button module-action-button"
-            disabled={!canExportExcelReport || reportBusy}
-            onClick={() => void onExportExcelReport({ stockLengthScope: exportScope })}
-            type="button"
-          >
-            {reportBusy ? 'Exporting…' : 'Export Excel'}
-          </button>
-        </div>
-      </header>
-      <section className="project-card stock-length-results__states">
-        <div className="project-card__header"><h2>Optimization Group Status</h2></div>
-        <div className="results-summary-grid">
-          {summaries.map((summary) => <div className="summary-card" key={summary.group.optimizationGroupId}>
-            <strong>{summary.group.name}</strong>
-            <span data-result-state>{resultState(summary.group)}</span>
-            <small>{summary.pieceCount} Piece Instances · {summary.stockItemCount} Stock Items · {summary.stockLength} in Stock Length · {summary.pieceLength} in pieces</small>
-            <small>{summary.sawLoss} in Saw Loss · {summary.remainder} in Remainder · {summary.utilization.toFixed(1)}% utilization</small>
-            {summary.group.lastStockLengthGenerationError ? <small>{summary.group.lastStockLengthGenerationError.message}</small> : null}
-            {summary.group.requiredPieces.length === 0 ? <small>Add Piece Instances to generate a Cut Plan.</small> : null}
-            {summary.group.requiredPieces.length > 0 && summary.group.resultStatus !== 'valid' && !summary.group.lastStockLengthGenerationError ? <small>Generate a Cut Plan from Required Pieces.</small> : null}
-            {summary.group.resultStatus !== 'valid' && onReviewOptimizationGroup ? <button className="secondary-button" onClick={() => onReviewOptimizationGroup(summary.group.optimizationGroupId)} type="button">{summary.group.requiredPieces.length === 0 ? 'Add Piece Instances' : 'Review Required Pieces'}</button> : null}
-            {summary.plans.map((plan) => {
-              const planItems = plan.stockItems;
-              const planPieceCount = planItems.reduce((total, item) => total + item.cutSequence.length, 0) + plan.unplacedPieceInstances.length;
-              const planPieceLength = planItems.reduce((total, item) => total + item.pieceLength, 0);
-              const planSawLoss = planItems.reduce((total, item) => total + item.sawLoss, 0);
-              const planRemainder = planItems.reduce((total, item) => total + item.remainder, 0);
-              const planStockLength = planItems.reduce((total, item) => total + item.stockLength, 0);
-              return <div className="stock-group-summary" key={`${summary.group.optimizationGroupId}\u0000${plan.cutPlanId}`}>
-                <strong>{plan.stockGroup.profileNumber} — {plan.stockGroup.finish || 'No finish specified'}</strong>
-                <span>{formatCutPlanStatus(plan.status)}</span>
-                <small>{planPieceCount} Piece Instances · {planItems.length} Stock Items · {planStockLength} in Stock Length · {planPieceLength} in pieces · {planSawLoss} in Saw Loss · {planRemainder} in Remainder · {(planStockLength > 0 ? planPieceLength / planStockLength * 100 : 0).toFixed(1)}% utilization</small>
-              </div>;
-            })}
-          </div>)}
-        </div>
-      </section>
-      {visibleStockItems.length > 0 ? (
-        <>
-          <section className="project-card">
+      <div className="stock-length-results__workspace">
+        <div className="stock-length-results__details">
+          <header className="page-header stock-length-results__header">
+            <div>
+              <p className="eyebrow">Stock-Length Results</p>
+              <h1>{heading}</h1>
+              <p>{overallResult?.description ?? 'Review persisted Cut Plans without combining Optimization Groups.'}</p>
+            </div>
+            <label className="project-field">
+              <span>Optimization Group scope</span>
+              <select aria-label="Optimization Group scope" onChange={(event) => changeOptimizationGroupScope(event.target.value)} value={optimizationGroupScope}>
+                {orderedGroups.length > 1 ? <option value={allOptimizationGroupsScope}>All Optimization Groups</option> : null}
+                {orderedGroups.map((group) => <option key={group.optimizationGroupId} value={group.optimizationGroupId}>{group.order + 1}. {group.name}</option>)}
+              </select>
+            </label>
+            <label className="project-field">
+              <span>Stock Group</span>
+              <select aria-label="Stock Group filter" onChange={(event) => setStockGroupFilter(event.target.value)} value={stockGroupFilter}>
+                <option value={allStockGroupsScope}>All Stock Groups</option>
+                {stockGroupOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </label>
+            <div className="form-actions">
+              <button className="primary-button module-action-button" disabled={!canExportReport || reportBusy} onClick={() => void onExportReport({ stockLengthScope: exportScope })} type="button">
+                {reportBusy ? 'Exporting…' : 'Export PDF'}
+              </button>
+              <button className="secondary-button module-action-button" disabled={!canExportExcelReport || reportBusy} onClick={() => void onExportExcelReport({ stockLengthScope: exportScope })} type="button">
+                {reportBusy ? 'Exporting…' : 'Export Excel'}
+              </button>
+            </div>
+          </header>
+          <section className="project-card stock-length-results__states">
+            <div className="project-card__header"><h2>Optimization Group Status</h2></div>
+            <div className="results-summary-grid">
+              {summaries.map((summary) => <div className="summary-card" key={summary.group.optimizationGroupId}>
+                <strong>{summary.group.name}</strong>
+                <span data-result-state>{resultState(summary.group)}</span>
+                <small>{summary.pieceCount} Piece Instances · {summary.stockItemCount} Stock Items · {summary.stockLength} in Stock Length · {summary.pieceLength} in pieces</small>
+                <small>{summary.sawLoss} in Saw Loss · {summary.remainder} in Remainder · {summary.utilization.toFixed(1)}% utilization</small>
+                {summary.group.lastStockLengthGenerationError ? <small>{summary.group.lastStockLengthGenerationError.message}</small> : null}
+                {summary.group.requiredPieces.length === 0 ? <small>Add Piece Instances to generate a Cut Plan.</small> : null}
+                {summary.group.requiredPieces.length > 0 && summary.group.resultStatus !== 'valid' && !summary.group.lastStockLengthGenerationError ? <small>Generate a Cut Plan from Required Pieces.</small> : null}
+                {summary.group.resultStatus !== 'valid' && onReviewOptimizationGroup ? <button className="secondary-button" onClick={() => onReviewOptimizationGroup(summary.group.optimizationGroupId)} type="button">{summary.group.requiredPieces.length === 0 ? 'Add Piece Instances' : 'Review Required Pieces'}</button> : null}
+                {summary.plans.map((plan) => {
+                  const planItems = plan.stockItems;
+                  const planPieceCount = planItems.reduce((total, item) => total + item.cutSequence.length, 0) + plan.unplacedPieceInstances.length;
+                  const planPieceLength = planItems.reduce((total, item) => total + item.pieceLength, 0);
+                  const planSawLoss = planItems.reduce((total, item) => total + item.sawLoss, 0);
+                  const planRemainder = planItems.reduce((total, item) => total + item.remainder, 0);
+                  const planStockLength = planItems.reduce((total, item) => total + item.stockLength, 0);
+                  return <div className="stock-group-summary" key={`${summary.group.optimizationGroupId}\u0000${plan.cutPlanId}`}>
+                    <strong>{plan.stockGroup.profileNumber} — {plan.stockGroup.finish || 'No finish specified'}</strong>
+                    <span>{formatCutPlanStatus(plan.status)}</span>
+                    <small>{planPieceCount} Piece Instances · {planItems.length} Stock Items · {planStockLength} in Stock Length · {planPieceLength} in pieces · {planSawLoss} in Saw Loss · {planRemainder} in Remainder · {(planStockLength > 0 ? planPieceLength / planStockLength * 100 : 0).toFixed(1)}% utilization</small>
+                  </div>;
+                })}
+              </div>)}
+            </div>
+          </section>
+          <div className="stock-length-results__records">
+            {visibleStockItems.length > 0 ? <section className="project-card stock-length-results__stock-items">
             <div className="project-card__header"><h2>Stock Items</h2>{overallResult ? <StatusPill label={formatCutPlanStatus(overallResult.status)} tone={overallResult.status === 'complete' ? 'ok' : overallResult.status === 'partial' ? 'warn' : 'error'} /> : null}</div>
             <label className="project-field stock-length-results__search"><span>Search Results</span><input aria-label="Search Results" onChange={(event) => setSearchQuery(event.target.value)} type="search" value={searchQuery} /></label>
             {searchResults.length > 0 ? <div className="stock-length-results__search-results">{searchResults.map(({ entry, piece }) => <button aria-label={`${piece.partNumber || piece.profileNumber}, ${piece.partName || 'Unnamed Piece Instance'}, ${sourceReferenceLabel(piece) || 'No Source Reference'}`} className="secondary-button" key={`${entry.key}\u0000${piece.pieceInstanceId}`} onClick={() => { setSelectedStockItemKey(entry.key); setSelectedPieceInstanceId(piece.pieceInstanceId); }} type="button">{piece.partNumber || piece.profileNumber} · {piece.partName || 'Unnamed'} · {sourceReferenceLabel(piece) || 'No source'}</button>)}</div> : null}
-            <div className="table-wrap"><table><thead><tr>{optimizationGroupScope === allOptimizationGroupsScope ? <th>Optimization Group</th> : null}<th>Stock Item</th><th>Profile Number</th><th>Finish</th><th>Piece Count</th><th>Stock Length</th><th>Piece Length</th><th>Saw Loss</th><th>Remainder</th><th>Utilization</th><th>Status</th></tr></thead><tbody>
+            <div aria-label="Stock Items table" className="table-wrap stock-length-results__table-scroll"><table><thead><tr>{optimizationGroupScope === allOptimizationGroupsScope ? <th>Optimization Group</th> : null}<th>Stock Item</th><th>Profile Number</th><th>Finish</th><th>Piece Count</th><th>Stock Length</th><th>Piece Length</th><th>Saw Loss</th><th>Remainder</th><th>Utilization</th><th>Status</th></tr></thead><tbody>
               {visibleStockItems.map(({ group, plan, item, key }) => <tr aria-label={`Stock Item ${item.stockItemNumber}, ${group.name}`} aria-selected={selectedStockItem?.key === key} key={key} onClick={() => setSelectedStockItemKey(key)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setSelectedStockItemKey(key); }} tabIndex={0}>{optimizationGroupScope === allOptimizationGroupsScope ? <td>{group.name}</td> : null}<td>{item.stockItemNumber}</td><td>{plan.stockGroup.profileNumber}</td><td>{plan.stockGroup.finish || 'No finish specified'}</td><td>{item.cutSequence.length}</td><td>{item.stockLength} in</td><td>{item.pieceLength} in</td><td>{item.sawLoss} in</td><td>{item.remainder} in</td><td>{item.utilizationPercent.toFixed(1)}%</td><td>{formatCutPlanStatus(plan.status)}</td></tr>)}
             </tbody></table></div>
-          </section>
+            </section> : <div className="empty-state"><strong>No Stock Items in scope</strong><span>Choose another scope or generate the Optimization Groups that need work.</span></div>}
+            <section className="project-card stock-length-results__unplaced"><div className="project-card__header"><h2>Unplaced{optimizationGroupScope === allOptimizationGroupsScope ? ` (${unplaced.length} project-wide)` : ` (${unplaced.length})`}</h2></div>
+              {unplaced.length > 0 ? <div className="table-wrap stock-length-results__table-scroll"><table><thead><tr><th>Optimization Group</th><th>Stock Group</th><th>Piece Instance</th><th>Length</th><th>Source Reference</th><th>Reason</th></tr></thead><tbody>{unplaced.map(({ group, plan, item }) => <tr key={`${group.optimizationGroupId}\u0000${plan.cutPlanId}\u0000${item.pieceInstance.pieceInstanceId}`}><td>{group.name}</td><td>{plan.stockGroup.profileNumber} — {plan.stockGroup.finish || 'No finish specified'}</td><td>{item.pieceInstance.pieceInstanceId}</td><td>{item.pieceInstance.length} in</td><td>{sourceReferenceLabel(item.pieceInstance) || '—'}</td><td>{item.reasonDescription}</td></tr>)}</tbody></table></div> : <p className="section-note">Every current Piece Instance was placed.</p>}
+            </section>
+          </div>
+        </div>
+        <div aria-label="Optimization preview" className="stock-length-results__preview">
           {selectedStockItem ? (
             <StockItemViewer
               finish={selectedStockItem.plan.stockGroup.finish}
@@ -401,12 +398,9 @@ export function StockLengthResults({
               selectedPieceInstanceId={selectedPieceInstanceId}
               stockItem={selectedStockItem.item}
             />
-          ) : null}
-        </>
-      ) : <div className="empty-state"><strong>No Stock Items in scope</strong><span>Choose another scope or generate the Optimization Groups that need work.</span></div>}
-      <section className="project-card"><div className="project-card__header"><h2>Unplaced{optimizationGroupScope === allOptimizationGroupsScope ? ` (${unplaced.length} project-wide)` : ` (${unplaced.length})`}</h2></div>
-        {unplaced.length > 0 ? <div className="table-wrap"><table><thead><tr><th>Optimization Group</th><th>Stock Group</th><th>Piece Instance</th><th>Length</th><th>Source Reference</th><th>Reason</th></tr></thead><tbody>{unplaced.map(({ group, plan, item }) => <tr key={`${group.optimizationGroupId}\u0000${plan.cutPlanId}\u0000${item.pieceInstance.pieceInstanceId}`}><td>{group.name}</td><td>{plan.stockGroup.profileNumber} — {plan.stockGroup.finish || 'No finish specified'}</td><td>{item.pieceInstance.pieceInstanceId}</td><td>{item.pieceInstance.length} in</td><td>{sourceReferenceLabel(item.pieceInstance) || '—'}</td><td>{item.reasonDescription}</td></tr>)}</tbody></table></div> : <p className="section-note">Every current Piece Instance was placed.</p>}
-      </section>
+          ) : <div className="empty-state"><strong>No Stock Item selected</strong><span>Choose a Stock Item to open its optimization preview.</span></div>}
+        </div>
+      </div>
     </div>
   );
 }
