@@ -1352,6 +1352,7 @@ export interface ExportPdfReportRequest {
   filePath?: string | null;
   suggestedFileName?: string | null;
   companyLogoPath?: string | null;
+  stockLengthScope?: StockLengthReportScope | null;
 }
 
 export interface ExportPdfReportResponse {

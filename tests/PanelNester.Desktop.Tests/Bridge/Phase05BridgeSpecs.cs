@@ -63,6 +63,43 @@ public sealed class Phase05BridgeSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Stock_Length_PDF_export_uses_the_visible_scope_and_normal_save_dialog()
+    {
+        Directory.CreateDirectory(_workspacePath);
+        var pdfPath = Path.Combine(_workspacePath, "visible-cut-plans.pdf");
+        var dialogs = new RecordingFileDialogService(savePaths: [pdfPath]);
+        var dispatcher = CreateDispatcher(dialogs, new QuestPdfReportExporter());
+        var project = new Project
+        {
+            ProjectKind = ProjectKind.StockLength,
+            Metadata = new ProjectMetadata { ProjectName = "Bridge Stock Report" },
+            State = new ProjectState
+            {
+                OptimizationGroups =
+                [
+                    StockLengthGroup("frames", "Frames", 0, "P-100", "Clear"),
+                    StockLengthGroup("doors", "Doors", 1, "P-200", "Bronze")
+                ]
+            }
+        };
+
+        var response = await DispatchAsync<ExportPdfReportResponse>(
+            dispatcher,
+            BridgeMessageTypes.ExportPdfReport,
+            new ExportPdfReportRequest(
+                project,
+                StockLengthScope: new StockLengthReportScope { OptimizationGroupId = "frames" }));
+
+        Assert.True(response.Success);
+        Assert.Equal(pdfPath, response.FilePath);
+        Assert.True(File.Exists(pdfPath));
+        Assert.Contains(dialogs.SaveRequests, request =>
+            request.DefaultExtension == ".pdf" && request.Title?.Contains("PDF", StringComparison.Ordinal) == true);
+        var bytes = await File.ReadAllBytesAsync(pdfPath);
+        Assert.StartsWith("%PDF-", Encoding.ASCII.GetString(bytes, 0, Math.Min(bytes.Length, 5)));
+    }
+
+    [Fact]
     public void Phase_five_bridge_message_names_follow_the_existing_request_response_pattern()
     {
         var responseTypes = Phase05BridgeExpectations.MessageTypes

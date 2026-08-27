@@ -83,8 +83,10 @@ interface StockLengthResultsProps {
   activeOptimizationGroupId?: string;
   onSelectOptimizationGroup: (optimizationGroupId: string) => void;
   onReviewOptimizationGroup?: (optimizationGroupId: string) => void;
+  canExportReport?: boolean;
   canExportExcelReport?: boolean;
   reportBusy?: boolean;
+  onExportReport?: (overrides?: ReportExportOverrides) => Promise<void>;
   onExportExcelReport?: (overrides?: ReportExportOverrides) => Promise<void>;
 }
 
@@ -120,8 +122,10 @@ export function StockLengthResults({
   activeOptimizationGroupId,
   onSelectOptimizationGroup,
   onReviewOptimizationGroup,
+  canExportReport = false,
   canExportExcelReport = false,
   reportBusy = false,
+  onExportReport = async () => undefined,
   onExportExcelReport = async () => undefined,
 }: StockLengthResultsProps) {
   const orderedGroups = useMemo(() => [...optimizationGroups]
@@ -331,14 +335,24 @@ export function StockLengthResults({
             {stockGroupOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
         </label>
-        <button
-          className="secondary-button module-action-button"
-          disabled={!canExportExcelReport || reportBusy}
-          onClick={() => void onExportExcelReport({ stockLengthScope: exportScope })}
-          type="button"
-        >
-          {reportBusy ? 'Exporting…' : 'Export Excel'}
-        </button>
+        <div className="form-actions">
+          <button
+            className="primary-button module-action-button"
+            disabled={!canExportReport || reportBusy}
+            onClick={() => void onExportReport({ stockLengthScope: exportScope })}
+            type="button"
+          >
+            {reportBusy ? 'Exporting…' : 'Export PDF'}
+          </button>
+          <button
+            className="secondary-button module-action-button"
+            disabled={!canExportExcelReport || reportBusy}
+            onClick={() => void onExportExcelReport({ stockLengthScope: exportScope })}
+            type="button"
+          >
+            {reportBusy ? 'Exporting…' : 'Export Excel'}
+          </button>
+        </div>
       </header>
       <section className="project-card stock-length-results__states">
         <div className="project-card__header"><h2>Optimization Group Status</h2></div>
@@ -1105,7 +1119,7 @@ export function ResultsPage({
     : 'Waiting for a nesting result';
 
   if (projectKind === 'stockLength') {
-    return <StockLengthResults projectId={projectId} optimizationGroups={optimizationGroups} activeOptimizationGroupId={activeOptimizationGroupId} onSelectOptimizationGroup={onSelectOptimizationGroup} onReviewOptimizationGroup={onReviewOptimizationGroup} canExportExcelReport={canExportExcelReport} reportBusy={reportBusy} onExportExcelReport={onExportExcelReport} />;
+    return <StockLengthResults projectId={projectId} optimizationGroups={optimizationGroups} activeOptimizationGroupId={activeOptimizationGroupId} onSelectOptimizationGroup={onSelectOptimizationGroup} onReviewOptimizationGroup={onReviewOptimizationGroup} canExportReport={canExportReport} canExportExcelReport={canExportExcelReport} reportBusy={reportBusy} onExportReport={onExportReport} onExportExcelReport={onExportExcelReport} />;
   }
 
   return (

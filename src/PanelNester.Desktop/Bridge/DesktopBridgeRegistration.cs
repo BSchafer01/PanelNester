@@ -1469,24 +1469,39 @@ public static class DesktopBridgeRegistration
 
                     try
                     {
-                        var reportData = await reportDataService
-                            .BuildReportDataAsync(
-                                new ReportDataRequest
-                                {
-                                    Project = request.Project,
-                                    BatchResult = request.BatchResult
-                                },
-                                cancellationToken)
-                            .ConfigureAwait(false);
                         var logoPath = ResolveCompanyLogoPath(request.CompanyLogoPath, desktopAppSettingsStore);
-                        reportData = reportData with
+                        if (request.Project.ProjectKind == ProjectKind.StockLength)
                         {
-                            CompanyLogoPath = logoPath
-                        };
-
-                        await pdfReportExporter
-                            .ExportAsync(reportData, filePath, cancellationToken)
-                            .ConfigureAwait(false);
+                            var stockLengthReport = await new StockLengthReportDataService()
+                                .BuildAsync(
+                                    new StockLengthReportDataRequest
+                                    {
+                                        Project = request.Project,
+                                        Scope = request.StockLengthScope ?? new StockLengthReportScope()
+                                    },
+                                    cancellationToken)
+                                .ConfigureAwait(false);
+                            stockLengthReport = stockLengthReport with { CompanyLogoPath = logoPath };
+                            await new QuestPdfStockLengthReportExporter()
+                                .ExportAsync(stockLengthReport, filePath, cancellationToken)
+                                .ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            var reportData = await reportDataService
+                                .BuildReportDataAsync(
+                                    new ReportDataRequest
+                                    {
+                                        Project = request.Project,
+                                        BatchResult = request.BatchResult
+                                    },
+                                    cancellationToken)
+                                .ConfigureAwait(false);
+                            reportData = reportData with { CompanyLogoPath = logoPath };
+                            await pdfReportExporter
+                                .ExportAsync(reportData, filePath, cancellationToken)
+                                .ConfigureAwait(false);
+                        }
 
                         var message = $"Exported PDF report to '{Path.GetFileName(filePath)}'.";
 

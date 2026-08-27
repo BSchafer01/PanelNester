@@ -49,6 +49,7 @@ public sealed class StockLengthReportDataService
 
         return Task.FromResult(new StockLengthReportData
         {
+            Settings = request.Project.Settings.ReportSettings,
             ProjectMetadata = request.Project.Metadata,
             InchDisplayFormat = request.Project.Settings.InchDisplayFormat,
             Scope = request.Scope,

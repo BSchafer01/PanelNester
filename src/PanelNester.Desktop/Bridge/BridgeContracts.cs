@@ -895,7 +895,8 @@ public sealed record ExportPdfReportRequest(
     BatchNestResponse? BatchResult = null,
     string? FilePath = null,
     string? SuggestedFileName = null,
-    string? CompanyLogoPath = null);
+    string? CompanyLogoPath = null,
+    StockLengthReportScope? StockLengthScope = null);
 
 public sealed record ExportPdfReportResponse(bool Success, string? FilePath, BridgeError? Error, string? Message)
 {

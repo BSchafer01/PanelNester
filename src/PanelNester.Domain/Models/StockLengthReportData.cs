@@ -30,6 +30,10 @@ public sealed record StockLengthReportDataRequest
 
 public sealed record StockLengthReportData
 {
+    public string? CompanyLogoPath { get; init; }
+
+    public ReportSettings Settings { get; init; } = new();
+
     public ProjectMetadata ProjectMetadata { get; init; } = new();
 
     public InchDisplayFormat InchDisplayFormat { get; init; } = InchDisplayFormat.Decimal;

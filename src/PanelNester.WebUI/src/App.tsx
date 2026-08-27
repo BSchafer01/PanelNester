@@ -4710,7 +4710,7 @@ export default function App() {
       return;
     }
 
-    if (!hasResult) {
+    if (state.projectKind !== 'stockLength' && !hasResult) {
       dispatch({
         type: 'report-operation-failed',
         message: 'Run nesting before exporting a PDF report.',
@@ -4738,6 +4738,7 @@ export default function App() {
         batchResult: project.state.lastBatchNestingResult ?? null,
         filePath: null,
         companyLogoPath: overrides?.companyLogoPath ?? undefined,
+        stockLengthScope: overrides?.stockLengthScope ?? null,
       });
 
       if (!response.success) {
