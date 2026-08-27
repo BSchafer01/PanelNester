@@ -103,6 +103,9 @@ export function StockItemViewer({
   const [internalSelection, setInternalSelection] = useState<string>();
   const [collapsed, setCollapsed] = useState(readCollapsedState);
   const [tooltip, setTooltip] = useState<string>();
+  const [cutSequencePlacement, setCutSequencePlacement] = useState<'overlay' | 'below'>(
+    () => window.innerWidth <= 900 ? 'below' : 'overlay',
+  );
   const segments = useMemo(() => buildSegments(stockItem, pieceInstances), [pieceInstances, stockItem]);
   const isSelectionControlled = onSelectPieceInstance !== undefined;
   const selection = isSelectionControlled ? selectedPieceInstanceId : internalSelection;
@@ -120,6 +123,14 @@ export function StockItemViewer({
     controlsRef.current?.update();
   }, []);
 
+  useEffect(() => {
+    const updatePlacement = () => setCutSequencePlacement(
+      window.innerWidth <= 900 ? 'below' : 'overlay',
+    );
+    window.addEventListener('resize', updatePlacement);
+    return () => window.removeEventListener('resize', updatePlacement);
+  }, []);
+
   const fitView = useCallback(() => {
     const camera = cameraRef.current;
     const controls = controlsRef.current;
@@ -127,7 +138,7 @@ export function StockItemViewer({
     if (!camera || !controls || !canvas) return;
     const width = Math.max(canvas.clientWidth, 1);
     const height = Math.max(canvas.clientHeight, 1);
-    const overlaySafeArea = width <= 900 ? 0 : Math.min(0.36, 340 / width);
+    const overlaySafeArea = cutSequencePlacement === 'below' ? 0 : Math.min(0.36, 340 / width);
     const framedWidth = (stockItem.stockLength + stockPadding * 2) / Math.max(1 - overlaySafeArea, 0.5);
     const framedHeight = Math.max(stockBarHeight + stockPadding * 2, framedWidth / (width / height));
     camera.left = -framedWidth / 2;
@@ -141,7 +152,7 @@ export function StockItemViewer({
     camera.updateProjectionMatrix();
     controls.update();
     rendererRef.current?.setSize(width, height, false);
-  }, [stockItem.stockLength]);
+  }, [cutSequencePlacement, stockItem.stockLength]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -272,7 +283,7 @@ export function StockItemViewer({
         <span onMouseEnter={() => setTooltip(`${stockItem.sawLoss} in consumed by ${kerfCount} kerf${kerfCount === 1 ? '' : 's'}`)} onMouseLeave={() => setTooltip(undefined)}><i className="stock-legend__saw-loss" />Saw Loss <small>Striped gaps</small></span>
         <span onMouseEnter={() => setTooltip(`${stockItem.remainder} in remains after all cuts`)} onMouseLeave={() => setTooltip(undefined)}><i className="stock-legend__remainder" />Remainder <small>Dotted tail</small></span>
       </div>
-      <div className="stock-item-viewer__surface">
+      <div className="stock-item-viewer__surface" data-cut-sequence-placement={cutSequencePlacement}>
         <canvas
           aria-label={`Proportional schematic for Stock Item ${stockItem.stockItemNumber}`}
           className="stock-item-viewer__canvas"

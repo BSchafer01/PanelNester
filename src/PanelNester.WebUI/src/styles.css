@@ -3771,6 +3771,26 @@ td {
   font-weight: 700;
 }
 
+.stock-item-viewer__surface[data-cut-sequence-placement="below"] {
+  display: grid;
+  height: auto;
+  overflow: visible;
+}
+
+.stock-item-viewer__surface[data-cut-sequence-placement="below"] .stock-item-viewer__canvas {
+  height: 320px;
+}
+
+.stock-item-viewer__surface[data-cut-sequence-placement="below"] .cut-sequence-card {
+  position: static;
+  width: auto;
+  max-height: 320px;
+  border-right: none;
+  border-bottom: none;
+  border-left: none;
+  box-shadow: none;
+}
+
 @media (max-width: 720px) {
   .module-hero {
     padding: 20px 18px;

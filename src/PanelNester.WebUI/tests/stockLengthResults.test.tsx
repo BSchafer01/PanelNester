@@ -217,6 +217,7 @@ describe('Stock-Length Results', () => {
 
   it('keeps Cut Sequence selection and scroll state when the responsive layout changes', async () => {
     const user = userEvent.setup();
+    const originalWidth = window.innerWidth;
     const manyPieces = Array.from({ length: 12 }, (_, index): PieceInstance => ({
       ...pieces[index % pieces.length],
       pieceInstanceId: `piece-${index + 1}:instance-1`,
@@ -225,6 +226,8 @@ describe('Stock-Length Results', () => {
     }));
     render(<StockItemViewer finish="Clear" pieceInstances={manyPieces} profileNumber="P-100" stockItem={stockItem({ cutSequence: manyPieces, pieceLength: 60, remainder: 58.625, sawLoss: 1.375 })} />);
     const card = screen.getByLabelText('Cut Sequence');
+    const surface = card.parentElement!;
+    expect(surface).toHaveAttribute('data-cut-sequence-placement', 'overlay');
     const rows = card.querySelector<HTMLElement>('.cut-sequence-card__rows')!;
     rows.scrollTop = 72;
     await user.click(screen.getByRole('button', { name: /Cut 6.*P-6.*5 in/ }));
@@ -233,8 +236,11 @@ describe('Stock-Length Results', () => {
     fireEvent(window, new Event('resize'));
 
     expect(screen.getByLabelText('Cut Sequence')).toBe(card);
+    expect(surface).toHaveAttribute('data-cut-sequence-placement', 'below');
     expect(rows.scrollTop).toBe(72);
     expect(screen.getByRole('button', { name: /Cut 6.*P-6.*5 in/ })).toHaveAttribute('aria-pressed', 'true');
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth });
+    fireEvent(window, new Event('resize'));
   });
 
   it('shows ordered Stock Items with core metrics status and Unplaced details', () => {
