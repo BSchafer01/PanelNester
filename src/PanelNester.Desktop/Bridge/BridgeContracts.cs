@@ -45,6 +45,7 @@ public static class BridgeMessageTypes
     public const string UpdateOptimizationGroups = "update-optimization-groups";
     public const string UpdateRequiredPieces = "update-required-pieces";
     public const string GenerateSelectedCutPlan = "generate-selected-cut-plan";
+    public const string GenerateSelectedCutPlans = "generate-selected-cut-plans";
     public const string GenerateAllStaleCutPlans = "generate-all-stale-cut-plans";
     public const string CancelCutPlanGeneration = "cancel-cut-plan-generation";
     public const string GetCutPlanGenerationProgress = "get-cut-plan-generation-progress";
@@ -355,6 +356,10 @@ public sealed record BeginImportSessionRequest
 
     public string? ImportSourcePath { get; init; }
 
+    public string? ImportSourceFileName { get; init; }
+
+    public string? ImportSourceContentBase64 { get; init; }
+
     public ProjectKind ProjectKind { get; init; } = ProjectKind.Sheet;
 }
 
@@ -456,6 +461,8 @@ public sealed record ImportSessionResponse(
 {
     public IReadOnlyList<RequiredPiece> RequiredPieces { get; init; } = Array.Empty<RequiredPiece>();
 
+    public ImportResultCounts? ResultCounts { get; init; }
+
     public WorkbookDiscovery? Workbook { get; init; }
 
     public IReadOnlyList<ImportSourceColumn> SourceColumns { get; init; } = Array.Empty<ImportSourceColumn>();
@@ -496,6 +503,16 @@ public sealed record ImportSessionResponse(
             failure.ResponseMessage);
     }
 }
+
+public sealed record ImportResultCounts(
+    int SourceRowCount,
+    int ValidSourceRowCount,
+    int OutputEntryCount,
+    int TotalPieceQuantity,
+    int CreatedEntryCount,
+    int UpdatedEntryCount,
+    int SkippedSourceRowCount,
+    int WorksheetCount);
 
 public sealed record CancelImportSessionResponse(
     bool Success,
@@ -851,6 +868,11 @@ public sealed record GenerateSelectedCutPlanResponse(
 }
 
 public sealed record GenerateAllStaleCutPlansRequest(Project Project, string OperationId = "");
+
+public sealed record GenerateSelectedCutPlansRequest(
+    Project Project,
+    IReadOnlyList<string> OptimizationGroupIds,
+    string OperationId = "");
 
 public sealed record GenerateAllStaleCutPlansResponse(
     bool Success,

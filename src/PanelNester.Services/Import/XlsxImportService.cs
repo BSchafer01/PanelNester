@@ -241,6 +241,7 @@ public sealed class XlsxImportService : IImportService, IWorkbookImportProgressS
             {
                 WorksheetName = worksheet.Name,
                 OriginalPosition = worksheet.Position,
+                UsedRowCount = worksheet.RangeUsed()?.RowCount() ?? 0,
                 HeadingRange = headingRange.RangeAddress.ToStringRelative()
             };
 

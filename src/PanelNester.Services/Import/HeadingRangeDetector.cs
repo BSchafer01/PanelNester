@@ -88,6 +88,7 @@ internal static class HeadingRangeDetector
         {
             WorksheetName = worksheet.Name,
             OriginalPosition = worksheet.Position,
+            UsedRowCount = usedRange.RowCount(),
             HeadingRange = highConfidence.Length == 1 ? highConfidence[0].Address : string.Empty,
             HeadingRangeDetectionStatus = detectionStatus,
             HeadingRangeCandidates = presentedCandidates,

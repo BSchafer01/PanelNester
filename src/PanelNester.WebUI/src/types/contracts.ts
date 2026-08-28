@@ -42,6 +42,7 @@ export const bridgeMessageTypes = {
   updateOptimizationGroups: 'update-optimization-groups',
   updateRequiredPieces: 'update-required-pieces',
   generateSelectedCutPlan: 'generate-selected-cut-plan',
+  generateSelectedCutPlans: 'generate-selected-cut-plans',
   generateAllStaleCutPlans: 'generate-all-stale-cut-plans',
   cancelCutPlanGeneration: 'cancel-cut-plan-generation',
   getCutPlanGenerationProgress: 'get-cut-plan-generation-progress',
@@ -264,6 +265,7 @@ export interface ImportSourceColumn {
 export interface ImportWorksheetDescriptor {
   worksheetName: string;
   originalPosition: number;
+  usedRowCount?: number;
   headingRange: string;
   headingRangeDetectionStatus: HeadingRangeDetectionStatus;
   headingRangeCandidates: HeadingRangeCandidate[];
@@ -375,6 +377,8 @@ export type ImportSessionPhase =
 export interface BeginImportSessionRequest {
   sessionId: string;
   importSourcePath?: string | null;
+  importSourceFileName?: string | null;
+  importSourceContentBase64?: string | null;
   projectKind?: ProjectKind;
 }
 
@@ -437,6 +441,18 @@ export interface ImportSessionResponse extends ImportFileResponse {
   previewSummary?: ImportPreviewSummary | null;
   progress?: WorkbookImportProgress | null;
   progressHistory?: WorkbookImportProgress[];
+  resultCounts?: ImportResultCounts | null;
+}
+
+export interface ImportResultCounts {
+  sourceRowCount: number;
+  validSourceRowCount: number;
+  outputEntryCount: number;
+  totalPieceQuantity: number;
+  createdEntryCount: number;
+  updatedEntryCount: number;
+  skippedSourceRowCount: number;
+  worksheetCount: number;
 }
 
 export interface ImportPreviewSummary {
@@ -1264,6 +1280,12 @@ export interface GenerateAllStaleCutPlansRequest {
   operationId?: string;
 }
 
+export interface GenerateSelectedCutPlansRequest {
+  project: ProjectRecord;
+  optimizationGroupIds: string[];
+  operationId?: string;
+}
+
 export interface GenerateAllStaleCutPlansResponse {
   success: boolean;
   project: ProjectRecord;
@@ -1483,6 +1505,7 @@ export const requestedBridgeCapabilities: BridgeCapability[] = [
   bridgeMessageTypes.updateOptimizationGroups,
   bridgeMessageTypes.updateRequiredPieces,
   bridgeMessageTypes.generateSelectedCutPlan,
+  bridgeMessageTypes.generateSelectedCutPlans,
   bridgeMessageTypes.generateAllStaleCutPlans,
   bridgeMessageTypes.cancelCutPlanGeneration,
   bridgeMessageTypes.getCutPlanGenerationProgress,

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { ConfirmationDialog } from '../components/ConfirmationDialog';
 import type {
   ImportResponse,
   Material,
@@ -319,17 +320,8 @@ export function MaterialsPage({
     }
   };
 
-  const handleRestoreDefaultLocation = () => {
-    if (
-      !window.confirm(
-        'Restore the default material library location? OptiFab will point back to the standard materials.json file. If that file is unreadable, OptiFab will preserve it and create a fresh library.',
-      )
-    ) {
-      return;
-    }
-
-    void onRestoreDefaultMaterialLibraryLocation().catch(() => undefined);
-  };
+  const [restoreDefaultPending, setRestoreDefaultPending] = useState(false);
+  const handleRestoreDefaultLocation = () => setRestoreDefaultPending(true);
 
   const handleRefreshMaterials = () => {
     void onRefreshMaterials().catch(() => undefined);
@@ -727,6 +719,16 @@ export function MaterialsPage({
           </div>
         </div>
       ) : null}
+      {restoreDefaultPending ? <ConfirmationDialog
+        message="OptiFab will point back to the standard materials.json file. If that file is unreadable, OptiFab will preserve it and create a fresh library."
+        onCancel={() => setRestoreDefaultPending(false)}
+        onConfirm={() => {
+          setRestoreDefaultPending(false);
+          void onRestoreDefaultMaterialLibraryLocation().catch(() => undefined);
+        }}
+        confirmLabel="Restore default"
+        title="Restore the default material library location?"
+      /> : null}
     </div>
   );
 }

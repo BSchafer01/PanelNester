@@ -28,7 +28,8 @@ internal sealed class ImportSessionCoordinator
         string sessionId,
         string importSourcePath,
         ProjectKind projectKind,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? importSourceIdentityPath = null)
     {
         ValidateSessionId(sessionId);
         ArgumentException.ThrowIfNullOrWhiteSpace(importSourcePath);
@@ -39,7 +40,11 @@ internal sealed class ImportSessionCoordinator
         }
 
         var normalizedPath = Path.GetFullPath(importSourcePath.Trim());
-        var session = new ImportSessionSnapshot(normalizedPath, Path.GetExtension(normalizedPath), projectKind);
+        var session = new ImportSessionSnapshot(
+            normalizedPath,
+            Path.GetExtension(normalizedPath),
+            projectKind,
+            importSourceIdentityPath);
         if (!_sessions.TryAdd(sessionId, session))
         {
             session.Release();
@@ -339,9 +344,10 @@ internal sealed class ImportSessionCoordinator
     }
 
     internal sealed class ImportSessionSnapshot(
-        string importSourcePath,
+        string capturePath,
         string extension,
-        ProjectKind projectKind = ProjectKind.Sheet)
+        ProjectKind projectKind = ProjectKind.Sheet,
+        string? importSourceIdentityPath = null)
     {
         private readonly object _gate = new();
         private CancellationTokenSource? _operationCancellation;
@@ -351,7 +357,11 @@ internal sealed class ImportSessionCoordinator
             new(StringComparer.Ordinal);
         private bool _released;
 
-        public string ImportSourcePath { get; } = importSourcePath;
+        private string CapturePath { get; } = capturePath;
+
+        public string ImportSourcePath { get; } = string.IsNullOrWhiteSpace(importSourceIdentityPath)
+            ? capturePath
+            : importSourceIdentityPath;
 
         public string Extension { get; } = extension;
 
@@ -385,7 +395,7 @@ internal sealed class ImportSessionCoordinator
             try
             {
                 await using var source = new FileStream(
-                    ImportSourcePath,
+                    CapturePath,
                     FileMode.Open,
                     FileAccess.Read,
                     FileShare.ReadWrite | FileShare.Delete,
@@ -449,7 +459,7 @@ internal sealed class ImportSessionCoordinator
             {
                 var assessment = await Task.Run(
                         () => WorkbookPackagePreflight.Inspect(
-                            ImportSourcePath,
+                            CapturePath,
                             WorkbookSafetyLimits.DesktopDefault,
                             operationToken),
                         operationToken)

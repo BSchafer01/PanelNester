@@ -266,7 +266,60 @@ public static class DesktopBridgeRegistration
             async (request, cancellationToken) =>
             {
                 var importSourcePath = NormalizeFilePath(request.ImportSourcePath);
-                if (string.IsNullOrWhiteSpace(importSourcePath))
+                var importSourceIdentityPath = importSourcePath;
+                string? droppedSnapshotPath = null;
+                byte[]? droppedContents = null;
+                if (!string.IsNullOrWhiteSpace(request.ImportSourceContentBase64))
+                {
+                    var fileName = Path.GetFileName(request.ImportSourceFileName?.Trim());
+                    var extension = Path.GetExtension(fileName);
+                    if (string.IsNullOrWhiteSpace(fileName) ||
+                        !(string.Equals(extension, ".csv", StringComparison.OrdinalIgnoreCase) ||
+                          string.Equals(extension, ".xlsx", StringComparison.OrdinalIgnoreCase) ||
+                          string.Equals(extension, ".xlsm", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        return ImportSessionResponse.Failure(
+                            request.SessionId,
+                            fileName,
+                            ImportSessionPhase.Opening,
+                            "unsupported-import-source",
+                            "Dropped Import Sources must be CSV, XLSX, or XLSM files.");
+                    }
+
+                    try
+                    {
+                        droppedContents = Convert.FromBase64String(request.ImportSourceContentBase64);
+                    }
+                    catch (FormatException)
+                    {
+                        return ImportSessionResponse.Failure(
+                            request.SessionId,
+                            fileName,
+                            ImportSessionPhase.Opening,
+                            "invalid-import-source-content",
+                            "The dropped Import Source content could not be decoded.");
+                    }
+
+                    if (droppedContents.LongLength > WorkbookSafetyLimits.DesktopDefault.MaximumCompressedBytes)
+                    {
+                        Array.Clear(droppedContents);
+                        return ImportSessionResponse.Failure(
+                            request.SessionId,
+                            fileName,
+                            ImportSessionPhase.Opening,
+                            "workbook-safety-ceiling-exceeded",
+                            "The dropped Import Source is above the desktop safety ceiling.");
+                    }
+
+                    var droppedSnapshotDirectory = Path.Combine(Path.GetTempPath(), "PanelNester.DroppedImports");
+                    Directory.CreateDirectory(droppedSnapshotDirectory);
+                    droppedSnapshotPath = Path.Combine(droppedSnapshotDirectory, $"{Guid.NewGuid():N}{extension}");
+                    await File.WriteAllBytesAsync(droppedSnapshotPath, droppedContents, cancellationToken)
+                        .ConfigureAwait(false);
+                    importSourcePath = droppedSnapshotPath;
+                    importSourceIdentityPath = fileName;
+                }
+                else if (string.IsNullOrWhiteSpace(importSourcePath))
                 {
                     var dialogResult = await fileDialogService
                         .OpenAsync(
@@ -284,12 +337,18 @@ public static class DesktopBridgeRegistration
                     }
 
                     importSourcePath = dialogResult.FilePath;
+                    importSourceIdentityPath = importSourcePath;
                 }
 
                 try
                 {
                     var result = await importSessions
-                        .BeginAsync(request.SessionId, importSourcePath, request.ProjectKind, cancellationToken)
+                        .BeginAsync(
+                            request.SessionId,
+                            importSourcePath,
+                            request.ProjectKind,
+                            cancellationToken,
+                            importSourceIdentityPath)
                         .ConfigureAwait(false);
                     return BuildImportSessionResponse(request.SessionId, result, ImportSessionPhase.Reading);
                 }
@@ -315,6 +374,18 @@ public static class DesktopBridgeRegistration
                         "import-host-error",
                         ex.Message,
                         "The desktop host could not begin the Import Session.");
+                }
+                finally
+                {
+                    if (droppedContents is not null)
+                    {
+                        Array.Clear(droppedContents);
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(droppedSnapshotPath) && File.Exists(droppedSnapshotPath))
+                    {
+                        File.Delete(droppedSnapshotPath);
+                    }
                 }
             });
 
@@ -533,6 +604,10 @@ public static class DesktopBridgeRegistration
                                 .SelectMany(group => group.RequiredPieces)
                                 .Where(piece => !piece.IsManual)
                                 .ToArray());
+                        var resultCounts = BuildStockLengthImportResultCounts(
+                            request.Project,
+                            worksheetImports,
+                            workbookProject);
                         finalization.CancellationToken.ThrowIfCancellationRequested();
                         var finalProgress = finalization.GetProgress();
                         combinedResult = combinedResult with
@@ -546,7 +621,8 @@ public static class DesktopBridgeRegistration
                             ImportSessionPhase.Finalized,
                             workbookProject,
                             finalized: true,
-                            previewSummary: previewSummary);
+                            previewSummary: previewSummary,
+                            resultCounts: resultCounts);
                     }
 
                     var importPreparation = await PrepareImportOptionsAsync(
@@ -1080,6 +1156,71 @@ public static class DesktopBridgeRegistration
                     result.Success,
                     result.Project,
                     result.Failures,
+                    message);
+            });
+        dispatcher.Register<GenerateSelectedCutPlansRequest>(
+            BridgeMessageTypes.GenerateSelectedCutPlans,
+            async (request, cancellationToken) =>
+            {
+                var operationId = ResolveOperationId(request.OperationId);
+                using var operation = cutPlanGeneration.Begin(operationId, cancellationToken);
+                var orderedGroupIds = request.OptimizationGroupIds
+                    .Where(id => !string.IsNullOrWhiteSpace(id))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray();
+                var project = request.Project;
+                var failures = new List<StockLengthGenerationFailure>();
+                var completed = 0;
+                foreach (var optimizationGroupId in orderedGroupIds)
+                {
+                    try
+                    {
+                        var result = await Task.Run(
+                            () => stockLengthGenerationService.GenerateSelectedAsync(
+                                project,
+                                optimizationGroupId,
+                                operation,
+                                operation.Token),
+                            CancellationToken.None)
+                            .ConfigureAwait(false);
+                        if (result.Project is not null)
+                        {
+                            project = result.Project;
+                        }
+                        if (!result.Success)
+                        {
+                            failures.Add(new StockLengthGenerationFailure
+                            {
+                                OptimizationGroupId = optimizationGroupId,
+                                Code = GetFirstErrorCode(result.Errors, "cut-plan-generation-failed"),
+                                Message = GetFirstErrorMessage(result.Errors, "The Optimization Group could not generate a Cut Plan.")
+                            });
+                        }
+                        else
+                        {
+                            completed++;
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        failures.Add(new StockLengthGenerationFailure
+                        {
+                            OptimizationGroupId = optimizationGroupId,
+                            Code = "cut-plan-generation-cancelled",
+                            Message = "Cut Plan generation was cancelled."
+                        });
+                        break;
+                    }
+                }
+                var message = failures.Count == 0
+                    ? $"Generated {completed} selected Optimization Group(s)."
+                    : $"Generated {completed} selected Optimization Group(s); " +
+                      string.Join("; ", failures.Select(failure =>
+                          $"{failure.OptimizationGroupId}: {failure.Message}"));
+                return new GenerateAllStaleCutPlansResponse(
+                    failures.Count == 0,
+                    project,
+                    failures,
                     message);
             });
         dispatcher.Register<CancelCutPlanGenerationRequest>(
@@ -2474,7 +2615,8 @@ public static class DesktopBridgeRegistration
         ImportSessionPhase phase,
         Project? project = null,
         bool finalized = false,
-        ImportPreviewSummary? previewSummary = null)
+        ImportPreviewSummary? previewSummary = null,
+        ImportResultCounts? resultCounts = null)
     {
         var response = result.Response;
         return new ImportSessionResponse(
@@ -2495,6 +2637,7 @@ public static class DesktopBridgeRegistration
             BuildImportFileMessage(response, result.ImportSource.ImportSourcePath))
         {
             RequiredPieces = response.RequiredPieces,
+            ResultCounts = resultCounts,
             Workbook = result.Workbook,
             SourceColumns = response.SourceColumns,
             Worksheet = response.Worksheet,
@@ -2502,6 +2645,53 @@ public static class DesktopBridgeRegistration
             Progress = result.Progress,
             ProgressHistory = result.ProgressHistory
         };
+    }
+
+    private static ImportResultCounts? BuildStockLengthImportResultCounts(
+        Project previousProject,
+        IReadOnlyList<FinalizedWorksheetImport> worksheetImports,
+        Project finalizedProject)
+    {
+        if (finalizedProject.ProjectKind != ProjectKind.StockLength)
+        {
+            return null;
+        }
+
+        var selectedPositions = worksheetImports
+            .Select(item => item.Selection.OriginalPosition)
+            .ToHashSet();
+        var sourcePieces = worksheetImports.SelectMany(item => item.Response.RequiredPieces).ToArray();
+        var skippedSourceRowCount = worksheetImports.Sum(item => item.Selection.ExcludedSourceRows.Count) +
+            sourcePieces.Where(piece => string.Equals(
+                piece.ValidationStatus,
+                ValidationStatuses.Error,
+                StringComparison.Ordinal)).Sum(piece => Math.Max(1, piece.SourceReferences.Count));
+        var validSourceRowCount = sourcePieces.Where(piece => !string.Equals(
+            piece.ValidationStatus,
+            ValidationStatuses.Error,
+            StringComparison.Ordinal)).Sum(piece => Math.Max(1, piece.SourceReferences.Count));
+        var sourceRowCount = validSourceRowCount + skippedSourceRowCount;
+        var outputEntries = finalizedProject.State.OptimizationGroups
+            .SelectMany(group => group.RequiredPieces)
+            .Where(piece => !piece.IsManual && piece.SourceReferences.Any(reference =>
+                selectedPositions.Contains(reference.WorksheetPosition)))
+            .ToArray();
+        var previousIds = previousProject.State.OptimizationGroups
+            .SelectMany(group => group.RequiredPieces)
+            .Where(piece => !piece.IsManual)
+            .Select(piece => piece.RequiredPieceId)
+            .ToHashSet(StringComparer.Ordinal);
+        var updatedEntryCount = outputEntries.Count(piece => previousIds.Contains(piece.RequiredPieceId));
+
+        return new ImportResultCounts(
+            sourceRowCount,
+            validSourceRowCount,
+            outputEntries.Length,
+            outputEntries.Sum(piece => piece.Quantity),
+            outputEntries.Length - updatedEntryCount,
+            updatedEntryCount,
+            skippedSourceRowCount,
+            worksheetImports.Count);
     }
 
     private static ImportResponse PrefixWorksheetRowIds(

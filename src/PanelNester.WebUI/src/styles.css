@@ -374,6 +374,14 @@ option {
   padding: 0;
 }
 
+.app-route--stock-length-import {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
 .app-route--extrusions {
   height: 100%;
   min-height: 0;
@@ -1114,7 +1122,8 @@ h3 {
 }
 
 .worksheet-preview__cell:hover,
-.worksheet-preview__cell--selected {
+.worksheet-preview__cell--selected,
+.worksheet-preview__cell--heading {
   background: rgba(71, 216, 255, 0.14);
   box-shadow: inset 0 0 0 1px rgba(71, 216, 255, 0.55);
 }
@@ -4684,8 +4693,7 @@ td {
 }
 
 .stock-length-import__group-create {
-  justify-self: start;
-  width: min(100%, 70rem);
+  width: 100%;
 }
 
 .stock-length-import__group-create .project-form-grid {
@@ -4773,6 +4781,467 @@ td {
   gap: 0.35rem;
 }
 
+.stock-length-workspace,
+.stock-import-workflow {
+  min-height: 100%;
+  padding: 1.5rem;
+  color: var(--text-primary);
+}
+
+.stock-length-workspace {
+  display: grid;
+  align-content: start;
+  gap: 1rem;
+}
+
+.stock-length-workspace--completed {
+  grid-template-rows: auto auto minmax(0, 1fr);
+  align-content: stretch;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.stock-length-workspace__header,
+.stock-import-workflow__header,
+.stock-import-workflow__footer,
+.stock-length-workspace__title-line,
+.stock-length-workspace__generate-actions,
+.stock-import-workflow__bulk,
+.stock-import-workflow__heading-controls,
+.pagination-bar,
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.stock-length-workspace__header,
+.stock-import-workflow__header,
+.stock-import-workflow__footer,
+.pagination-bar {
+  justify-content: space-between;
+}
+
+.stock-length-workspace__header h1,
+.stock-import-workflow__header h1 {
+  margin: 0;
+}
+
+.stock-length-workspace__unsaved {
+  color: #e6a737;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.stock-length-workspace__empty {
+  display: grid;
+  min-height: 19rem;
+  place-content: center;
+  justify-items: center;
+  text-align: center;
+}
+
+.stock-length-workspace__empty-icon {
+  display: grid;
+  color: #68859a;
+  font-size: 3rem;
+  line-height: 0.7;
+}
+
+.stock-length-workspace__empty-icon span {
+  margin-top: -0.25rem;
+  letter-spacing: -0.4rem;
+}
+
+.stock-length-workspace__empty--dragging {
+  border-color: var(--panel-accent);
+  background: rgba(71, 216, 255, 0.08);
+  box-shadow: inset 0 0 0 1px var(--panel-accent);
+}
+
+.stock-length-workspace__summary-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 1rem;
+  min-width: 0;
+}
+
+.stock-length-workspace__summary-row--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.stock-length-workspace__summary-row > * {
+  min-width: 0;
+  height: 100%;
+}
+
+.stock-length-workspace__group-form {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) minmax(10rem, 0.6fr) auto;
+  align-items: end;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.stock-length-workspace__generate-actions {
+  justify-content: flex-end;
+  margin-top: 0.9rem;
+}
+
+.stock-length-workspace__inline-input {
+  width: 8rem;
+}
+
+.stock-length-workspace__filters {
+  display: grid;
+  grid-template-columns: minmax(14rem, 1fr) repeat(3, minmax(10rem, auto));
+  gap: 0.65rem;
+  margin-bottom: 0.75rem;
+}
+
+.stock-length-workspace__filters input,
+.stock-length-workspace__filters select,
+.stock-length-workspace__inline-input {
+  min-height: 2.55rem;
+  border: 1px solid var(--panel-border-strong);
+  border-radius: 0.45rem;
+  padding: 0.55rem 0.7rem;
+  color: var(--text-primary);
+  background: var(--panel-surface-2);
+}
+
+.stock-length-workspace__display {
+  width: 15rem;
+}
+
+.stock-length-workspace__pieces-scroll {
+  min-height: 0;
+  height: 100%;
+  max-height: none;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.stock-length-workspace__pieces {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.stock-length-workspace__pieces-scroll thead th {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  background: var(--panel-surface-2);
+}
+
+.stock-length-workspace__table-empty {
+  display: grid;
+  min-height: 10rem;
+  place-content: center;
+  justify-items: center;
+  gap: 0.35rem;
+  color: var(--text-muted);
+}
+
+.stock-length-workspace__last-import {
+  display: grid;
+  align-content: start;
+  gap: 0.75rem;
+}
+
+.stock-length-workspace__last-import h2 {
+  overflow-wrap: anywhere;
+}
+
+.stock-length-workspace__success,
+.stock-import-workflow__matched {
+  color: #70cc54;
+}
+
+.stock-length-workspace__generation {
+  margin: 1rem 1.5rem 0;
+}
+
+.status-pill {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.status-pill--ready {
+  color: #70cc54;
+}
+
+.stock-import-workflow {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 1rem;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.stock-import-workflow__stepper {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(9rem, 1fr));
+  max-width: 58rem;
+  margin-inline: auto;
+}
+
+.stock-import-workflow__step {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--text-muted);
+}
+
+.stock-import-workflow__step strong {
+  white-space: nowrap;
+}
+
+.stock-import-workflow__step::after {
+  width: 100%;
+  height: 1px;
+  content: '';
+  background: var(--panel-border-strong);
+}
+
+.stock-import-workflow__step:last-child::after {
+  display: none;
+}
+
+.stock-import-workflow__step > span {
+  display: grid;
+  flex: 0 0 1.7rem;
+  width: 1.7rem;
+  height: 1.7rem;
+  place-items: center;
+  border: 1px solid var(--panel-border-strong);
+  border-radius: 50%;
+}
+
+.stock-import-workflow__step--active,
+.stock-import-workflow__step--complete {
+  color: var(--panel-accent);
+}
+
+.stock-import-workflow__step--active > span,
+.stock-import-workflow__step--complete > span {
+  border-color: var(--panel-accent);
+  color: #04151c;
+  background: var(--panel-accent);
+}
+
+.stock-import-workflow__layout,
+.stock-import-workflow__mapping-layout,
+.stock-import-workflow__review-layout {
+  display: grid;
+  min-height: 0;
+  gap: 0.8rem;
+}
+
+.stock-import-workflow__layout--summary {
+  grid-template-columns: minmax(0, 1fr) 20rem;
+  overflow: hidden;
+}
+
+.stock-import-workflow__worksheet-panel {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.stock-import-workflow__worksheet-table {
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.stock-import-workflow__worksheet-table thead th {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  background: var(--panel-surface-2);
+}
+
+.stock-import-workflow__worksheet-tools {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) 12rem auto auto;
+  gap: 0.65rem;
+  margin-bottom: 0.75rem;
+}
+
+.stock-import-workflow__summary {
+  min-height: 0;
+  overflow: auto;
+}
+
+.stock-import-workflow__mapping-layout {
+  grid-template-columns: 18rem minmax(28rem, 1.3fr) minmax(26rem, 1fr);
+}
+
+.stock-import-workflow__review-layout {
+  grid-template-columns: 20rem minmax(0, 1fr);
+}
+
+.stock-import-workflow__mapping-layout > *,
+.stock-import-workflow__review-layout > * {
+  min-width: 0;
+  overflow: auto;
+}
+
+.stock-import-workflow__summary dl > div,
+.stock-import-workflow__review-summary dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem 0;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.stock-import-workflow__summary dd,
+.stock-import-workflow__review-summary dd {
+  margin: 0;
+  font-weight: 800;
+}
+
+.stock-import-workflow__bulk {
+  justify-content: flex-end;
+  margin: 0.8rem 0;
+}
+
+.stock-import-workflow__worksheet-nav {
+  display: grid;
+  align-content: start;
+  gap: 0.55rem;
+}
+
+.stock-import-workflow__worksheet-button {
+  display: grid;
+  gap: 0.25rem;
+  width: 100%;
+  border: 1px solid var(--panel-border-strong);
+  border-radius: 0.55rem;
+  padding: 0.8rem;
+  color: var(--text-primary);
+  text-align: left;
+  background: var(--panel-surface-2);
+}
+
+.stock-import-workflow__worksheet-button--active {
+  border-color: var(--panel-accent);
+  background: color-mix(in srgb, var(--panel-accent) 10%, var(--panel-surface-2));
+}
+
+.stock-import-workflow__worksheet-button span {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.stock-import-workflow__heading-controls {
+  flex-wrap: wrap;
+  margin: 0.8rem 0;
+}
+
+.stock-import-workflow__heading-controls .project-field {
+  min-width: 13rem;
+  flex: 1;
+}
+
+.stock-import-workflow__field-table {
+  border: 1px solid var(--panel-border);
+  border-radius: 0.55rem;
+  overflow: hidden;
+}
+
+.stock-import-workflow__field-head,
+.stock-import-workflow__field-row {
+  display: grid;
+  grid-template-columns: minmax(8rem, 0.8fr) 4.5rem minmax(11rem, 1.2fr) minmax(8rem, 1fr) 7rem 8rem;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.7rem;
+}
+
+.stock-import-workflow__layout-group {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.7rem 0;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.stock-import-workflow__layout-group > span {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.stock-import-workflow__field-head {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: var(--panel-surface-2);
+}
+
+.stock-import-workflow__field-row {
+  border-top: 1px solid var(--panel-border);
+}
+
+.stock-import-workflow__field-row select {
+  min-width: 0;
+}
+
+.stock-import-workflow__attention {
+  color: #f0a03d;
+}
+
+.stock-import-workflow__source-preview .worksheet-preview {
+  max-height: calc(100vh - 21rem);
+}
+
+.stock-import-workflow__tabs {
+  display: flex;
+  margin: 1rem 0 0.75rem;
+}
+
+.stock-import-workflow__tab {
+  border: 1px solid var(--panel-border-strong);
+  padding: 0.7rem 1rem;
+  color: var(--text-muted);
+  background: transparent;
+}
+
+.stock-import-workflow__tab--active {
+  border-bottom-color: var(--panel-accent);
+  color: var(--panel-accent);
+}
+
+.stock-import-workflow__behavior {
+  margin-top: 1rem;
+  border: 1px solid var(--panel-border);
+  padding: 1rem;
+}
+
+.stock-import-workflow__footer {
+  position: sticky;
+  z-index: 5;
+  bottom: 0;
+  border: 1px solid var(--panel-border);
+  border-radius: 0.7rem;
+  padding: 0.85rem 1rem;
+  background: color-mix(in srgb, var(--panel-surface) 94%, transparent);
+  backdrop-filter: blur(10px);
+}
+
+.stock-import-workflow__footer-status {
+  color: var(--text-muted);
+}
+
 .stock-length-results__states .summary-card {
   align-content: start;
   display: grid;
@@ -4805,6 +5274,41 @@ td {
 }
 
 @media (max-width: 1180px) {
+  .app-route--stock-length-import {
+    height: auto;
+    overflow: auto;
+  }
+
+  .stock-length-workspace__summary-row,
+  .stock-import-workflow__layout--summary,
+  .stock-import-workflow__mapping-layout,
+  .stock-import-workflow__review-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .stock-length-workspace__last-import {
+    order: -1;
+  }
+
+  .stock-length-workspace--completed {
+    grid-template-rows: auto;
+    height: auto;
+    overflow: visible;
+  }
+
+  .stock-length-workspace__pieces-scroll {
+    min-height: 18rem;
+    max-height: 52vh;
+  }
+
+  .stock-import-workflow {
+    height: auto;
+  }
+
+  .stock-import-workflow__source-preview .worksheet-preview {
+    max-height: 30rem;
+  }
+
   .stock-length-results {
     overflow: auto;
   }
@@ -4819,6 +5323,33 @@ td {
 }
 
 @media (max-width: 760px) {
+  .stock-length-workspace,
+  .stock-import-workflow {
+    padding: 0.75rem;
+  }
+
+  .stock-length-workspace__header,
+  .stock-import-workflow__header,
+  .stock-import-workflow__footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .stock-length-workspace__group-form,
+  .stock-length-workspace__filters,
+  .stock-import-workflow__field-head,
+  .stock-import-workflow__field-row {
+    grid-template-columns: 1fr;
+  }
+
+  .stock-import-workflow__stepper {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .stock-import-workflow__step strong {
+    display: none;
+  }
+
   .stock-length-import__group-create .project-form-grid,
   .stock-length-import__group-row {
     grid-template-columns: 1fr;

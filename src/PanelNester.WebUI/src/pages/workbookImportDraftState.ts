@@ -2,6 +2,7 @@ import type {
   ImportColumnMapping,
   ImportConfiguration,
   ImportFileResponse,
+  ImportFieldName,
   ImportMaterialMapping,
   ImportMappingSession,
   ImportNewMaterialRequest,
@@ -9,10 +10,79 @@ import type {
   ImportPreviewSummary,
   ImportSourceColumn,
   ImportWorksheetDraft,
+  ImportWorksheetDescriptor,
   OptimizationGroup,
   PartRow,
   WorkbookDiscovery,
 } from '../types/contracts';
+
+const stockLengthHeadingAliases: ReadonlyArray<readonly [ImportFieldName, readonly string[]]> = [
+  ['Quantity', ['quantity', 'qty', 'count', 'pieces', 'piececount']],
+  ['Length', ['length', 'len', 'partlength', 'panellength']],
+  ['Profile Number', ['profile', 'profilenumber', 'profileno', 'die', 'dienumber', 'dieno', 'extrusion', 'extrusionnumber', 'extrusionno']],
+  ['Part Name', ['partname', 'piecename', 'description']],
+  ['Finish', ['finish', 'color', 'colour']],
+  ['Part Number', ['partnumber', 'partno', 'itemnumber', 'itemno']],
+];
+
+export interface WorksheetLayout {
+  layoutId: string;
+  normalizedHeaderSchema: string[];
+  worksheetNames: string[];
+  drafts: ImportWorksheetDraft[];
+}
+
+export function buildWorksheetLayouts(drafts: ImportWorksheetDraft[]): WorksheetLayout[] {
+  const layouts = new Map<string, ImportWorksheetDraft[]>();
+  for (const draft of drafts.filter((candidate) => candidate.selected)) {
+    const schema = worksheetSourceColumns(draft).map((column) => normalizeHeading(column.heading));
+    const layoutId = schema.length > 0
+      ? `layout:${JSON.stringify(schema)}`
+      : `worksheet:${draft.worksheet.originalPosition}`;
+    layouts.set(layoutId, [...(layouts.get(layoutId) ?? []), draft]);
+  }
+  return Array.from(layouts, ([layoutId, layoutDrafts]) => ({
+    layoutId,
+    normalizedHeaderSchema: worksheetSourceColumns(layoutDrafts[0]).map(
+      (column) => normalizeHeading(column.heading)),
+    worksheetNames: layoutDrafts.map((draft) => draft.worksheet.worksheetName),
+    drafts: layoutDrafts,
+  }));
+}
+
+export function applyWorksheetLayoutMappings(
+  drafts: ImportWorksheetDraft[],
+  layoutId: string,
+  mappings: ImportColumnMapping[],
+): ImportWorksheetDraft[] {
+  const layout = buildWorksheetLayouts(drafts).find((candidate) => candidate.layoutId === layoutId);
+  if (!layout) return drafts;
+  const sourceDraft = layout.drafts.find((draft) => {
+    const addresses = new Set(worksheetSourceColumns(draft).map((column) => column.address));
+    return mappings.every((mapping) => addresses.has(mapping.sourceColumn));
+  }) ?? layout.drafts[0];
+  const sourceColumns = worksheetSourceColumns(sourceDraft);
+  const fieldsByColumnIndex = mappings.flatMap((mapping) => {
+    const columnIndex = sourceColumns.findIndex((column) => column.address === mapping.sourceColumn);
+    return columnIndex >= 0 ? [[columnIndex, mapping.targetField] as const] : [];
+  });
+  const memberNames = new Set(layout.worksheetNames);
+  return drafts.map((draft) => {
+    if (!memberNames.has(draft.worksheet.worksheetName)) return draft;
+    const targetColumns = worksheetSourceColumns(draft);
+    return {
+      ...draft,
+      options: {
+        ...draft.options,
+        projectKind: 'stockLength',
+        columnMappings: fieldsByColumnIndex.flatMap(([columnIndex, targetField]) => {
+          const sourceColumn = targetColumns[columnIndex]?.address;
+          return sourceColumn ? [{ sourceColumn, targetField }] : [];
+        }),
+      },
+    };
+  });
+}
 
 export function summarizeWorkbookPreview(
   drafts: ImportWorksheetDraft[],
@@ -78,6 +148,24 @@ export function summarizeWorkbookPreview(
   return { worksheets, optimizationGroups };
 }
 
+export function suggestStockLengthColumnMappings(
+  worksheet: ImportWorksheetDescriptor,
+  headingRange: string,
+): ImportColumnMapping[] {
+  const columns = sourceColumnsForWorksheetRange(worksheet, headingRange);
+  const recognized = new Map<ImportFieldName, string[]>();
+  for (const column of columns) {
+    const normalized = normalizeHeading(column.heading);
+    const target = stockLengthHeadingAliases.find(([, aliases]) => aliases.includes(normalized))?.[0];
+    if (target) recognized.set(target, [...(recognized.get(target) ?? []), column.address]);
+  }
+
+  return stockLengthHeadingAliases.flatMap(([targetField]) => {
+    const sourceColumns = recognized.get(targetField) ?? [];
+    return sourceColumns.length === 1 ? [{ sourceColumn: sourceColumns[0], targetField }] : [];
+  });
+}
+
 export function createWorkbookWorksheetDrafts(
   sessionId: string,
   workbook: WorkbookDiscovery,
@@ -108,11 +196,24 @@ export function createWorkbookWorksheetDrafts(
     const isInitial = worksheet.worksheetName === previewWorksheetName;
     const optimizationGroupId = saved?.optimizationGroupId ??
       `import-${sessionId}-${worksheet.originalPosition}`;
-    const columnMappings = saved?.columnMappings ??
+    const restoredOrInitialMappings = saved?.columnMappings ??
       (isInitial ? firstOptions.columnMappings : []);
     const materialMappings = savedConfiguration?.options.materialMappings ??
       (isInitial ? firstOptions.materialMappings : []);
     const headingRange = saved?.headingRange || worksheet.headingRange;
+    const assumedDetectedRange = firstOptions.projectKind === 'stockLength' && !saved &&
+      worksheet.headingRangeDetectionStatus === 'unique-high-confidence' &&
+      headingRange.length > 0;
+    const detectedMappings = firstOptions.projectKind === 'stockLength' && assumedDetectedRange
+      ? suggestStockLengthColumnMappings(worksheet, headingRange)
+      : [];
+    const mappedTargets = new Set(restoredOrInitialMappings.map((mapping) => mapping.targetField));
+    const mappedSources = new Set(restoredOrInitialMappings.map((mapping) => mapping.sourceColumn));
+    const columnMappings = [
+      ...restoredOrInitialMappings,
+      ...detectedMappings.filter((mapping) =>
+        !mappedTargets.has(mapping.targetField) && !mappedSources.has(mapping.sourceColumn)),
+    ];
 
     return {
       worksheet,
@@ -126,13 +227,14 @@ export function createWorkbookWorksheetDrafts(
       preview: isInitial ? firstPreview : emptyPreview(),
       options: {
         ...(savedConfiguration?.options ?? (isInitial ? firstOptions : {})),
+        projectKind: savedConfiguration?.options.projectKind ?? firstOptions.projectKind,
         columnMappings,
         materialMappings,
       },
       newMaterials: [],
       hasPendingChanges: !isInitial || Boolean(saved && firstPreview.worksheet?.worksheetName !== worksheet.worksheetName),
       headingRange,
-      headingRangeConfirmed: Boolean(saved?.headingRange),
+      headingRangeConfirmed: Boolean(saved?.headingRange) || assumedDetectedRange,
       excludedSourceRows: saved?.excludedSourceRows ?? [],
       ignoredMaterialNames: [],
       partOverrides: (savedConfiguration?.partOverrides ?? []).filter((partOverride) =>
@@ -491,8 +593,8 @@ export function copyColumnMappingsFromPreviousSelectedWorksheet(
 
   const reconciliation = reconcileMappingsByUniqueHeading(
     previous.options.columnMappings,
-    sourceColumnsForDraft(previous),
-    sourceColumnsForDraft(target),
+    worksheetSourceColumns(previous),
+    worksheetSourceColumns(target),
   );
   const nextDraft = {
     ...target,
@@ -978,7 +1080,7 @@ function uniqueHeadingAddresses(
   );
 }
 
-function sourceColumnsForDraft(
+export function worksheetSourceColumns(
   draft: ImportWorksheetDraft,
 ): ImportSourceColumn[] {
   const fromRange = sourceColumnsForHeadingRange(draft, draft.headingRange);
@@ -989,6 +1091,13 @@ function sourceColumnsForHeadingRange(
   draft: ImportWorksheetDraft,
   address: string,
 ): ImportSourceColumn[] {
+  return sourceColumnsForWorksheetRange(draft.worksheet, address);
+}
+
+function sourceColumnsForWorksheetRange(
+  worksheet: ImportWorksheetDescriptor,
+  address: string,
+): ImportSourceColumn[] {
   const match = /^([A-Z]+)([1-9]\d*):([A-Z]+)([1-9]\d*)$/.exec(address);
   if (!match || match[2] !== match[4]) {
     return [];
@@ -996,7 +1105,7 @@ function sourceColumnsForHeadingRange(
 
   const firstColumn = columnNumber(match[1]);
   const lastColumn = columnNumber(match[3]);
-  const row = draft.worksheet.previewRows?.find(
+  const row = worksheet.previewRows?.find(
     (previewRow) => previewRow.rowNumber === Number(match[2]),
   );
   return (row?.cells ?? [])

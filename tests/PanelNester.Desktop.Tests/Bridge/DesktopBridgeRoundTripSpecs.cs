@@ -546,8 +546,8 @@ public sealed class DesktopBridgeRoundTripSpecs : IDisposable
 
         var generated = await DispatchAsync<GenerateAllStaleCutPlansResponse>(
             dispatcher,
-            BridgeMessageTypes.GenerateAllStaleCutPlans,
-            new GenerateAllStaleCutPlansRequest(finalized.Project));
+            BridgeMessageTypes.GenerateSelectedCutPlans,
+            new GenerateSelectedCutPlansRequest(finalized.Project, ["frames", "doors"]));
         Assert.True(generated.Success, generated.Message);
         var generatedProject = generated.Project;
         var frames = Assert.Single(generatedProject.State.OptimizationGroups, group => group.OptimizationGroupId == "frames");

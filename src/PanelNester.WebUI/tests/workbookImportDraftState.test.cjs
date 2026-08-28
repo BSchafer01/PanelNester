@@ -31,8 +31,10 @@ const statePath = path.join(
 );
 const {
   applyHighConfidenceHeadingRanges,
+  applyWorksheetLayoutMappings,
   assignSelectedWorksheetsToOptimizationGroup,
   canFinalizeStockLengthWorkbook,
+  buildWorksheetLayouts,
   collectWorkbookNewMaterials,
   confirmWorksheetHeadingRange,
   copyColumnMappingsFromPreviousSelectedWorksheet,
@@ -475,6 +477,77 @@ test('bulk confirmation summarizes and applies only unique high-confidence detec
 
   assert.deepEqual(summary.worksheetNames, ['First']);
   assert.deepEqual(applied.map((draft) => draft.headingRangeConfirmed), [true, false, false]);
+});
+
+test('unique high-confidence Heading Ranges seed Stock-Length Column Mappings before manual confirmation', () => {
+  const detectedWorkbook = {
+    initialWorksheetName: 'Detected',
+    macrosPresent: false,
+    worksheets: [{
+      worksheetName: 'Detected',
+      originalPosition: 1,
+      headingRange: 'B10:G10',
+      headingRangeDetectionStatus: 'unique-high-confidence',
+      previewRows: [{
+        rowNumber: 10,
+        cells: [
+          { address: 'B10', columnNumber: 2, value: 'Qty' },
+          { address: 'C10', columnNumber: 3, value: 'Length' },
+          { address: 'D10', columnNumber: 4, value: 'Die / Extrusion #' },
+          { address: 'E10', columnNumber: 5, value: 'Part Name' },
+          { address: 'F10', columnNumber: 6, value: 'Finish' },
+          { address: 'G10', columnNumber: 7, value: 'Part#' },
+        ],
+      }],
+    }],
+  };
+  const stockOptions = { projectKind: 'stockLength', columnMappings: [], materialMappings: [] };
+  const drafts = createWorkbookWorksheetDrafts('detected', detectedWorkbook, preview, stockOptions);
+
+  assert.equal(drafts[0].headingRangeConfirmed, true);
+  assert.deepEqual(drafts[0].options.columnMappings, [
+    { sourceColumn: 'B', targetField: 'Quantity' },
+    { sourceColumn: 'C', targetField: 'Length' },
+    { sourceColumn: 'E', targetField: 'Part Name' },
+    { sourceColumn: 'F', targetField: 'Finish' },
+  ]);
+});
+
+test('two selected Worksheets with identical normalized header schemas share one mapping', () => {
+  const layoutWorkbook = {
+    initialWorksheetName: 'First', macrosPresent: false, worksheets: [
+      { worksheetName: 'First', originalPosition: 1, headingRange: 'A1:C1', previewRows: [{ rowNumber: 1, cells: [
+        { address: 'A1', columnNumber: 1, value: ' Qty ' },
+        { address: 'B1', columnNumber: 2, value: 'LENGTH' },
+        { address: 'C1', columnNumber: 3, value: 'Profile Number' },
+      ] }] },
+      { worksheetName: 'Second', originalPosition: 2, headingRange: 'D4:F4', previewRows: [{ rowNumber: 4, cells: [
+        { address: 'D4', columnNumber: 4, value: 'qty' },
+        { address: 'E4', columnNumber: 5, value: 'Length' },
+        { address: 'F4', columnNumber: 6, value: ' profile-number ' },
+      ] }] },
+    ],
+  };
+  const drafts = createWorkbookWorksheetDrafts('layout', layoutWorkbook, preview, {
+    projectKind: 'stockLength', columnMappings: [], materialMappings: [],
+  }).map((draft) => ({ ...draft, selected: true, headingRangeConfirmed: true }));
+
+  const layouts = buildWorksheetLayouts(drafts);
+  const updated = applyWorksheetLayoutMappings(drafts, layouts[0].layoutId, [
+    { sourceColumn: 'A', targetField: 'Quantity' },
+    { sourceColumn: 'B', targetField: 'Length' },
+  ]);
+
+  assert.equal(layouts.length, 1);
+  assert.deepEqual(layouts[0].worksheetNames, ['First', 'Second']);
+  assert.deepEqual(updated[0].options.columnMappings, [
+    { sourceColumn: 'A', targetField: 'Quantity' },
+    { sourceColumn: 'B', targetField: 'Length' },
+  ]);
+  assert.deepEqual(updated[1].options.columnMappings, [
+    { sourceColumn: 'D', targetField: 'Quantity' },
+    { sourceColumn: 'E', targetField: 'Length' },
+  ]);
 });
 
 test('Worksheet navigation exposes heading, mapping, error, and ready states without blocking activation', () => {

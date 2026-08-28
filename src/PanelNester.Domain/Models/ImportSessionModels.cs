@@ -77,6 +77,8 @@ public sealed record ImportWorksheetDescriptor
 
     public int OriginalPosition { get; init; }
 
+    public int UsedRowCount { get; init; }
+
     public string HeadingRange { get; init; } = string.Empty;
 
     public string HeadingRangeDetectionStatus { get; init; } = HeadingRangeDetectionStatuses.None;

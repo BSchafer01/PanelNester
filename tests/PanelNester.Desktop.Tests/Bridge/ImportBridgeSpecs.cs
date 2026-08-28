@@ -858,6 +858,39 @@ public sealed class ImportBridgeSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Beginning_an_import_session_accepts_a_pathless_dropped_Workbook_snapshot()
+    {
+        byte[] workbookContents;
+        using (var stream = new MemoryStream())
+        {
+            using (var workbook = new XLWorkbook())
+            {
+                WriteWorkbookWorksheet(workbook.AddWorksheet("Dropped"), "DROP", "Demo Material");
+                workbook.SaveAs(stream);
+            }
+            workbookContents = stream.ToArray();
+        }
+
+        var dispatcher = CreateDispatcher();
+        var response = await DispatchAsync<ImportSessionResponse>(
+            dispatcher,
+            BridgeMessageTypes.BeginImportSession,
+            new BeginImportSessionRequest
+            {
+                SessionId = $"dropped-{Guid.NewGuid():N}",
+                ImportSourceFileName = "dropped.xlsx",
+                ImportSourceContentBase64 = Convert.ToBase64String(workbookContents),
+                ProjectKind = ProjectKind.StockLength
+            });
+
+        Assert.True(response.Success);
+        Assert.Equal("dropped.xlsx", response.ImportSourcePath);
+        Assert.Equal("dropped.xlsx", response.ImportSource?.ImportSourcePath);
+        Assert.Equal(workbookContents.LongLength, response.ImportSource?.ContentLength);
+        Assert.Equal("Dropped", Assert.Single(response.Workbook!.Worksheets).WorksheetName);
+    }
+
+    [Fact]
     public async Task Beginning_a_Workbook_session_reports_truthful_discovery_progress()
     {
         Directory.CreateDirectory(_workspacePath);
@@ -3068,6 +3101,14 @@ public sealed class ImportBridgeSpecs : IDisposable
             JsonSerializer.SerializeToElement(finalizePayload, SerializerOptions));
 
         Assert.True(finalized.Success, finalized.Message);
+        Assert.Equal(3, finalized.ResultCounts?.SourceRowCount);
+        Assert.Equal(3, finalized.ResultCounts?.ValidSourceRowCount);
+        Assert.Equal(2, finalized.ResultCounts?.OutputEntryCount);
+        Assert.Equal(9, finalized.ResultCounts?.TotalPieceQuantity);
+        Assert.Equal(2, finalized.ResultCounts?.CreatedEntryCount);
+        Assert.Equal(0, finalized.ResultCounts?.UpdatedEntryCount);
+        Assert.Equal(0, finalized.ResultCounts?.SkippedSourceRowCount);
+        Assert.Equal(3, finalized.ResultCounts?.WorksheetCount);
         var groups = finalized.Project!.State.OptimizationGroups.ToDictionary(group => group.OptimizationGroupId);
         var sharedPiece = Assert.Single(groups["shared"].RequiredPieces);
         Assert.Equal(240, groups["shared"].StockLength);
@@ -3131,6 +3172,9 @@ public sealed class ImportBridgeSpecs : IDisposable
             });
 
         Assert.True(reimported.Success, reimported.Message);
+        Assert.Equal(0, reimported.ResultCounts?.CreatedEntryCount);
+        Assert.Equal(2, reimported.ResultCounts?.UpdatedEntryCount);
+        Assert.Equal(2, reimported.ResultCounts?.OutputEntryCount);
         var reconciledPieces = reimported.Project!.State.OptimizationGroups
             .SelectMany(group => group.RequiredPieces)
             .ToDictionary(piece => piece.RequiredPieceId);

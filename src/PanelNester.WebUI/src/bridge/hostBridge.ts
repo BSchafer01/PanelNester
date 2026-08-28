@@ -71,6 +71,7 @@ import {
   type UpdateRequiredPiecesResponse,
   type GenerateSelectedCutPlanRequest,
   type GenerateSelectedCutPlanResponse,
+  type GenerateSelectedCutPlansRequest,
   type GenerateAllStaleCutPlansRequest,
   type GenerateAllStaleCutPlansResponse,
   type CancelCutPlanGenerationRequest,
@@ -540,6 +541,16 @@ class HostBridgeClient {
   ): Promise<GenerateAllStaleCutPlansResponse> {
     return this.invoke<GenerateAllStaleCutPlansResponse>(
       bridgeMessageTypes.generateAllStaleCutPlans,
+      request,
+      longRunningRequestTimeoutMs,
+    );
+  }
+
+  generateSelectedCutPlans(
+    request: GenerateSelectedCutPlansRequest,
+  ): Promise<GenerateAllStaleCutPlansResponse> {
+    return this.invoke<GenerateAllStaleCutPlansResponse>(
+      bridgeMessageTypes.generateSelectedCutPlans,
       request,
       longRunningRequestTimeoutMs,
     );

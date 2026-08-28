@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MaterialCombobox } from '../components/MaterialCombobox';
+import { ConfirmationDialog } from '../components/ConfirmationDialog';
 import { ImportDetails } from '../components/ImportDetails';
 import { StatusPill } from '../components/StatusPill';
 import { ThemedSelect, type ThemedSelectOption } from '../components/ThemedSelect';
@@ -748,6 +749,8 @@ export function ImportPage({
   const [selectedSourceRowIds, setSelectedSourceRowIds] =
     useState<Set<string>>(() => new Set());
   const [newOptimizationGroupName, setNewOptimizationGroupName] = useState('');
+  const [pendingRowDeletion, setPendingRowDeletion] = useState<string>();
+  const [pendingGroupDeletion, setPendingGroupDeletion] = useState<{ group: OptimizationGroup; removeOwnedContent: boolean; message: string }>();
   const selectionAnchorRowId = useRef<string>();
 
   useEffect(() => {
@@ -1504,16 +1507,9 @@ export function ImportPage({
     cancelAddRow();
   };
 
-  const requestDelete = async (rowId: string) => {
-    if (
-      !window.confirm(
-        `Delete ${rowId}? The service will revalidate the remaining import rows.`,
-      )
-    ) {
-      return;
-    }
-
+  const confirmRowDeletion = async (rowId: string) => {
     await onDeletePartRow(rowId);
+    setPendingRowDeletion(undefined);
     if (editingRowId === rowId) {
       cancelEdit();
     }
@@ -1608,9 +1604,7 @@ export function ImportPage({
     const message = removeOwnedContent
       ? `Delete ${group.name} and remove its ${group.parts.length} owned part(s)${hasSavedResults ? ' and saved results' : ''}?`
       : `Delete empty Optimization Group ${group.name}?`;
-    if (window.confirm(message)) {
-      await onDeleteOptimizationGroup(group.optimizationGroupId, removeOwnedContent);
-    }
+    setPendingGroupDeletion({ group, removeOwnedContent, message });
   };
 
   const recordCountLabel =
@@ -3367,7 +3361,7 @@ export function ImportPage({
                                     <button
                                       className="module-table-action module-table-action--danger"
                                       disabled={!bridge.connected || busy}
-                                      onClick={() => void requestDelete(part.rowId)}
+                                      onClick={() => setPendingRowDeletion(part.rowId)}
                                       type="button"
                                     >
                                       Delete
@@ -3453,6 +3447,26 @@ export function ImportPage({
           ) : null}
         </div>
       </section>
+      {pendingRowDeletion ? <ConfirmationDialog
+        danger
+        message={`The service will revalidate the remaining import rows after ${pendingRowDeletion} is deleted.`}
+        onCancel={() => setPendingRowDeletion(undefined)}
+        onConfirm={() => void confirmRowDeletion(pendingRowDeletion)}
+        confirmLabel="Delete row"
+        title={`Delete ${pendingRowDeletion}?`}
+      /> : null}
+      {pendingGroupDeletion ? <ConfirmationDialog
+        danger
+        message={pendingGroupDeletion.message}
+        onCancel={() => setPendingGroupDeletion(undefined)}
+        onConfirm={() => {
+          const request = pendingGroupDeletion;
+          setPendingGroupDeletion(undefined);
+          void onDeleteOptimizationGroup(request.group.optimizationGroupId, request.removeOwnedContent);
+        }}
+        confirmLabel="Delete Optimization Group"
+        title="Delete Optimization Group?"
+      /> : null}
     </div>
   );
 }

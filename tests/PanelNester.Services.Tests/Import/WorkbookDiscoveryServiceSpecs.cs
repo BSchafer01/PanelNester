@@ -122,6 +122,7 @@ public sealed class WorkbookDiscoveryServiceSpecs : IDisposable
             .DiscoverAsync(workbookPath, ProjectKind.StockLength);
 
         var worksheetResult = Assert.Single(result.Worksheets);
+        Assert.Equal(5, worksheetResult.UsedRowCount);
         Assert.Equal("B4:G4", worksheetResult.HeadingRange);
         Assert.Equal(
             HeadingRangeDetectionStatuses.UniqueHighConfidence,

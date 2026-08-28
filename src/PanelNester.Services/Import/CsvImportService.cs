@@ -70,6 +70,7 @@ public sealed class CsvImportService : IImportService
                 {
                     WorksheetName = worksheetName,
                     OriginalPosition = 0,
+                    UsedRowCount = Math.Max(response.Parts.Count, response.RequiredPieces.Count) + 1,
                     HeadingRange = $"R1C1:R1C{response.AvailableColumns.Count}"
                 },
                 Parts = response.Parts.Select(part => part with

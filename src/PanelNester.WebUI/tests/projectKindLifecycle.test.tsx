@@ -74,7 +74,7 @@ describe('Project Kind lifecycle', () => {
     await user.tab();
     expect(sawKerf).toHaveValue('0.0625');
     await user.click(screen.getByRole('button', { name: 'Import' }));
-    expect(screen.getByRole('heading', { name: 'Required Pieces' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Required Piece Entries' })).toBeInTheDocument();
     expect(screen.queryByText(/Material Resolution/)).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Project' }));
 

@@ -1,5 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { AppShell } from './components/AppShell';
+import { ConfirmationDialog } from './components/ConfirmationDialog';
 import { NewProjectDialog } from './components/ProjectKindControls';
 import { hostBridge } from './bridge/hostBridge';
 import { reconcileCutPlanGenerationResponse } from './cutPlanGenerationGuard';
@@ -45,6 +46,7 @@ import {
   type ImportMappingSession,
   type ImportSessionPhase,
   type ImportSessionResponse,
+  type ImportResultCounts,
   type ImportMaterialResolution,
   type ImportResponse,
   type ImportOptions,
@@ -112,6 +114,23 @@ const importBridgeTimeoutMs = 120000;
 const nestingBridgeTimeoutMs = 300000;
 const currentProjectVersion = 7;
 
+function encodeDroppedImportSource(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error('The dropped Import Source could not be read.'));
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      const separator = result.indexOf(',');
+      if (separator < 0) {
+        reject(new Error('The dropped Import Source could not be encoded.'));
+        return;
+      }
+      resolve(result.slice(separator + 1));
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 interface AppState {
   activeRoute: AppRoute;
   projectKind: ProjectKind;
@@ -127,6 +146,8 @@ interface AppState {
   selectedFilePath?: string;
   importSource?: ImportSourceMetadata;
   importConfiguration?: ImportConfiguration;
+  lastImportReceipt?: ImportResultCounts;
+  preImportProject?: ProjectRecord;
   importMappingSession?: ImportMappingSession;
   importMessage: string;
   importPhase?: ImportSessionPhase;
@@ -210,6 +231,8 @@ type AppAction =
       filePath: string;
       response: ImportResponse;
       project?: ProjectRecord;
+      resultCounts?: ImportResultCounts;
+      undoProject?: ProjectRecord;
       message: string;
       selectedMaterialId?: string;
     }
@@ -251,6 +274,7 @@ type AppAction =
       lastNestMaterial?: Material;
       message: string;
     }
+  | { type: 'import-undone' }
   | {
       type: 'project-saved';
       filePath: string;
@@ -541,6 +565,8 @@ const initialState: AppState = {
   selectedFilePath: undefined,
   importSource: undefined,
   importConfiguration: undefined,
+  lastImportReceipt: undefined,
+  preImportProject: undefined,
   importMappingSession: undefined,
   importMessage: defaultImportMessage,
   nestingMessage: defaultNestingMessage,
@@ -868,6 +894,7 @@ function normalizeImportSessionResponse(
     finalized: response.finalized === true,
     project: response.project ?? null,
     workbook: response.workbook ?? null,
+    resultCounts: response.resultCounts ?? null,
   };
 }
 
@@ -1103,6 +1130,7 @@ function createWorkbookImportMappingSession(
   filePath: string,
   started: ImportSessionResponse,
   preview: ImportSessionResponse,
+  projectKind: ProjectKind,
   savedConfiguration?: ImportConfiguration,
   optimizationGroups: OptimizationGroup[] = [],
 ): ImportMappingSession {
@@ -1111,7 +1139,7 @@ function createWorkbookImportMappingSession(
     workbook.worksheets.find(
       (worksheet) => worksheet.worksheetName === workbook.initialWorksheetName,
     ) ?? workbook.worksheets[0];
-  const firstOptions = buildImportOptionsFromResponse(preview);
+  const firstOptions = { ...buildImportOptionsFromResponse(preview), projectKind };
   const worksheets = createWorkbookWorksheetDrafts(
     sessionId,
     workbook,
@@ -1766,6 +1794,8 @@ function reducer(state: AppState, action: AppAction): AppState {
           selectedFilePath: action.filePath,
           importSource: action.project?.state.importSource ?? undefined,
           importConfiguration: action.project?.state.importConfiguration ?? undefined,
+          lastImportReceipt: action.resultCounts,
+          preImportProject: action.undoProject,
           importResponse: action.response,
           optimizationGroups:
             action.project?.state.optimizationGroups ??
@@ -1871,6 +1901,22 @@ function reducer(state: AppState, action: AppAction): AppState {
         },
         'Nesting results changed. Save the project to keep this layout with its material snapshot.',
       );
+    }
+    case 'import-undone': {
+      if (!state.preImportProject) return state;
+      const project = state.preImportProject;
+      return markProjectDirty({
+        ...state,
+        selectedFilePath: project.state.sourceFilePath ?? undefined,
+        importSource: project.state.importSource ?? undefined,
+        importConfiguration: project.state.importConfiguration ?? undefined,
+        importResponse: getProjectImportResponse(project),
+        optimizationGroups: project.state.optimizationGroups,
+        activeOptimizationGroupId: project.state.optimizationGroups[0]?.optimizationGroupId,
+        lastImportReceipt: undefined,
+        preImportProject: undefined,
+        importMessage: 'The last import was undone. Save the project to keep this change.',
+      }, 'Import undone.');
     }
     case 'nesting-failed':
       return {
@@ -2280,6 +2326,10 @@ export default function App() {
   const [unsavedPromptActionLabel, setUnsavedPromptActionLabel] = useState<string | null>(
     null,
   );
+  const [pendingImportReplacement, setPendingImportReplacement] = useState<{
+    requestedFilePath?: string;
+    droppedFile?: File;
+  } | null>(null);
   const materialSelectionRef = useRef({
     importResponse: state.importResponse,
     selectedMaterialId: state.selectedMaterialId,
@@ -3410,25 +3460,25 @@ export default function App() {
   saveProjectRef.current = () => saveProject();
   saveProjectAsRef.current = () => saveProject({ saveAs: true });
 
-  const importFile = async () => {
+  const importFile = async (
+    requestedFilePath?: string,
+    replacementConfirmed = false,
+    droppedFile?: File,
+  ) => {
     const replacingExistingImportSource = hasExistingImportSource(state);
-    if (
-      replacingExistingImportSource &&
-      !window.confirm(
-        'Replace the current Import Source? Imported Worksheets, source-derived parts, saved import configuration, and affected Optimization Results will be removed. Manual parts and their groups will be preserved.',
-      )
-    ) {
-      dispatch({
-        type: 'import-selection-cancelled',
-        message: 'Import Source replacement cancelled. The current project is unchanged.',
-      });
+    if (replacingExistingImportSource && !replacementConfirmed) {
+      setPendingImportReplacement({ requestedFilePath, droppedFile });
       return;
     }
 
     dispatch({
       type: 'import-started',
       phase: 'opening',
-      message: 'Opening the native file picker and preparing the import review…',
+      message: droppedFile
+        ? `Reading the dropped Import Source ${droppedFile.name}…`
+        : requestedFilePath
+        ? `Preparing to re-import ${fileNameFromPath(requestedFilePath)}…`
+        : 'Opening the native file picker and preparing the import review…',
     });
 
     try {
@@ -3468,7 +3518,11 @@ export default function App() {
 
         const sessionId = createImportSessionId();
         activeImportSessionIdRef.current = sessionId;
-        const dialogResponse = await openImportDialog();
+        const dialogResponse: OpenFileDialogResponse = droppedFile
+          ? { success: true, filePath: droppedFile.name }
+          : requestedFilePath
+          ? { success: true, filePath: requestedFilePath }
+          : await openImportDialog();
         if (activeImportSessionIdRef.current !== sessionId) {
           return;
         }
@@ -3491,11 +3545,16 @@ export default function App() {
           phase: 'reading',
           message: `Reading an immutable snapshot of ${fileNameFromPath(selectedFilePath)}…`,
         });
+        const droppedContentBase64 = droppedFile
+          ? await encodeDroppedImportSource(droppedFile)
+          : undefined;
         const started = normalizeImportSessionResponse(
           await trackImportOperation(sessionId, () =>
             hostBridge.beginImportSession({
               sessionId,
-              importSourcePath: selectedFilePath,
+              importSourcePath: droppedFile ? null : selectedFilePath,
+              importSourceFileName: droppedFile?.name ?? null,
+              importSourceContentBase64: droppedContentBase64 ?? null,
               projectKind: state.projectKind,
             })),
           sessionId,
@@ -3546,6 +3605,7 @@ export default function App() {
               selectedFilePath,
               started,
               started,
+              state.projectKind,
               state.importConfiguration,
               state.optimizationGroups,
             ),
@@ -3592,6 +3652,7 @@ export default function App() {
               selectedFilePath,
               started,
               response,
+              state.projectKind,
               state.importConfiguration,
               state.optimizationGroups,
             ),
@@ -3658,8 +3719,14 @@ export default function App() {
         return;
       }
 
+      if (droppedFile) {
+        throw new Error('Dropped Import Sources require the current OptiFab desktop import-session bridge.');
+      }
+
       if (hasCapability(bridgeMessageTypes.importFile)) {
-        const dialogResponse = hasCapability(bridgeMessageTypes.openFileDialog)
+        const dialogResponse = requestedFilePath
+          ? ({ success: true, filePath: requestedFilePath } satisfies OpenFileDialogResponse)
+          : hasCapability(bridgeMessageTypes.openFileDialog)
           ? await openImportDialog()
           : undefined;
         const selectedFilePath = dialogResponse?.filePath ?? undefined;
@@ -3736,7 +3803,9 @@ export default function App() {
         return;
       }
 
-      const dialogResponse = await openImportDialog();
+      const dialogResponse: OpenFileDialogResponse = requestedFilePath
+        ? { success: true, filePath: requestedFilePath }
+        : await openImportDialog();
 
       if (!dialogResponse.success || !dialogResponse.filePath) {
         dispatch({
@@ -3822,7 +3891,10 @@ export default function App() {
     });
   };
 
-  const previewImportMapping = async (sessionOverride?: ImportMappingSession) => {
+  const previewImportMapping = async (
+    sessionOverride?: ImportMappingSession,
+    worksheetNames?: string[],
+  ) => {
     const session = sessionOverride ?? state.importMappingSession;
     if (!session) {
       return;
@@ -3835,41 +3907,111 @@ export default function App() {
     });
 
     try {
-      const response =
+      const usesImportSession =
         session.sessionId !== 'legacy-import' &&
-        hasCapability(bridgeMessageTypes.previewImportSession)
-          ? normalizeImportSessionResponse(
-              await trackImportOperation(session.sessionId, () =>
-                hostBridge.previewImportSession({
-                  sessionId: session.sessionId,
-                  options: session.options,
-                  newMaterials: session.newMaterials,
-                  worksheetName: session.activeWorksheetName ?? null,
-                  headingRange:
-                    session.worksheets?.find(
-                      (draft) => draft.worksheet.worksheetName === session.activeWorksheetName,
-                    )?.headingRange ?? null,
-                })),
-              session.sessionId,
-            )
-          : normalizeImportFileResponse(
-              await hostBridge.invoke<ImportFileResponse>(
-                bridgeMessageTypes.importFile,
-                {
-                  filePath: session.filePath,
-                  options: session.options,
-                } satisfies ImportFileRequest,
-                importBridgeTimeoutMs,
+        hasCapability(bridgeMessageTypes.previewImportSession);
+      if (usesImportSession && session.worksheets?.length) {
+        const requestedNames = worksheetNames?.length
+          ? [...new Set(worksheetNames)]
+          : session.activeWorksheetName
+            ? [session.activeWorksheetName]
+            : [];
+        const targets = requestedNames.flatMap((worksheetName) => {
+          const draft = session.worksheets?.find(
+            (candidate) => candidate.worksheet.worksheetName === worksheetName,
+          );
+          return draft?.selected ? [draft] : [];
+        });
+        let nextSession = session;
+        let filePath = session.filePath;
+
+        for (const target of targets) {
+          const response = normalizeImportSessionResponse(
+            await trackImportOperation(session.sessionId, () =>
+              hostBridge.previewImportSession({
+                sessionId: session.sessionId,
+                options: target.options,
+                newMaterials: target.newMaterials,
+                worksheetName: target.worksheet.worksheetName,
+                headingRange: target.headingRange || null,
+              })),
+            session.sessionId,
+          );
+          if (activeImportSessionIdRef.current !== session.sessionId) {
+            return;
+          }
+          if (responseLooksLikeImportPreparationFailure(response)) {
+            dispatch({
+              type: 'import-failed',
+              message: getBridgeErrorMessage(
+                response.error,
+                response.message ?? `The desktop host could not refresh ${target.worksheet.worksheetName}.`,
               ),
-            );
-      if (
-        session.sessionId !== 'legacy-import' &&
-        activeImportSessionIdRef.current !== session.sessionId
-      ) {
+            });
+            return;
+          }
+
+          filePath = pickImportFilePath(response, filePath) ?? filePath;
+          const recognizedOptions = buildImportOptionsFromResponse(response);
+          const refreshedOptions = mergeRecognizedColumnMappings(
+            {
+              ...target.options,
+              materialMappings: target.options.materialMappings.length > 0
+                ? target.options.materialMappings
+                : recognizedOptions.materialMappings,
+            },
+            response,
+          );
+          nextSession = {
+            ...nextSession,
+            filePath,
+            worksheets: nextSession.worksheets?.map((draft) =>
+              draft.worksheet.worksheetName === target.worksheet.worksheetName
+                ? {
+                    ...draft,
+                    preview: response,
+                    options: refreshedOptions,
+                    hasPendingChanges: false,
+                  }
+                : draft),
+          };
+        }
+
+        const activeDraft = nextSession.worksheets?.find(
+          (draft) => draft.worksheet.worksheetName === nextSession.activeWorksheetName,
+        ) ?? nextSession.worksheets?.find((draft) => draft.selected);
+        if (activeDraft) {
+          nextSession = {
+            ...nextSession,
+            preview: activeDraft.preview,
+            options: activeDraft.options,
+            newMaterials: activeDraft.newMaterials,
+            hasPendingChanges: activeDraft.hasPendingChanges,
+          };
+        }
+        dispatch({
+          type: 'import-mapping-ready',
+          session: nextSession,
+          message: describeImportReview(
+            filePath,
+            toImportResponse(activeDraft?.preview ?? nextSession.preview),
+            nextSession,
+          ),
+        });
         return;
       }
-      const filePath = pickImportFilePath(response, session.filePath) ?? session.filePath;
 
+      const response = normalizeImportFileResponse(
+        await hostBridge.invoke<ImportFileResponse>(
+          bridgeMessageTypes.importFile,
+          {
+            filePath: session.filePath,
+            options: session.options,
+          } satisfies ImportFileRequest,
+          importBridgeTimeoutMs,
+        ),
+      );
+      const filePath = pickImportFilePath(response, session.filePath) ?? session.filePath;
       if (responseLooksLikeImportPreparationFailure(response)) {
         dispatch({
           type: 'import-failed',
@@ -3880,7 +4022,6 @@ export default function App() {
         });
         return;
       }
-
       const recognizedOptions = buildImportOptionsFromResponse(response);
       const refreshedOptions = mergeRecognizedColumnMappings(
         {
@@ -3891,28 +4032,11 @@ export default function App() {
         },
         response,
       );
-      let nextSession = createImportMappingSession(session.sessionId, filePath, response, {
+      const nextSession = createImportMappingSession(session.sessionId, filePath, response, {
         ...session,
         options: refreshedOptions,
         hasPendingChanges: false,
       });
-      if (nextSession.worksheets && nextSession.activeWorksheetName) {
-        nextSession = {
-          ...nextSession,
-          worksheets: nextSession.worksheets.map((draft) =>
-            draft.worksheet.worksheetName === nextSession.activeWorksheetName
-              ? {
-                  ...draft,
-                  preview: response,
-                  options: nextSession.options,
-                  newMaterials: nextSession.newMaterials,
-                  hasPendingChanges: false,
-                }
-              : draft,
-          ),
-        };
-      }
-
       dispatch({
         type: 'import-mapping-ready',
         session: nextSession,
@@ -3941,6 +4065,7 @@ export default function App() {
       return;
     }
 
+    const undoProject = buildProjectRecord(state);
     dispatch({
       type: 'import-started',
       phase: 'finalizing',
@@ -4041,12 +4166,16 @@ export default function App() {
         filePath,
         response: importResponse,
         project: sessionResponse?.project ?? undefined,
+        resultCounts: sessionResponse?.resultCounts ?? undefined,
+        undoProject: sessionResponse?.resultCounts ? undoProject : undefined,
         selectedMaterialId: pickMaterialId(
           effectiveMaterials,
           importResponse,
           state.selectedMaterialId,
         ),
-        message: describeImportResult(filePath, importResponse),
+        message: sessionResponse?.resultCounts
+          ? `Imported ${sessionResponse.resultCounts.sourceRowCount} source rows as ${sessionResponse.resultCounts.outputEntryCount} required-piece entries from ${sessionResponse.resultCounts.worksheetCount} worksheets.`
+          : describeImportResult(filePath, importResponse),
       });
     } catch (error) {
       if (
@@ -4695,6 +4824,50 @@ export default function App() {
     }
   };
 
+  const generateSelectedCutPlans = async (optimizationGroupIds: string[]): Promise<void> => {
+    const targetOptimizationGroupIds = [...new Set(optimizationGroupIds)].filter((id) =>
+      state.optimizationGroups.some((group) =>
+        group.optimizationGroupId === id &&
+        group.requiredPieces.length > 0 &&
+        Boolean(group.stockLength && group.stockLength > 0)));
+    if (targetOptimizationGroupIds.length === 0) {
+      throw new Error('Select at least one ready Optimization Group.');
+    }
+    if (targetOptimizationGroupIds.length === 1) {
+      await generateSelectedCutPlan(targetOptimizationGroupIds[0]);
+      return;
+    }
+    if (!hasCapability(bridgeMessageTypes.generateSelectedCutPlans)) {
+      throw new Error('Generating multiple selected Optimization Groups requires an updated desktop host.');
+    }
+
+    const operationId = createGenerationOperationId();
+    const generationProject = buildProjectRecord(state);
+    activeGenerationOperationIdRef.current = operationId;
+    dispatch({ type: 'generation-operation-started', message: 'Preparing selected Optimization Groups…' });
+    try {
+      const response = await trackGenerationOperation(
+        operationId,
+        () => hostBridge.generateSelectedCutPlans({
+          project: generationProject,
+          optimizationGroupIds: targetOptimizationGroupIds,
+          operationId,
+        }),
+      );
+      applyCutPlanGenerationResponse(
+        generationProject,
+        response.project,
+        targetOptimizationGroupIds,
+        targetOptimizationGroupIds[0],
+        response.message,
+      );
+    } catch (error) {
+      const message = getErrorMessage(error, 'Selected Optimization Groups could not generate Cut Plans.');
+      dispatch({ type: 'generation-operation-finished', message });
+      throw new Error(message);
+    }
+  };
+
   const generateAllStaleCutPlans = async (): Promise<void> => {
     if (!hasCapability(bridgeMessageTypes.generateAllStaleCutPlans)) {
       throw new Error('Generate All Stale is not available from the connected desktop host.');
@@ -5100,9 +5273,13 @@ export default function App() {
           busy={state.projectBusy || state.importBusy || state.generationBusy}
           generationBusy={state.generationBusy}
           generationProgress={state.generationProgress}
+          importConfiguration={state.importConfiguration}
+          importSource={state.importSource}
+          lastImportReceipt={state.lastImportReceipt}
           inchDisplayFormat={state.projectSettings.inchDisplayFormat}
           mappingSession={state.importMappingSession}
-          message={state.projectMessage}
+          message={state.importMessage || state.projectMessage}
+          projectDirty={state.projectDirty}
           onCancelImportMapping={cancelImportMapping}
           onCancelGeneration={cancelCutPlanGeneration}
           onCreateOptimizationGroup={(name, stockLength) =>
@@ -5118,8 +5295,14 @@ export default function App() {
           }
           onFinalizeImportMapping={finalizeImportMapping}
           onGenerateSelected={generateSelectedCutPlan}
+          onGenerateSelectedGroups={generateSelectedCutPlans}
           onGenerateAllStale={generateAllStaleCutPlans}
+          onImportDroppedFile={(file) => importFile(undefined, false, file)}
           onImportFile={importFile}
+          onReimportFile={state.importSource?.importSourcePath
+            ? () => importFile(state.importSource!.importSourcePath)
+            : undefined}
+          onUndoImport={state.preImportProject ? () => dispatch({ type: 'import-undone' }) : undefined}
           onInchDisplayFormatChange={(inchDisplayFormat: InchDisplayFormat) =>
             dispatch({
               type: 'project-settings-changed',
@@ -5423,6 +5606,10 @@ export default function App() {
       ? 'app-route app-route--results'
       : state.activeRoute === 'extrusions'
         ? 'app-route app-route--extrusions'
+        : state.activeRoute === 'import' &&
+            state.projectKind === 'stockLength' &&
+            (Boolean(state.importMappingSession) || state.optimizationGroups.some((group) => group.requiredPieces.length > 0))
+          ? 'app-route app-route--stock-length-import'
         : 'app-route';
 
   return (
@@ -5458,6 +5645,21 @@ export default function App() {
           onCreate={createNewProject}
         />
       ) : null}
+      {pendingImportReplacement ? <ConfirmationDialog
+        danger
+        message="Imported Worksheets, source-derived parts, saved import configuration, and affected Optimization Results will be removed. Manual parts and their groups will be preserved."
+        onCancel={() => {
+          setPendingImportReplacement(null);
+          dispatch({ type: 'import-selection-cancelled', message: 'Import Source replacement cancelled. The current project is unchanged.' });
+        }}
+        onConfirm={() => {
+          const request = pendingImportReplacement;
+          setPendingImportReplacement(null);
+          void importFile(request.requestedFilePath, true, request.droppedFile);
+        }}
+        confirmLabel="Replace Import Source"
+        title="Replace the current Import Source?"
+      /> : null}
       {unsavedPromptActionLabel ? (
         <div
           className="results-dialog-backdrop"
