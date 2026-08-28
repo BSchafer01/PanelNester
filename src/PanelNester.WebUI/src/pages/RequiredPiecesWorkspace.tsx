@@ -11,6 +11,7 @@ import type {
   RequiredPieceChange,
 } from '../types/contracts';
 import { RequiredPieceDrawer } from './RequiredPieceDrawer';
+import { ProjectEntriesEmptyState } from './ProjectEntriesEmptyState';
 import {
   filterRequiredPieces,
   flattenRequiredPieces,
@@ -108,8 +109,6 @@ export function RequiredPiecesWorkspace({
   const [newStockLength, setNewStockLength] = useState('');
   const [stockLengthDrafts, setStockLengthDrafts] = useState<Record<string, string>>({});
   const [showImportDetails, setShowImportDetails] = useState(false);
-  const [draggingImport, setDraggingImport] = useState(false);
-  const [dropMessage, setDropMessage] = useState('');
   const [pendingGeneration, setPendingGeneration] = useState<{ groupIds: string[]; action: 'selected' | 'all'; quantity: number } | null>(null);
 
   const allRows = useMemo(() => flattenRequiredPieces(groups), [groups]);
@@ -161,37 +160,6 @@ export function RequiredPiecesWorkspace({
     if (request.action === 'selected' && onGenerateSelected) run(() => onGenerateSelected(request.groupIds));
     if (request.action === 'all' && onGenerateAll) run(onGenerateAll);
   };
-  const importDroppedFile = (dataTransfer: DataTransfer) => {
-    setDraggingImport(false);
-    const file = dataTransfer.files[0] as (File & { path?: string }) | undefined;
-    const uri = dataTransfer.getData('text/uri-list').split(/\r?\n/).find((value) => value && !value.startsWith('#'));
-    const plainText = dataTransfer.getData('text/plain').trim();
-    let filePath = file?.path || uri || plainText;
-    if (filePath.toLocaleLowerCase().startsWith('file://')) {
-      try {
-        filePath = decodeURIComponent(new URL(filePath).pathname).replace(/^\/(?:([A-Za-z]:))/, '$1');
-      } catch {
-        filePath = '';
-      }
-    }
-    const displayName = file?.name || filePath;
-    if (!/\.(csv|xlsx|xlsm)$/i.test(displayName)) {
-      setDropMessage('Drop a CSV, XLSX, or XLSM Import Source.');
-      return;
-    }
-    if (file && !file.path && onImportDroppedFile) {
-      setDropMessage('');
-      run(() => onImportDroppedFile(file));
-      return;
-    }
-    if (!filePath) {
-      setDropMessage('OptiFab could not read the dropped file path. Use Import Workbook or CSV instead.');
-      return;
-    }
-    setDropMessage('');
-    if (onImportFile) run(() => onImportFile(filePath));
-  };
-
   return <div className={allRows.length > 0 ? 'stock-length-workspace stock-length-workspace--completed' : 'stock-length-workspace'}>
     <header className="stock-length-workspace__header">
       <div>
@@ -205,16 +173,14 @@ export function RequiredPiecesWorkspace({
       </div> : null}
     </header>
 
-    {isEmpty ? <section aria-label="Import Required Pieces" className={draggingImport ? 'project-card stock-length-workspace__empty stock-length-workspace__empty--dragging' : 'project-card stock-length-workspace__empty'} onDragEnter={(event) => { event.preventDefault(); setDraggingImport(true); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDraggingImport(false); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }} onDrop={(event) => { event.preventDefault(); importDroppedFile(event.dataTransfer); }} role="region">
-      <div className="stock-length-workspace__empty-icon" aria-hidden="true">◇<span>◇◇</span></div>
-      <h2>No Required Pieces have been added yet.</h2>
-      <p>Drop a Workbook or CSV here, choose one below, or add a Required Piece manually.</p>
-      <div className="form-actions">
-        <button className="primary-button" disabled={busy || !onImportFile} onClick={() => onImportFile && run(() => onImportFile())} type="button">Import Workbook or CSV</button>
-        <button className="secondary-button" disabled={busy || groups.length === 0} onClick={() => setDrawer({ groupId: groups[0]?.optimizationGroupId })} type="button">＋ Add Required Piece manually</button>
-      </div>
-      {dropMessage ? <p className="stock-import-workflow__attention" role="alert">{dropMessage}</p> : null}
-    </section> : null}
+    {isEmpty ? <ProjectEntriesEmptyState
+      busy={busy}
+      canAddManually={groups.length > 0}
+      onAddManually={() => setDrawer({ groupId: groups[0]?.optimizationGroupId })}
+      onImportDroppedFile={onImportDroppedFile}
+      onImportFile={onImportFile}
+      projectKind="stockLength"
+    /> : null}
 
     {!isEmpty ? <div className={importSource ? 'stock-length-workspace__summary-row' : 'stock-length-workspace__summary-row stock-length-workspace__summary-row--single'}>
         <section className="project-card stock-length-workspace__groups stock-length-import__group-create">
@@ -255,8 +221,8 @@ export function RequiredPiecesWorkspace({
             <select aria-label="Filter by source" onChange={(event) => setSourceFilter(event.target.value as RequiredPieceSourceFilter)} value={sourceFilter}><option value="all">All sources</option><option value="worksheet">Imported Worksheets</option><option value="manual">Manual</option></select>
             <select aria-label="Filter by status" onChange={(event) => setStatusFilter(event.target.value as RequiredPieceStatusFilter)} value={statusFilter}><option value="all">All statuses</option><option value="valid">Valid</option><option value="warning">Warning</option><option value="error">Error</option></select>
           </div>
-          <div aria-label="Saved Required Pieces table" className="table-wrap stock-length-workspace__pieces-scroll stock-length-import__saved-pieces-scroll"><table><thead><tr><th>Optimization Group</th><th>Qty</th><th>Length</th><th>Profile Number</th><th>Finish</th><th>Part Name</th><th>Part Number</th><th>Source</th><th>Actions</th></tr></thead><tbody>
-            {pagination.rows.map(({ group, piece, sourceLabel }) => <tr key={piece.requiredPieceId}><td>{group.name}</td><td>{piece.quantity}</td><td>{formatInches(piece.length, inchDisplayFormat)}</td><td>{piece.profileNumber}</td><td>{piece.finish || 'No finish specified'}</td><td>{piece.partName || '—'}</td><td>{piece.partNumber || '—'}</td><td title={piece.sourceReferences.map((reference) => `${reference.worksheetName}!${reference.physicalRow}`).join(', ')}>{sourceLabel}</td><td><div className="table-actions"><button aria-label={`Edit Required Piece ${piece.requiredPieceId}`} className="secondary-button" onClick={() => setDrawer({ groupId: group.optimizationGroupId, piece })} type="button">Edit</button><button aria-label={`Delete Required Piece ${piece.requiredPieceId}`} className="danger-button" onClick={() => run(() => onDeletePiece(group.optimizationGroupId, piece.requiredPieceId))} type="button">Delete</button></div></td></tr>)}
+          <div aria-label="Saved Required Pieces table" className="table-wrap stock-length-workspace__pieces-scroll stock-length-import__saved-pieces-scroll"><table><thead><tr><th>Optimization Group</th><th>Qty</th><th>Length</th><th>Profile Number</th><th>Finish</th><th>Part Name</th><th>Part Number</th><th>Source</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+            {pagination.rows.map(({ group, piece, sourceLabel, status }) => <tr key={piece.requiredPieceId}><td>{group.name}</td><td>{piece.quantity}</td><td>{formatInches(piece.length, inchDisplayFormat)}</td><td>{piece.profileNumber}</td><td>{piece.finish || 'No finish specified'}</td><td>{piece.partName || '—'}</td><td>{piece.partNumber || '—'}</td><td title={piece.sourceReferences.map((reference) => `${reference.worksheetName}!${reference.physicalRow}`).join(', ')}>{sourceLabel}</td><td><div className="module-status-stack"><span className={`module-status-chip module-status-chip--${status}`} title={(piece.validationMessages ?? []).join(' | ') || 'Ready'}>{status}</span><span className="module-status-note">{piece.validationMessages?.[0] ?? 'Ready for cutting'}</span></div></td><td><div className="table-actions"><button aria-label={`Edit Required Piece ${piece.requiredPieceId}`} className="module-table-action" onClick={() => setDrawer({ groupId: group.optimizationGroupId, piece })} type="button">Edit</button><button aria-label={`Delete Required Piece ${piece.requiredPieceId}`} className="module-table-action module-table-action--danger" onClick={() => run(() => onDeletePiece(group.optimizationGroupId, piece.requiredPieceId))} type="button">Delete</button></div></td></tr>)}
           </tbody></table></div>
           {filteredRows.length === 0 ? <p className="section-note">No Required Pieces match the current filters.</p> : null}
           <div className="pagination-bar"><span>Showing {pagination.first}–{pagination.last} of {filteredRows.length} Required Piece Entries</span><div className="pagination-controls"><button className="secondary-button" disabled={pagination.page <= 1} onClick={() => setPage((value) => value - 1)} type="button">‹</button><span>Page {pagination.page} of {pagination.pageCount}</span><button className="secondary-button" disabled={pagination.page >= pagination.pageCount} onClick={() => setPage((value) => value + 1)} type="button">›</button><select aria-label="Required Piece Entries per page" onChange={(event) => setPageSize(Number(event.target.value))} value={pageSize}>{requiredPiecePageSizes.map((size) => <option key={size} value={size}>{size} / page</option>)}</select></div></div>

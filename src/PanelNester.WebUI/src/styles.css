@@ -81,6 +81,41 @@ option {
   color: var(--panel-text);
 }
 
+/* Keep ordinary controls consistent across active and finalized import workspaces. */
+:where(.import-workspace, .project-import-workflow, .stock-import-workflow, .stock-length-workspace)
+  :where(input:not([type='checkbox']):not([type='radio']):not([type='file']), select, textarea) {
+  min-width: 0;
+  min-height: 44px;
+  border: 1px solid var(--panel-border-strong);
+  border-radius: 10px;
+  padding: 0 12px;
+  background: var(--panel-surface-3);
+  color: var(--panel-text);
+  color-scheme: dark;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+:where(.import-workspace, .project-import-workflow, .stock-import-workflow, .stock-length-workspace)
+  :where(input:not([type='checkbox']):not([type='radio']):not([type='file']), textarea)::placeholder {
+  color: var(--panel-text-muted);
+}
+
+:where(.import-workspace, .project-import-workflow, .stock-import-workflow, .stock-length-workspace)
+  :where(input:not([type='checkbox']):not([type='radio']):not([type='file']), select, textarea):focus {
+  border-color: rgba(71, 216, 255, 0.5);
+  box-shadow: 0 0 0 3px rgba(71, 216, 255, 0.08);
+}
+
+:where(.import-workspace, .project-import-workflow, .stock-import-workflow, .stock-length-workspace)
+  :where(input:not([type='checkbox']):not([type='radio']):not([type='file']), select, textarea):disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+:where(.import-workspace, .project-import-workflow, .stock-import-workflow, .stock-length-workspace) textarea {
+  padding-block: 10px;
+}
+
 .app-shell {
   display: flex;
   flex-direction: column;
@@ -374,7 +409,8 @@ option {
   padding: 0;
 }
 
-.app-route--stock-length-import {
+.app-route--stock-length-import,
+.app-route--project-import {
   display: grid;
   height: 100%;
   min-height: 0;
@@ -1468,7 +1504,9 @@ td {
 
 .module-search input {
   width: 100%;
+  min-height: 0;
   border: none;
+  padding: 0;
   background: transparent;
   color: var(--panel-text);
 }
@@ -4952,6 +4990,75 @@ td {
   gap: 0.75rem;
 }
 
+.sheet-parts-workspace__header {
+  padding: 0;
+}
+
+.sheet-parts-workspace__header .module-hero__copy {
+  max-width: none;
+}
+
+.sheet-parts-workspace__legacy-summary {
+  display: contents;
+}
+
+.sheet-parts-workspace .optimization-groups-list {
+  gap: 0;
+  border: 1px solid var(--panel-border);
+  border-radius: 0.55rem;
+  overflow: hidden;
+}
+
+.sheet-parts-workspace__group-head,
+.sheet-parts-workspace .optimization-group-row {
+  display: grid;
+  grid-template-columns: 7rem minmax(12rem, 1fr) minmax(12rem, 1fr) 5rem minmax(12rem, auto);
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.sheet-parts-workspace__group-head {
+  padding: 0.7rem;
+  color: var(--panel-text-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: var(--panel-surface-2);
+}
+
+.sheet-parts-workspace .optimization-group-row {
+  border: 0;
+  border-top: 1px solid var(--panel-border);
+  border-radius: 0;
+  background: transparent;
+}
+
+.sheet-parts-workspace .optimization-group-row--active {
+  background: color-mix(in srgb, var(--panel-accent) 5%, transparent);
+}
+
+.sheet-parts-workspace .optimization-group-row > span > strong {
+  display: none;
+}
+
+.sheet-parts-workspace__parts {
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+}
+
+.sheet-parts-workspace__parts .module-table-shell {
+  min-height: 0;
+  height: 100%;
+  max-height: none;
+}
+
+.sheet-parts-workspace__parts .module-table-toolbar {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
 .stock-length-workspace__last-import h2 {
   overflow-wrap: anywhere;
 }
@@ -5094,6 +5201,18 @@ td {
   overflow: auto;
 }
 
+.stock-import-workflow__mapping-layout > .stock-import-workflow__mapping {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.stock-import-workflow__mapping-controls {
+  display: grid;
+  gap: 0.75rem;
+}
+
 .stock-import-workflow__summary dl > div,
 .stock-import-workflow__review-summary dl > div {
   display: flex;
@@ -5153,9 +5272,11 @@ td {
 }
 
 .stock-import-workflow__field-table {
+  min-height: 0;
   border: 1px solid var(--panel-border);
   border-radius: 0.55rem;
-  overflow: hidden;
+  overflow: auto;
+  scrollbar-gutter: stable;
 }
 
 .stock-import-workflow__field-head,
@@ -5180,6 +5301,9 @@ td {
 }
 
 .stock-import-workflow__field-head {
+  position: sticky;
+  z-index: 2;
+  top: 0;
   color: var(--text-muted);
   font-size: 0.72rem;
   font-weight: 800;
@@ -5194,6 +5318,21 @@ td {
 
 .stock-import-workflow__field-row select {
   min-width: 0;
+}
+
+.sheet-import-materials {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  border-top: 1px solid var(--panel-border);
+  padding-top: 1rem;
+}
+
+.sheet-import-materials .mapping-resolution-card__body {
+  display: grid;
+  grid-template-columns: minmax(14rem, 1fr) auto auto;
+  align-items: end;
+  gap: 0.65rem;
 }
 
 .stock-import-workflow__attention {
@@ -5274,7 +5413,8 @@ td {
 }
 
 @media (max-width: 1180px) {
-  .app-route--stock-length-import {
+  .app-route--stock-length-import,
+  .app-route--project-import {
     height: auto;
     overflow: auto;
   }
@@ -5337,6 +5477,8 @@ td {
 
   .stock-length-workspace__group-form,
   .stock-length-workspace__filters,
+  .sheet-parts-workspace__group-head,
+  .sheet-parts-workspace .optimization-group-row,
   .stock-import-workflow__field-head,
   .stock-import-workflow__field-row {
     grid-template-columns: 1fr;

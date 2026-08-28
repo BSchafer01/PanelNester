@@ -4,17 +4,19 @@ import type {
   ImportSourceMetadata,
   ImportResultCounts,
   InchDisplayFormat,
+  Material,
   OptimizationGroup,
   RequiredPieceChange,
   StockLengthGenerationProgress,
 } from '../types/contracts';
 import { RequiredPiecesWorkspace, formatInches } from './RequiredPiecesWorkspace';
-import { StockLengthImportWorkflow } from './StockLengthImportWorkflow';
+import { ProjectImportWorkflow } from './ProjectImportWorkflow';
 
 export { formatInches };
 
 interface RequiredPiecesPageProps {
   optimizationGroups: OptimizationGroup[];
+  materials?: Material[];
   activeOptimizationGroupId?: string;
   inchDisplayFormat: InchDisplayFormat;
   busy: boolean;
@@ -51,6 +53,7 @@ interface RequiredPiecesPageProps {
 
 export function RequiredPiecesPage({
   optimizationGroups,
+  materials = [],
   activeOptimizationGroupId,
   inchDisplayFormat,
   busy,
@@ -89,15 +92,17 @@ export function RequiredPiecesPage({
     onFinalizeImportMapping &&
     onCancelImportMapping
   ) {
-    return <StockLengthImportWorkflow
+    return <ProjectImportWorkflow
       busy={busy}
       groups={optimizationGroups}
+      materials={materials}
       message={message}
       onCancel={onCancelImportMapping}
       onFinalize={onFinalizeImportMapping}
       onPreview={onPreviewImportMapping}
       onReplaceFile={onImportFile}
       onUpdateSession={onUpdateImportMappingSession}
+      projectKind="stockLength"
       session={mappingSession}
     />;
   }

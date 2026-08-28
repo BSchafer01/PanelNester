@@ -74,7 +74,6 @@ export function applyWorksheetLayoutMappings(
       ...draft,
       options: {
         ...draft.options,
-        projectKind: 'stockLength',
         columnMappings: fieldsByColumnIndex.flatMap(([columnIndex, targetField]) => {
           const sourceColumn = targetColumns[columnIndex]?.address;
           return sourceColumn ? [{ sourceColumn, targetField }] : [];

@@ -90,6 +90,7 @@ interface ImportPageProps {
   importResponse: ImportResponse;
   importSource?: ImportSourceMetadata;
   importConfiguration?: ImportConfiguration;
+  /** Active Import Sessions are routed through ProjectImportWorkflow by the application shell. */
   mappingSession?: ImportMappingSession;
   importMessage: string;
   importPhase?: ImportSessionPhase;
@@ -749,6 +750,7 @@ export function ImportPage({
   const [selectedSourceRowIds, setSelectedSourceRowIds] =
     useState<Set<string>>(() => new Set());
   const [newOptimizationGroupName, setNewOptimizationGroupName] = useState('');
+  const [showOptimizationGroupForm, setShowOptimizationGroupForm] = useState(false);
   const [pendingRowDeletion, setPendingRowDeletion] = useState<string>();
   const [pendingGroupDeletion, setPendingGroupDeletion] = useState<{ group: OptimizationGroup; removeOwnedContent: boolean; message: string }>();
   const selectionAnchorRowId = useRef<string>();
@@ -1611,14 +1613,37 @@ export function ImportPage({
     filteredParts.length === activeImportResponse.parts.length
       ? `Showing ${filteredParts.length} records`
       : `Showing ${filteredParts.length} of ${activeImportResponse.parts.length} records`;
+  const isFinalizedWorkspace = !mappingSession;
+  const importedSheetParts = activeImportResponse.parts.filter((part) => !part.isManual);
+  const importedSourceRowCount = importedSheetParts.reduce(
+    (total, part) => total + Math.max(1, part.sourceReferences?.length ?? 0),
+    0,
+  );
+  const importSourceName = importSource?.importSourcePath
+    .split(/[\\/]/)
+    .filter(Boolean)
+    .slice(-1)[0];
 
   return (
-    <div className="page-grid import-workspace">
-      <section className="module-hero module-hero--import">
+    <div className={isFinalizedWorkspace
+      ? 'sheet-parts-workspace stock-length-workspace stock-length-workspace--completed import-workspace'
+      : 'page-grid import-workspace'}>
+      <section className={isFinalizedWorkspace
+        ? 'stock-length-workspace__header sheet-parts-workspace__header'
+        : 'module-hero module-hero--import'}>
         <div className="module-hero__copy">
-          <p className="module-hero__breadcrumb">Workspace / Module</p>
-          <h1>Import &amp; Panel Management</h1>
-          <p className="module-hero__intro">{importMessage}</p>
+          {!isFinalizedWorkspace ? <p className="module-hero__breadcrumb">Workspace / Module</p> : null}
+          <div className="stock-length-workspace__title-line">
+            <h1>{isFinalizedWorkspace
+              ? <>Sheet Part Entries{hasParts ? ` (${activeImportResponse.parts.length})` : ''}</>
+              : <>Import &amp; Panel Management</>}</h1>
+          </div>
+          <p className={isFinalizedWorkspace ? undefined : 'module-hero__intro'}>
+            {isFinalizedWorkspace
+              ? 'Manage sheet parts by Optimization Group, then run nesting.'
+              : importMessage}
+          </p>
+          {isFinalizedWorkspace ? <p className="section-note" role="status">{importMessage}</p> : null}
           {importBusy && importPhase ? (
             <div className="import-session-progress" role="status">
               <span>
@@ -1642,10 +1667,10 @@ export function ImportPage({
               {warning}
             </p>
           ))}
-          {displayFilePath ? (
+          {!isFinalizedWorkspace && displayFilePath ? (
             <p className="module-hero__meta import-path">Source file: {displayFilePath}</p>
           ) : null}
-          {importSource && importConfiguration ? (
+          {!isFinalizedWorkspace && importSource && importConfiguration ? (
             <ImportDetails
               importSource={importSource}
               importConfiguration={importConfiguration}
@@ -1654,15 +1679,26 @@ export function ImportPage({
               optimizationGroups={optimizationGroups}
             />
           ) : null}
-          <p className="module-hero__meta">
+          {!isFinalizedWorkspace ? <p className="module-hero__meta">
             {hasPendingImportReview
               ? 'Current imported rows remain unchanged until you finalize this review.'
               : batchNestingEnabled
                 ? `Imported rows carry their material names. Batch nesting will group ${readyPartCount} ready row(s) across ${readyMaterialCount} ready material group(s).`
                 : nestingMessage}
-          </p>
+          </p> : null}
         </div>
         <div className="module-hero__actions">
+          {isFinalizedWorkspace && canAddRows ? (
+            <button
+              className="primary-button"
+              disabled={!bridge.connected || busy}
+              onClick={showAddRow ? cancelAddRow : startAddRow}
+              type="button"
+            >
+              {showAddRow ? 'Cancel add' : '＋ Add part'}
+            </button>
+          ) : null}
+          {!isFinalizedWorkspace ? <>
           <button
             className="secondary-button module-action-button"
             disabled={!bridge.connected || busy || !canImportFiles}
@@ -1714,22 +1750,32 @@ export function ImportPage({
               <span>{nestingBusy ? 'Nesting…' : 'Run All'}</span>
             </button>
           ) : null}
+          </> : null}
         </div>
       </section>
 
-      <section className="module-panel optimization-groups-card">
-        <div className="section-header">
+      <div className={isFinalizedWorkspace
+        ? importSource && importConfiguration
+          ? 'stock-length-workspace__summary-row'
+          : 'stock-length-workspace__summary-row stock-length-workspace__summary-row--single'
+        : 'sheet-parts-workspace__legacy-summary'}>
+      <section className={isFinalizedWorkspace
+        ? 'project-card stock-length-workspace__groups optimization-groups-card'
+        : 'module-panel optimization-groups-card'}>
+        <div className={isFinalizedWorkspace ? 'project-card__header' : 'section-header'}>
           <div>
-            <p className="eyebrow">Project structure</p>
+            {!isFinalizedWorkspace ? <p className="eyebrow">Project structure</p> : null}
             <h2>Optimization Groups</h2>
+            {isFinalizedWorkspace ? <p className="section-note">{optimizationGroups.length} group{optimizationGroups.length === 1 ? '' : 's'}</p> : null}
           </div>
-          <span className="section-note">Ordered nesting boundaries</span>
+          {isFinalizedWorkspace ? <button className="secondary-button" disabled={busy || !canManageOptimizationGroups} onClick={() => setShowOptimizationGroupForm((value) => !value)} type="button">＋ Add group</button> : <span className="section-note">Ordered nesting boundaries</span>}
         </div>
         <p className="section-note">
           Create and organize project Optimization Groups here, then assign each imported
           Worksheet to the appropriate group.
         </p>
         <div className="optimization-groups-list">
+          {isFinalizedWorkspace && optimizationGroups.length > 0 ? <div className="sheet-parts-workspace__group-head"><span>Status</span><span>Optimization Group</span><span>Associated Worksheets</span><span>Parts</span><span>Actions</span></div> : null}
           {optimizationGroups.length === 0 ? (
             <div className="empty-state">
               <strong>No Optimization Groups yet</strong>
@@ -1749,7 +1795,7 @@ export function ImportPage({
               >
                 <button
                   aria-pressed={isActive}
-                  className="secondary-button optimization-group-row__active"
+                  className={isFinalizedWorkspace ? 'module-table-action optimization-group-row__active' : 'secondary-button optimization-group-row__active'}
                   disabled={busy}
                   onClick={() => onActivateOptimizationGroup(group.optimizationGroupId)}
                   type="button"
@@ -1775,6 +1821,7 @@ export function ImportPage({
                     ? associatedWorksheets.join(', ')
                     : 'None'}
                 </span>
+                {isFinalizedWorkspace ? <span>{group.parts.length}</span> : null}
                 <div className="table-actions">
                   <button
                     className="module-table-action"
@@ -1810,7 +1857,7 @@ export function ImportPage({
             );
           })}
         </div>
-        <div className="optimization-groups-create">
+        {!isFinalizedWorkspace || showOptimizationGroupForm || optimizationGroups.length === 0 ? <div className="optimization-groups-create">
           <input
             aria-label="New Optimization Group name"
             disabled={busy || !canManageOptimizationGroups}
@@ -1827,14 +1874,33 @@ export function ImportPage({
             }
             onClick={() => {
               const name = newOptimizationGroupName.trim();
-              void onCreateOptimizationGroup(name).then(() => setNewOptimizationGroupName(''));
+              void onCreateOptimizationGroup(name).then(() => {
+                setNewOptimizationGroupName('');
+                setShowOptimizationGroupForm(false);
+              });
             }}
             type="button"
           >
             Add Optimization Group
           </button>
-        </div>
+        </div> : null}
+        {isFinalizedWorkspace ? <div className="stock-length-workspace__generate-actions">
+          <button className="secondary-button" disabled={!bridge.connected || busy || !canImportFiles} onClick={() => void onImportFile()} type="button">Choose file</button>
+          <button className="primary-button" disabled={!bridge.connected || !canRunNesting || nestingBusy || busy} onClick={() => void onRunNesting()} type="button">{nestingBusy ? 'Nesting…' : batchNestingEnabled ? 'Run active group' : 'Run nesting'}</button>
+          {batchNestingEnabled ? <button className="secondary-button" disabled={!bridge.connected || !canRunAllNesting || nestingBusy || busy} onClick={() => void onRunAllNesting()} type="button">{nestingBusy ? 'Nesting…' : 'Run all'}</button> : null}
+          <span className="section-note">{readyPartCount} ready part{readyPartCount === 1 ? '' : 's'} across {readyMaterialCount} material group{readyMaterialCount === 1 ? '' : 's'}</span>
+        </div> : null}
       </section>
+
+      {isFinalizedWorkspace && importSource && importConfiguration ? <aside className="project-card stock-length-workspace__last-import">
+        <h2>Last Import</h2>
+        <p><strong>✓ {importSourceName ?? importSource.importSourcePath}</strong></p>
+        <p>Imported {importedSourceRowCount} source row{importedSourceRowCount === 1 ? '' : 's'} as {importedSheetParts.length} sheet-part entr{importedSheetParts.length === 1 ? 'y' : 'ies'} from {importConfiguration.worksheets.length} Worksheet{importConfiguration.worksheets.length === 1 ? '' : 's'}.</p>
+        <p className="section-note">{new Date(importSource.snapshotCapturedAtUtc).toLocaleString()}</p>
+        <ImportDetails importSource={importSource} importConfiguration={importConfiguration} importedParts={importResponse.parts} materials={materials} optimizationGroups={optimizationGroups} />
+        <p className="stock-length-workspace__success">✓ Import completed successfully</p>
+      </aside> : null}
+      </div>
 
       {mappingSession ? (
         <section className="module-panel">
@@ -2654,13 +2720,17 @@ export function ImportPage({
         </section>
       ) : null}
 
-      <section className="module-panel module-panel--table">
-        <div className="module-panel__header">
+      <section className={isFinalizedWorkspace
+        ? 'project-card stock-length-workspace__pieces sheet-parts-workspace__parts'
+        : 'module-panel module-panel--table'}>
+        <div className={isFinalizedWorkspace ? 'project-card__header' : 'module-panel__header'}>
           <div>
-            <p className="eyebrow">Payload</p>
-            <h3>{mappingSession ? 'Preview rows' : 'Imported rows'}</h3>
+            {!isFinalizedWorkspace ? <p className="eyebrow">Payload</p> : null}
+            <h2>{isFinalizedWorkspace
+              ? `Sheet Part Entries (${activeImportResponse.parts.length})`
+              : mappingSession ? 'Preview rows' : 'Imported rows'}</h2>
           </div>
-          {canAddRows ? (
+          {!isFinalizedWorkspace && canAddRows ? (
             <button
               className="secondary-button"
               disabled={!bridge.connected || busy}
@@ -2672,13 +2742,13 @@ export function ImportPage({
           ) : null}
         </div>
 
-        <p className="section-note">
+        {!isFinalizedWorkspace ? <p className="section-note">
           {mappingSession
             ? 'Preview rows will replace the current import payload once you finalize this review.'
             : 'Use filters, inline edits, and add/delete actions here after the import is finalized.'}
-        </p>
+        </p> : null}
 
-        <div className="stats-grid module-stats-grid">
+        {!isFinalizedWorkspace ? <div className="stats-grid module-stats-grid">
           <article className="stat-card">
             <span>Imported</span>
             <strong>{activeImportResponse.parts.length}</strong>
@@ -2701,7 +2771,7 @@ export function ImportPage({
             <span>Errors</span>
             <strong>{counts.error}</strong>
           </article>
-        </div>
+        </div> : null}
 
         {hasParts ? (
           <>

@@ -12,6 +12,8 @@ import {
 } from './projectKind';
 import { ImportPage } from './pages/ImportPage';
 import { RequiredPiecesPage } from './pages/RequiredPiecesPage';
+import { ProjectImportWorkflow } from './pages/ProjectImportWorkflow';
+import { SheetPartsEmptyWorkspace } from './pages/SheetPartsEmptyWorkspace';
 import {
   collectWorkbookNewMaterials,
   createWorkbookWorksheetDrafts,
@@ -5264,6 +5266,11 @@ export default function App() {
     }
   };
 
+  const isBlankSheetImport = state.projectKind === 'sheet' &&
+    !state.importSource &&
+    state.importResponse.parts.length === 0 &&
+    state.optimizationGroups.length === 0;
+
   let content: React.ReactNode;
   switch (state.activeRoute) {
     case 'import':
@@ -5278,6 +5285,7 @@ export default function App() {
           lastImportReceipt={state.lastImportReceipt}
           inchDisplayFormat={state.projectSettings.inchDisplayFormat}
           mappingSession={state.importMappingSession}
+          materials={state.materials}
           message={state.importMessage || state.projectMessage}
           projectDirty={state.projectDirty}
           onCancelImportMapping={cancelImportMapping}
@@ -5322,6 +5330,28 @@ export default function App() {
           }
           optimizationGroups={state.optimizationGroups}
         />
+      ) : state.importMappingSession ? (
+        <ProjectImportWorkflow
+          busy={state.importBusy || state.partMutationBusy}
+          groups={state.optimizationGroups}
+          materials={state.materials}
+          message={state.importMessage}
+          onCancel={cancelImportMapping}
+          onFinalize={finalizeImportMapping}
+          onPreview={previewImportMapping}
+          onReplaceFile={importFile}
+          onUpdateSession={updateImportMappingSession}
+          projectKind="sheet"
+          session={state.importMappingSession}
+        />
+      ) : isBlankSheetImport ? (
+        <SheetPartsEmptyWorkspace
+          busy={state.projectBusy || state.importBusy || state.partMutationBusy}
+          message={state.importMessage || state.projectMessage}
+          onImportDroppedFile={(file) => importFile(undefined, false, file)}
+          onImportFile={importFile}
+          projectDirty={state.projectDirty}
+        />
       ) : (
         <ImportPage
           bridge={state.bridge}
@@ -5330,7 +5360,7 @@ export default function App() {
           importResponse={state.importResponse}
           importSource={state.importSource}
           importConfiguration={state.importConfiguration}
-          mappingSession={state.importMappingSession}
+          mappingSession={undefined}
           importMessage={state.importMessage}
           importPhase={state.importPhase}
           importProgress={state.importProgress}
@@ -5606,9 +5636,11 @@ export default function App() {
       ? 'app-route app-route--results'
       : state.activeRoute === 'extrusions'
         ? 'app-route app-route--extrusions'
+        : state.activeRoute === 'import' && (state.importMappingSession || isBlankSheetImport)
+          ? 'app-route app-route--project-import'
         : state.activeRoute === 'import' &&
             state.projectKind === 'stockLength' &&
-            (Boolean(state.importMappingSession) || state.optimizationGroups.some((group) => group.requiredPieces.length > 0))
+            state.optimizationGroups.some((group) => group.requiredPieces.length > 0)
           ? 'app-route app-route--stock-length-import'
         : 'app-route';
 

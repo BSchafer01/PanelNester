@@ -55,6 +55,19 @@ const reportSettings = {
 };
 
 describe('Project Kind lifecycle', () => {
+  it('uses the shared entry-import empty state for a blank Sheet Project', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: 'Import' }));
+
+    expect(screen.getByRole('heading', { name: 'Sheet Part Entries' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Import Sheet Parts' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'No Sheet Parts have been added yet.' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Import Workbook or CSV' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Optimization Groups' })).not.toBeInTheDocument();
+  });
+
   it('runs the rendered App lifecycle and restores the Sheet workflow without losing report metadata', async () => {
     const user = userEvent.setup();
     render(<App />);
