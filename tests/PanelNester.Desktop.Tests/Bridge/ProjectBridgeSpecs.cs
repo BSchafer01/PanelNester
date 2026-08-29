@@ -204,6 +204,54 @@ public sealed class ProjectBridgeSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Set_Oversized_Stock_round_trips_the_updated_project_and_result_through_the_bridge()
+    {
+        var repository = new JsonMaterialRepository(Path.Combine(_workspacePath, "oversized-materials.json"));
+        var materialService = new MaterialService(repository);
+        var dispatcher = DesktopBridgeRegistration.CreateDefault(
+            new RecordingFileDialogService(), materialService, new ProjectService(materialService),
+            new CsvImportService(repository), new PartEditorService(repository), new ShelfNestingService(),
+            () => new WebUiContentLocation("F:\\mock-ui", "Mock UI build", true));
+        var instance = new PieceInstance
+        {
+            PieceInstanceId = "piece-1:instance-1", RequiredPieceId = "piece-1",
+            InstanceNumber = 1, Length = 130m, ProfileNumber = "P-100"
+        };
+        var project = new Project
+        {
+            ProjectId = "stock-project", ProjectKind = ProjectKind.StockLength,
+            State = new ProjectState
+            {
+                OptimizationGroups = [new OptimizationGroup
+                {
+                    OptimizationGroupId = "frames", Name = "Frames", StockLength = 120m,
+                    RequiredPieces = [new RequiredPiece { RequiredPieceId = "piece-1", Quantity = 1, Length = 130m, ProfileNumber = "P-100" }],
+                    ResultStatus = OptimizationResultStatus.Valid,
+                    LastStockLengthOptimizationResult = new StockLengthOptimizationResult
+                    {
+                        OptimizationGroupId = "frames", Status = CutPlanStatus.Failed,
+                        CutPlans = [new CutPlan
+                        {
+                            CutPlanId = "frames:p-100", Status = CutPlanStatus.Failed,
+                            StockGroup = new StockGroup { ProfileNumber = "P-100", RequiredPieceIds = ["piece-1"] },
+                            UnplacedPieceInstances = [new UnplacedPieceInstance { PieceInstance = instance, ReasonCode = "exceeds-stock-length", ReasonDescription = "Too long." }]
+                        }]
+                    }
+                }]
+            }
+        };
+
+        var response = await DispatchAsync<SetOversizedStockResponse>(dispatcher, BridgeMessageTypes.SetOversizedStock,
+            new SetOversizedStockRequest(project, "frames", "144"));
+
+        Assert.True(response.Success, response.Message);
+        Assert.Equal(144m, response.Result?.OversizedStockLength);
+        Assert.Equal(StockItemKind.Oversized, Assert.Single(Assert.Single(response.Result!.CutPlans).StockItems).Kind);
+        Assert.Equal(CutPlanStatus.Complete, response.Result.Status);
+        Assert.Equivalent(response.Result, Assert.Single(response.Project!.State.OptimizationGroups).LastStockLengthOptimizationResult, strict: true);
+    }
+
+    [Fact]
     public async Task Generate_All_Stale_returns_successful_results_with_failed_group_diagnostics()
     {
         var repository = new JsonMaterialRepository(Path.Combine(_workspacePath, "all-stale-materials.json"));

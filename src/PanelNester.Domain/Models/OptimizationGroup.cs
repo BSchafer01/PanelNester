@@ -10,6 +10,8 @@ public sealed record OptimizationGroup
 
     public OptimizationGroupOrigin Origin { get; init; } = OptimizationGroupOrigin.Project;
 
+    public ImportGroupingKey? ImportGroupingKey { get; init; }
+
     public IReadOnlyList<PartRow> Parts { get; init; } = Array.Empty<PartRow>();
 
     public decimal? StockLength { get; init; }

@@ -229,7 +229,7 @@ public sealed class ClosedXmlExcelReportExporter : IExcelReportExporter, IStockL
     {
         string[] headings =
         [
-            "Optimization Group", "Stock Group", "Profile Number", "Finish", "Stock Item",
+            "Optimization Group", "Stock Group", "Profile Number", "Finish", "Stock Item", "Stock Type",
             "Placed Piece Instances", "Stock Length", "Piece Length", "Saw Loss", "Remainder", "Utilization", "Status"
         ];
         WriteHeadings(worksheet, headings);
@@ -247,14 +247,15 @@ public sealed class ClosedXmlExcelReportExporter : IExcelReportExporter, IStockL
                     worksheet.Cell(row, 3).Value = stockGroup.ProfileNumber;
                     worksheet.Cell(row, 4).Value = stockGroup.Finish ?? string.Empty;
                     worksheet.Cell(row, 5).Value = stockItem.StockItemNumber;
-                    worksheet.Cell(row, 6).Value = stockItem.CutSequence.Count;
-                    worksheet.Cell(row, 7).Value = stockItem.StockLength;
-                    worksheet.Cell(row, 8).Value = stockItem.PieceLength;
-                    worksheet.Cell(row, 9).Value = stockItem.SawLoss;
-                    worksheet.Cell(row, 10).Value = stockItem.Remainder;
-                    worksheet.Cell(row, 11).Value = stockItem.UtilizationPercent / 100m;
-                    worksheet.Cell(row, 11).Style.NumberFormat.Format = "0.0%";
-                    worksheet.Cell(row, 12).Value = DisplayState(stockGroup.State);
+                    worksheet.Cell(row, 6).Value = DisplayStockItemKind(stockItem.Kind);
+                    worksheet.Cell(row, 7).Value = stockItem.CutSequence.Count;
+                    worksheet.Cell(row, 8).Value = stockItem.StockLength;
+                    worksheet.Cell(row, 9).Value = stockItem.PieceLength;
+                    worksheet.Cell(row, 10).Value = stockItem.SawLoss;
+                    worksheet.Cell(row, 11).Value = stockItem.Remainder;
+                    worksheet.Cell(row, 12).Value = stockItem.UtilizationPercent / 100m;
+                    worksheet.Cell(row, 12).Style.NumberFormat.Format = "0.0%";
+                    worksheet.Cell(row, 13).Value = DisplayState(stockGroup.State);
                     row++;
                 }
             }
@@ -271,7 +272,7 @@ public sealed class ClosedXmlExcelReportExporter : IExcelReportExporter, IStockL
     {
         string[] headings =
         [
-            "Optimization Group", "Stock Group", "Profile Number", "Finish", "Stock Item", "Cut Sequence",
+            "Optimization Group", "Stock Group", "Profile Number", "Finish", "Stock Item", "Stock Type", "Cut Sequence",
             "Piece Instance", "Quantity Instance", "Required Piece", "Part Number", "Part Name", "Length",
             "Start Position", "End Position", "Source References", "Status"
         ];
@@ -297,17 +298,18 @@ public sealed class ClosedXmlExcelReportExporter : IExcelReportExporter, IStockL
                         worksheet.Cell(row, 3).Value = stockGroup.ProfileNumber;
                         worksheet.Cell(row, 4).Value = stockGroup.Finish ?? string.Empty;
                         worksheet.Cell(row, 5).Value = stockItem.StockItemNumber;
-                        worksheet.Cell(row, 6).Value = piece.Sequence;
-                        worksheet.Cell(row, 7).Value = piece.PieceInstanceId;
-                        worksheet.Cell(row, 8).Value = piece.QuantityInstance;
-                        worksheet.Cell(row, 9).Value = piece.RequiredPieceId;
-                        worksheet.Cell(row, 10).Value = piece.PartNumber ?? string.Empty;
-                        worksheet.Cell(row, 11).Value = piece.PartName ?? string.Empty;
-                        worksheet.Cell(row, 12).Value = piece.Length;
-                        worksheet.Cell(row, 13).Value = startPosition;
-                        worksheet.Cell(row, 14).Value = endPosition;
-                        worksheet.Cell(row, 15).Value = FormatSourceReferences(piece.SourceReferences);
-                        worksheet.Cell(row, 16).Value = DisplayState(stockGroup.State);
+                        worksheet.Cell(row, 6).Value = DisplayStockItemKind(stockItem.Kind);
+                        worksheet.Cell(row, 7).Value = piece.Sequence;
+                        worksheet.Cell(row, 8).Value = piece.PieceInstanceId;
+                        worksheet.Cell(row, 9).Value = piece.QuantityInstance;
+                        worksheet.Cell(row, 10).Value = piece.RequiredPieceId;
+                        worksheet.Cell(row, 11).Value = piece.PartNumber ?? string.Empty;
+                        worksheet.Cell(row, 12).Value = piece.PartName ?? string.Empty;
+                        worksheet.Cell(row, 13).Value = piece.Length;
+                        worksheet.Cell(row, 14).Value = startPosition;
+                        worksheet.Cell(row, 15).Value = endPosition;
+                        worksheet.Cell(row, 16).Value = FormatSourceReferences(piece.SourceReferences);
+                        worksheet.Cell(row, 17).Value = DisplayState(stockGroup.State);
                         startPosition = endPosition + kerf;
                         row++;
                     }
@@ -444,6 +446,9 @@ public sealed class ClosedXmlExcelReportExporter : IExcelReportExporter, IStockL
         StockLengthReportState.ApplicationError => "Application Error",
         _ => state.ToString()
     };
+
+    private static string DisplayStockItemKind(StockItemKind kind) =>
+        kind == StockItemKind.Oversized ? "Oversized" : "Regular";
 
     private static string FormatSourceReferences(IEnumerable<SourceReference> sourceReferences) =>
         string.Join("; ", sourceReferences.Select(reference => $"{reference.WorksheetName}!{reference.PhysicalRow}"));

@@ -1,6 +1,7 @@
 using PanelNester.Domain.Models;
 using PanelNester.Domain.Contracts;
 using PanelNester.Services.Projects;
+using PanelNester.Services.Import;
 
 namespace PanelNester.Desktop.Bridge;
 
@@ -293,7 +294,8 @@ internal static class ProjectImportFinalizer
         IReadOnlyList<FinalizedWorksheetImport> worksheetImports,
         bool replaceExistingImportSource = false,
         Action<WorkbookImportPhase, string>? reportProgress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        StockLengthImportGrouping? stockLengthGrouping = null)
     {
         ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(importSource);
@@ -321,7 +323,10 @@ internal static class ProjectImportFinalizer
                 "Each selected Worksheet may be finalized only once.");
         }
 
-        if (orderedImports.Any(item => string.IsNullOrWhiteSpace(item.Selection.OptimizationGroupId)))
+        var effectiveStockLengthGrouping = stockLengthGrouping ?? new StockLengthImportGrouping();
+        if ((project.ProjectKind != ProjectKind.StockLength ||
+             effectiveStockLengthGrouping.Mode == StockLengthImportGroupingMode.Worksheet) &&
+            orderedImports.Any(item => string.IsNullOrWhiteSpace(item.Selection.OptimizationGroupId)))
         {
             throw new ImportSessionException(
                 "import-optimization-group-required",
@@ -336,7 +341,8 @@ internal static class ProjectImportFinalizer
                 orderedImports,
                 replaceExistingImportSource,
                 reportProgress,
-                cancellationToken);
+                cancellationToken,
+                effectiveStockLengthGrouping);
         }
 
         var selectedGroupIds = orderedImports
@@ -450,11 +456,23 @@ internal static class ProjectImportFinalizer
         IReadOnlyList<FinalizedWorksheetImport> orderedImports,
         bool replaceExistingImportSource,
         Action<WorkbookImportPhase, string>? reportProgress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        StockLengthImportGrouping grouping)
     {
         var targetProject = PrepareImportSource(project, replaceExistingImportSource);
-        var selectedGroupIds = orderedImports
-            .Select(item => item.Selection.OptimizationGroupId)
+        if (grouping.Mode == StockLengthImportGroupingMode.MappedField)
+        {
+            return FinalizeStockLengthByMappedField(
+                project,
+                targetProject,
+                importSource,
+                orderedImports,
+                grouping,
+                reportProgress,
+                cancellationToken);
+        }
+
+        var selectedGroupIds = orderedImports.Select(item => item.Selection.OptimizationGroupId)
             .ToHashSet(StringComparer.Ordinal);
         var groups = targetProject.State.OptimizationGroups
             .OrderBy(group => group.Order)
@@ -537,6 +555,7 @@ internal static class ProjectImportFinalizer
                     StockGroups = BuildStockGroups(pieces)
                 };
                 if (!previousGroups.TryGetValue(group.OptimizationGroupId, out var previous) ||
+                    previous.StockLength != updated.StockLength ||
                     !HasSameOptimizationInputs(previous.RequiredPieces, updated.RequiredPieces))
                 {
                     return ClearResults(updated);
@@ -563,6 +582,7 @@ internal static class ProjectImportFinalizer
         var configuration = new ImportConfiguration
         {
             Options = orderedImports[0].Options with { MaterialMappings = Array.Empty<ImportMaterialMapping>() },
+            StockLengthGrouping = grouping,
             PartOverrides = orderedImports.SelectMany(item => item.Selection.PartOverrides).ToArray(),
             Worksheets = orderedImports.Select(item => new ImportWorksheetConfiguration
             {
@@ -578,6 +598,138 @@ internal static class ProjectImportFinalizer
                     })
                     .ToArray(),
                 OptimizationGroupId = item.Selection.OptimizationGroupId,
+                ExcludedSourceRows = item.Selection.ExcludedSourceRows
+            }).ToArray()
+        };
+
+        reportProgress?.Invoke(WorkbookImportPhase.Finalizing, "Finalizing");
+        return targetProject with
+        {
+            MaterialSnapshots = Array.Empty<Material>(),
+            State = targetProject.State with
+            {
+                SourceFilePath = importSource.ImportSourcePath,
+                ImportSource = importSource,
+                ImportConfiguration = configuration,
+                Parts = Array.Empty<PartRow>(),
+                OptimizationGroups = normalizedGroups,
+                LastNestingResult = null,
+                LastBatchNestingResult = null
+            }
+        };
+    }
+
+    private static Project FinalizeStockLengthByMappedField(
+        Project originalProject,
+        Project targetProject,
+        ImportSourceMetadata importSource,
+        IReadOnlyList<FinalizedWorksheetImport> orderedImports,
+        StockLengthImportGrouping grouping,
+        Action<WorkbookImportPhase, string>? reportProgress,
+        CancellationToken cancellationToken)
+    {
+        reportProgress?.Invoke(WorkbookImportPhase.CombiningParts, "Grouping Required Pieces");
+        var missingMapping = orderedImports.FirstOrDefault(item =>
+            string.IsNullOrWhiteSpace(grouping.Field) ||
+            !item.Options.ColumnMappings.Any(mapping =>
+                string.Equals(mapping.TargetField, grouping.Field, StringComparison.Ordinal) &&
+                !string.IsNullOrWhiteSpace(mapping.SourceColumn)));
+        if (missingMapping is not null)
+        {
+            throw new ImportSessionException(
+                "import-grouping-field-mapping-required",
+                $"Worksheet '{missingMapping.Selection.WorksheetName}' must map the selected Grouping Field '{grouping.Field}'.");
+        }
+
+        IReadOnlyList<StockLengthImportGroupPlan> plans;
+        try
+        {
+            plans = new StockLengthImportGroupingPlanner().Build(
+                grouping,
+                orderedImports.SelectMany(item => item.Response.RequiredPieces).ToArray());
+        }
+        catch (StockLengthImportGroupingException exception)
+        {
+            throw new ImportSessionException(exception.Code, exception.Message);
+        }
+
+        var configuredIds = plans.Select(plan => plan.Configuration.OptimizationGroupId)
+            .ToHashSet(StringComparer.Ordinal);
+        var groups = targetProject.State.OptimizationGroups
+            .OrderBy(group => group.Order)
+            .Select(group => configuredIds.Contains(group.OptimizationGroupId)
+                ? group with { RequiredPieces = group.RequiredPieces.Where(piece => piece.IsManual).ToArray() }
+                : group)
+            .ToList();
+        var previousGroups = originalProject.State.OptimizationGroups.ToDictionary(
+            group => group.OptimizationGroupId,
+            StringComparer.Ordinal);
+
+        foreach (var plan in plans)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var definition = plan.Configuration;
+            var index = groups.FindIndex(group => string.Equals(
+                group.OptimizationGroupId,
+                definition.OptimizationGroupId,
+                StringComparison.Ordinal));
+            if (index < 0)
+            {
+                index = groups.Count;
+                groups.Add(new OptimizationGroup
+                {
+                    OptimizationGroupId = definition.OptimizationGroupId,
+                    Name = MakeUniqueGroupName(definition.Name.Trim(), groups),
+                    Order = index,
+                    Origin = OptimizationGroupOrigin.ImportSource
+                });
+            }
+
+            var combined = CombineCompatibleImportedRequiredPieces(
+                groups[index].RequiredPieces.Concat(plan.RequiredPieces).ToArray(),
+                cancellationToken);
+            var updated = groups[index] with
+            {
+                ImportGroupingKey = plan.Key,
+                StockLength = definition.StockLength,
+                RequiredPieces = combined,
+                StockGroups = BuildStockGroups(combined)
+            };
+            if (!previousGroups.TryGetValue(updated.OptimizationGroupId, out var previous) ||
+                previous.StockLength != updated.StockLength ||
+                !HasSameOptimizationInputs(previous.RequiredPieces, updated.RequiredPieces))
+            {
+                groups[index] = ClearResults(updated);
+                continue;
+            }
+
+            groups[index] = updated with
+            {
+                LastStockLengthOptimizationResult = previous.LastStockLengthOptimizationResult,
+                LastStockLengthGenerationError = previous.LastStockLengthGenerationError,
+                ResultStatus = previous.ResultStatus
+            };
+        }
+
+        var normalizedGroups = groups.Select((group, order) => group with { Order = order }).ToArray();
+        var configuration = new ImportConfiguration
+        {
+            Options = orderedImports[0].Options with { MaterialMappings = Array.Empty<ImportMaterialMapping>() },
+            StockLengthGrouping = grouping,
+            PartOverrides = orderedImports.SelectMany(item => item.Selection.PartOverrides).ToArray(),
+            Worksheets = orderedImports.Select(item => new ImportWorksheetConfiguration
+            {
+                WorksheetName = item.Selection.WorksheetName,
+                OriginalPosition = item.Selection.OriginalPosition,
+                HeadingRange = item.Response.Worksheet?.HeadingRange ?? item.Selection.HeadingRange,
+                ColumnMappings = item.Response.ColumnMappings
+                    .Where(mapping => !string.IsNullOrWhiteSpace(mapping.SourceColumn))
+                    .Select(mapping => new ImportColumnMapping
+                    {
+                        SourceColumn = mapping.SourceColumn!,
+                        TargetField = mapping.TargetField
+                    }).ToArray(),
+                OptimizationGroupId = null,
                 ExcludedSourceRows = item.Selection.ExcludedSourceRows
             }).ToArray()
         };

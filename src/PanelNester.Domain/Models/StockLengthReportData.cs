@@ -105,6 +105,8 @@ public sealed record StockLengthReportStockItem
 {
     public int StockItemNumber { get; init; }
 
+    public StockItemKind Kind { get; init; } = StockItemKind.Regular;
+
     public decimal StockLength { get; init; }
 
     public decimal PieceLength { get; init; }

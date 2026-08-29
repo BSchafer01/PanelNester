@@ -592,7 +592,8 @@ public static class DesktopBridgeRegistration
                             worksheetImports,
                             request.ReplaceExistingImportSource,
                             (phase, label) => finalization.ReportProgress(phase, label),
-                            finalization.CancellationToken);
+                            finalization.CancellationToken,
+                            request.StockLengthGrouping);
                         var previewSummary = BuildWorkbookPreviewSummary(
                             worksheetImports,
                             workbookProject.State.OptimizationGroups);
@@ -1079,6 +1080,31 @@ public static class DesktopBridgeRegistration
 
         var stockLengthGenerationService = new StockLengthProjectGenerationService(
             new SheetOptimizerStockLengthCutPlanGenerator(nestingService));
+        var oversizedStockAssignmentService = new OversizedStockAssignmentService();
+        dispatcher.Register<SetOversizedStockRequest>(
+            BridgeMessageTypes.SetOversizedStock,
+            async (request, cancellationToken) =>
+            {
+                var result = await oversizedStockAssignmentService.SetAsync(
+                        request.Project,
+                        request.OptimizationGroupId,
+                        request.OversizedStockLength,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                var updated = result.Project?.State.OptimizationGroups.FirstOrDefault(group =>
+                    string.Equals(group.OptimizationGroupId, request.OptimizationGroupId, StringComparison.Ordinal))
+                    ?.LastStockLengthOptimizationResult;
+                return result.Success && result.Project is not null && updated is not null
+                    ? new SetOversizedStockResponse(
+                        true,
+                        result.Project,
+                        updated,
+                        null,
+                        request.OversizedStockLength is null ? "Removed Oversized Stock assignment." : "Assigned Oversized Stock.")
+                    : SetOversizedStockResponse.Failure(
+                        GetFirstErrorCode(result.Errors, "oversized-stock-assignment-failed"),
+                        GetFirstErrorMessage(result.Errors, "Oversized Stock could not be assigned."));
+            });
         dispatcher.Register<GenerateSelectedCutPlanRequest>(
             BridgeMessageTypes.GenerateSelectedCutPlan,
             async (request, cancellationToken) =>

@@ -3683,10 +3683,26 @@ td {
 }
 
 .stock-length-results__unplaced {
-  grid-template-rows: auto minmax(0, 1fr);
-  max-height: min(24vh, 14rem);
+  grid-template-rows: auto auto minmax(0, 1fr);
+  max-height: min(34vh, 22rem);
   min-height: 0;
   overflow: hidden;
+}
+
+.stock-length-results__oversized-assignment {
+  display: grid;
+  grid-template-columns: minmax(13rem, 1fr) minmax(9rem, auto) minmax(11rem, 0.7fr) auto;
+  align-items: end;
+  gap: 0.65rem;
+  border: 1px solid color-mix(in srgb, var(--panel-accent) 40%, var(--panel-border));
+  border-radius: 0.55rem;
+  padding: 0.65rem;
+  background: color-mix(in srgb, var(--panel-accent) 7%, var(--panel-surface-2));
+}
+
+.stock-length-results__oversized-assignment > div:first-child {
+  display: grid;
+  gap: 0.2rem;
 }
 
 .stock-length-results__preview {
@@ -4902,6 +4918,8 @@ td {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
   gap: 1rem;
+  height: clamp(20rem, 42vh, 30rem);
+  min-height: 0;
   min-width: 0;
 }
 
@@ -4922,9 +4940,34 @@ td {
   margin-bottom: 1rem;
 }
 
+.stock-length-workspace__groups {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.stock-length-workspace__groups-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.stock-length-workspace__groups-scroll thead th {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  background: var(--panel-surface-2);
+}
+
 .stock-length-workspace__generate-actions {
+  flex-shrink: 0;
   justify-content: flex-end;
-  margin-top: 0.9rem;
+  margin-top: 0.65rem;
+  border-top: 1px solid var(--panel-border);
+  padding-top: 0.65rem;
 }
 
 .stock-length-workspace__inline-input {
@@ -5426,6 +5469,18 @@ td {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .stock-length-workspace__summary-row {
+    height: auto;
+  }
+
+  .stock-length-workspace__groups {
+    height: clamp(20rem, 50vh, 30rem);
+  }
+
+  .stock-length-results__oversized-assignment {
+    grid-template-columns: minmax(13rem, 1fr) minmax(11rem, 0.8fr);
+  }
+
   .stock-length-workspace__last-import {
     order: -1;
   }
@@ -5508,5 +5563,10 @@ td {
 
   .stock-length-results__header .form-actions {
     justify-self: stretch;
+  }
+
+  .stock-length-results__oversized-assignment {
+    grid-template-columns: 1fr;
+    align-items: stretch;
   }
 }

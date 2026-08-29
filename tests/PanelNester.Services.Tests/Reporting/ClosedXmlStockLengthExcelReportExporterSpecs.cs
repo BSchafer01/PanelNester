@@ -34,7 +34,8 @@ public sealed class ClosedXmlStockLengthExcelReportExporterSpecs : IDisposable
                         pieceLength: 30m,
                         sourceWorksheet: "Later",
                         sourceRow: 8,
-                        unplacedPieceId: "piece-z-unplaced"),
+                        unplacedPieceId: "piece-z-unplaced",
+                        kind: StockItemKind.Oversized),
                     CreateGroup(
                         "group-a",
                         "First Group",
@@ -64,34 +65,37 @@ public sealed class ClosedXmlStockLengthExcelReportExporterSpecs : IDisposable
 
         var summary = workbook.Worksheet("Summary");
         Assert.Equal(
-            ["Optimization Group", "Stock Group", "Profile Number", "Finish", "Stock Item", "Placed Piece Instances", "Stock Length", "Piece Length", "Saw Loss", "Remainder", "Utilization", "Status"],
-            summary.Row(1).Cells(1, 12).Select(cell => cell.GetString()));
+            ["Optimization Group", "Stock Group", "Profile Number", "Finish", "Stock Item", "Stock Type", "Placed Piece Instances", "Stock Length", "Piece Length", "Saw Loss", "Remainder", "Utilization", "Status"],
+            summary.Row(1).Cells(1, 13).Select(cell => cell.GetString()));
         Assert.Equal(2, summary.Tables.Count());
         Assert.Equal("First Group", summary.Cell(2, 1).GetString());
         Assert.Equal(1, summary.Cell(2, 5).GetValue<int>());
-        Assert.Equal(1, summary.Cell(2, 6).GetValue<int>());
-        Assert.Equal(120m, summary.Cell(2, 7).GetValue<decimal>());
-        Assert.Equal(24.125m, summary.Cell(2, 8).GetValue<decimal>());
-        Assert.Equal(0m, summary.Cell(2, 9).GetValue<decimal>());
-        Assert.Equal(95.875m, summary.Cell(2, 10).GetValue<decimal>());
+        Assert.Equal("Regular", summary.Cell(2, 6).GetString());
+        Assert.Equal(1, summary.Cell(2, 7).GetValue<int>());
+        Assert.Equal(120m, summary.Cell(2, 8).GetValue<decimal>());
+        Assert.Equal(24.125m, summary.Cell(2, 9).GetValue<decimal>());
+        Assert.Equal(0m, summary.Cell(2, 10).GetValue<decimal>());
+        Assert.Equal(95.875m, summary.Cell(2, 11).GetValue<decimal>());
         Assert.Equal(
             decimal.Round(24.125m / 120m, 12),
-            decimal.Round(summary.Cell(2, 11).GetValue<decimal>(), 12));
-        Assert.Equal("Complete", summary.Cell(2, 12).GetString());
+            decimal.Round(summary.Cell(2, 12).GetValue<decimal>(), 12));
+        Assert.Equal("Complete", summary.Cell(2, 13).GetString());
         Assert.Equal("Second Group", summary.Cell(3, 1).GetString());
-        Assert.Equal("Partial", summary.Cell(3, 12).GetString());
+        Assert.Equal("Oversized", summary.Cell(3, 6).GetString());
+        Assert.Equal("Partial", summary.Cell(3, 13).GetString());
 
         var cuts = workbook.Worksheet("Cut Plans");
         Assert.Equal(
-            ["Optimization Group", "Stock Group", "Profile Number", "Finish", "Stock Item", "Cut Sequence", "Piece Instance", "Quantity Instance", "Required Piece", "Part Number", "Part Name", "Length", "Start Position", "End Position", "Source References", "Status"],
-            cuts.Row(1).Cells(1, 16).Select(cell => cell.GetString()));
+            ["Optimization Group", "Stock Group", "Profile Number", "Finish", "Stock Item", "Stock Type", "Cut Sequence", "Piece Instance", "Quantity Instance", "Required Piece", "Part Number", "Part Name", "Length", "Start Position", "End Position", "Source References", "Status"],
+            cuts.Row(1).Cells(1, 17).Select(cell => cell.GetString()));
         Assert.Single(cuts.Tables);
         Assert.Equal("First Group", cuts.Cell(2, 1).GetString());
-        Assert.Equal(1, cuts.Cell(2, 6).GetValue<int>());
-        Assert.Equal(24.125m, cuts.Cell(2, 12).GetValue<decimal>());
-        Assert.Equal(0m, cuts.Cell(2, 13).GetValue<decimal>());
-        Assert.Equal(24.125m, cuts.Cell(2, 14).GetValue<decimal>());
-        Assert.Equal("Pieces!4", cuts.Cell(2, 15).GetString());
+        Assert.Equal("Regular", cuts.Cell(2, 6).GetString());
+        Assert.Equal(1, cuts.Cell(2, 7).GetValue<int>());
+        Assert.Equal(24.125m, cuts.Cell(2, 13).GetValue<decimal>());
+        Assert.Equal(0m, cuts.Cell(2, 14).GetValue<decimal>());
+        Assert.Equal(24.125m, cuts.Cell(2, 15).GetValue<decimal>());
+        Assert.Equal("Pieces!4", cuts.Cell(2, 16).GetString());
 
         var unplaced = workbook.Worksheet("Unplaced");
         Assert.Equal(
@@ -241,7 +245,8 @@ public sealed class ClosedXmlStockLengthExcelReportExporterSpecs : IDisposable
         decimal pieceLength,
         string sourceWorksheet,
         int sourceRow,
-        string? unplacedPieceId = null)
+        string? unplacedPieceId = null,
+        StockItemKind kind = StockItemKind.Regular)
     {
         var piece = new PieceInstance
         {
@@ -319,6 +324,7 @@ public sealed class ClosedXmlStockLengthExcelReportExporterSpecs : IDisposable
                             {
                                 StockItemId = $"stock-{groupId}",
                                 StockItemNumber = stockItemNumber,
+                                Kind = kind,
                                 StockLength = 120m,
                                 PieceLength = pieceLength,
                                 SawLoss = 0m,

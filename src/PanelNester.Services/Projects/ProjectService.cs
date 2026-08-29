@@ -584,6 +584,7 @@ public sealed class ProjectService : IProjectService
         group with
         {
             LastStockLengthGenerationError = null,
+            LastStockLengthOptimizationResult = group.LastStockLengthOptimizationResult?.ClearOversizedStockAssignment(),
             ResultStatus = group.LastStockLengthOptimizationResult is null &&
                 group.LastNestingResult is null && group.LastBatchNestingResult is null
                 ? OptimizationResultStatus.None

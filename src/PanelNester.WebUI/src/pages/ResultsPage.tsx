@@ -75,6 +75,7 @@ interface ResultsPageProps {
   ) => Promise<void>;
   onSelectOptimizationGroup: (optimizationGroupId: string) => void;
   onReviewOptimizationGroup?: (optimizationGroupId: string) => void;
+  onSetOversizedStock?: (optimizationGroupId: string, oversizedStockLength: string | null) => Promise<void>;
 }
 
 interface StockLengthResultsProps {
@@ -88,6 +89,7 @@ interface StockLengthResultsProps {
   reportBusy?: boolean;
   onExportReport?: (overrides?: ReportExportOverrides) => Promise<void>;
   onExportExcelReport?: (overrides?: ReportExportOverrides) => Promise<void>;
+  onSetOversizedStock?: (optimizationGroupId: string, oversizedStockLength: string | null) => Promise<void>;
 }
 
 function formatCutPlanStatus(status: string): string {
@@ -127,6 +129,7 @@ export function StockLengthResults({
   reportBusy = false,
   onExportReport = async () => undefined,
   onExportExcelReport = async () => undefined,
+  onSetOversizedStock = async () => undefined,
 }: StockLengthResultsProps) {
   const orderedGroups = useMemo(() => [...optimizationGroups]
     .sort((left, right) => left.order - right.order), [optimizationGroups]);
@@ -142,6 +145,8 @@ export function StockLengthResults({
     () => sessionStorage.getItem(`${sessionKey}:stock-group`) ?? allStockGroupsScope,
   );
   const [searchQuery, setSearchQuery] = useState('');
+  const [oversizedDrafts, setOversizedDrafts] = useState<Record<string, string>>({});
+  const [oversizedGroupId, setOversizedGroupId] = useState<string>();
   const [selectedStockItemKey, setSelectedStockItemKey] = useState<string>();
   const [selectedPieceInstanceId, setSelectedPieceInstanceId] = useState<string>();
   const scopedGroups = optimizationGroupScope === allOptimizationGroupsScope
@@ -304,6 +309,31 @@ export function StockLengthResults({
       utilization: stockLength > 0 ? pieceLength / stockLength * 100 : 0,
     };
   });
+  const oversizedCandidates = scopedGroups.flatMap((group) => {
+    const result = group.resultStatus === 'valid' ? group.lastStockLengthOptimizationResult : null;
+    if (!result) return [];
+    const visiblePlans = result.cutPlans.filter((plan) =>
+      stockGroupFilter === allStockGroupsScope ||
+      stockGroupKey(plan.stockGroup.profileNumber, plan.stockGroup.finish) === stockGroupFilter);
+    const visibleEligible = visiblePlans.some((plan) =>
+      plan.unplacedPieceInstances.some((item) => item.reasonCode === 'exceeds-stock-length') ||
+      plan.stockItems.some((item) => item.kind === 'oversized'));
+    if (!visibleEligible && !(stockGroupFilter === allStockGroupsScope && result.oversizedStockLength)) return [];
+    const assignedCount = result.cutPlans.reduce((total, plan) => total +
+      plan.stockItems.filter((item) => item.kind === 'oversized').reduce((count, item) => count + item.cutSequence.length, 0), 0);
+    const remainingCount = result.cutPlans.reduce((total, plan) => total +
+      plan.unplacedPieceInstances.filter((item) => item.reasonCode === 'exceeds-stock-length').length, 0);
+    return [{ group, result, assignedCount, remainingCount }];
+  });
+  const selectedOversizedCandidate = oversizedCandidates.find(({ group }) =>
+    group.optimizationGroupId === oversizedGroupId) ?? oversizedCandidates[0];
+  const oversizedCandidateIds = oversizedCandidates.map(({ group }) => group.optimizationGroupId).join('\u0001');
+
+  useEffect(() => {
+    setOversizedGroupId((current) => oversizedCandidates.some(({ group }) =>
+      group.optimizationGroupId === current) ? current : oversizedCandidates[0]?.group.optimizationGroupId);
+  }, [oversizedCandidateIds]);
+
   const exportScope: StockLengthReportScope = {
     optimizationGroupId: optimizationGroupScope === allOptimizationGroupsScope
       ? null
@@ -379,11 +409,21 @@ export function StockLengthResults({
             <div className="project-card__header"><h2>Stock Items</h2>{overallResult ? <StatusPill label={formatCutPlanStatus(overallResult.status)} tone={overallResult.status === 'complete' ? 'ok' : overallResult.status === 'partial' ? 'warn' : 'error'} /> : null}</div>
             <label className="project-field stock-length-results__search"><span>Search Results</span><input aria-label="Search Results" onChange={(event) => setSearchQuery(event.target.value)} type="search" value={searchQuery} /></label>
             {searchResults.length > 0 ? <div className="stock-length-results__search-results">{searchResults.map(({ entry, piece }) => <button aria-label={`${piece.partNumber || piece.profileNumber}, ${piece.partName || 'Unnamed Piece Instance'}, ${sourceReferenceLabel(piece) || 'No Source Reference'}`} className="secondary-button" key={`${entry.key}\u0000${piece.pieceInstanceId}`} onClick={() => { setSelectedStockItemKey(entry.key); setSelectedPieceInstanceId(piece.pieceInstanceId); }} type="button">{piece.partNumber || piece.profileNumber} · {piece.partName || 'Unnamed'} · {sourceReferenceLabel(piece) || 'No source'}</button>)}</div> : null}
-            <div aria-label="Stock Items table" className="table-wrap stock-length-results__table-scroll"><table><thead><tr>{optimizationGroupScope === allOptimizationGroupsScope ? <th>Optimization Group</th> : null}<th>Stock Item</th><th>Profile Number</th><th>Finish</th><th>Piece Count</th><th>Stock Length</th><th>Piece Length</th><th>Saw Loss</th><th>Remainder</th><th>Utilization</th><th>Status</th></tr></thead><tbody>
-              {visibleStockItems.map(({ group, plan, item, key }) => <tr aria-label={`Stock Item ${item.stockItemNumber}, ${group.name}`} aria-selected={selectedStockItem?.key === key} key={key} onClick={() => setSelectedStockItemKey(key)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setSelectedStockItemKey(key); }} tabIndex={0}>{optimizationGroupScope === allOptimizationGroupsScope ? <td>{group.name}</td> : null}<td>{item.stockItemNumber}</td><td>{plan.stockGroup.profileNumber}</td><td>{plan.stockGroup.finish || 'No finish specified'}</td><td>{item.cutSequence.length}</td><td>{item.stockLength} in</td><td>{item.pieceLength} in</td><td>{item.sawLoss} in</td><td>{item.remainder} in</td><td>{item.utilizationPercent.toFixed(1)}%</td><td>{formatCutPlanStatus(plan.status)}</td></tr>)}
+            <div aria-label="Stock Items table" className="table-wrap stock-length-results__table-scroll"><table><thead><tr>{optimizationGroupScope === allOptimizationGroupsScope ? <th>Optimization Group</th> : null}<th>Stock Item</th><th>Type</th><th>Profile Number</th><th>Finish</th><th>Piece Count</th><th>Stock Length</th><th>Piece Length</th><th>Saw Loss</th><th>Remainder</th><th>Utilization</th><th>Status</th></tr></thead><tbody>
+              {visibleStockItems.map(({ group, plan, item, key }) => <tr aria-label={`${item.kind === 'oversized' ? 'Oversized' : 'Regular'} Stock Item ${item.stockItemNumber}, ${group.name}`} aria-selected={selectedStockItem?.key === key} key={key} onClick={() => setSelectedStockItemKey(key)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setSelectedStockItemKey(key); }} tabIndex={0}>{optimizationGroupScope === allOptimizationGroupsScope ? <td>{group.name}</td> : null}<td>{item.stockItemNumber}</td><td>{item.kind === 'oversized' ? 'Oversized' : 'Regular'}</td><td>{plan.stockGroup.profileNumber}</td><td>{plan.stockGroup.finish || 'No finish specified'}</td><td>{item.cutSequence.length}</td><td>{item.stockLength} in</td><td>{item.pieceLength} in</td><td>{item.sawLoss} in</td><td>{item.remainder} in</td><td>{item.utilizationPercent.toFixed(1)}%</td><td>{formatCutPlanStatus(plan.status)}</td></tr>)}
             </tbody></table></div>
             </section> : <div className="empty-state"><strong>No Stock Items in scope</strong><span>Choose another scope or generate the Optimization Groups that need work.</span></div>}
-            <section className="project-card stock-length-results__unplaced"><div className="project-card__header"><h2>Unplaced{optimizationGroupScope === allOptimizationGroupsScope ? ` (${unplaced.length} project-wide)` : ` (${unplaced.length})`}</h2></div>
+            <section aria-label="Unplaced Piece Instances" className="project-card stock-length-results__unplaced"><div className="project-card__header"><h2>Unplaced{optimizationGroupScope === allOptimizationGroupsScope ? ` (${unplaced.length} project-wide)` : ` (${unplaced.length})`}</h2></div>
+              {selectedOversizedCandidate && (() => {
+                const { group, result, assignedCount, remainingCount } = selectedOversizedCandidate;
+                const draft = oversizedDrafts[group.optimizationGroupId] ?? `${result.oversizedStockLength ?? ''}`;
+                return <div className="stock-length-results__oversized-assignment">
+                  <div><strong>Oversized Stock</strong><small>{assignedCount} assigned · {remainingCount} remaining · applies to all overlong pieces in this Optimization Group</small></div>
+                  {oversizedCandidates.length > 1 ? <label className="project-field"><span>Optimization Group</span><select aria-label="Optimization Group for Oversized Stock" onChange={(event) => setOversizedGroupId(event.target.value)} value={group.optimizationGroupId}>{oversizedCandidates.map((candidate) => <option key={candidate.group.optimizationGroupId} value={candidate.group.optimizationGroupId}>{candidate.group.name}</option>)}</select></label> : <strong>{group.name}</strong>}
+                  <label className="project-field"><span>Oversized Stock Length (in)</span><input aria-label={`Oversized Stock Length for ${group.name}`} inputMode="decimal" onChange={(event) => setOversizedDrafts((current) => ({ ...current, [group.optimizationGroupId]: event.target.value }))} value={draft} /></label>
+                  <div className="form-actions"><button className="primary-button" disabled={!draft.trim() || reportBusy} onClick={() => void onSetOversizedStock(group.optimizationGroupId, draft)} type="button">{result.oversizedStockLength ? 'Change assignment' : 'Assign oversized stock'}</button>{result.oversizedStockLength ? <button className="secondary-button" disabled={reportBusy} onClick={() => void onSetOversizedStock(group.optimizationGroupId, null)} type="button">Remove assignment</button> : null}</div>
+                </div>;
+              })()}
               {unplaced.length > 0 ? <div className="table-wrap stock-length-results__table-scroll"><table><thead><tr><th>Optimization Group</th><th>Stock Group</th><th>Piece Instance</th><th>Length</th><th>Source Reference</th><th>Reason</th></tr></thead><tbody>{unplaced.map(({ group, plan, item }) => <tr key={`${group.optimizationGroupId}\u0000${plan.cutPlanId}\u0000${item.pieceInstance.pieceInstanceId}`}><td>{group.name}</td><td>{plan.stockGroup.profileNumber} — {plan.stockGroup.finish || 'No finish specified'}</td><td>{item.pieceInstance.pieceInstanceId}</td><td>{item.pieceInstance.length} in</td><td>{sourceReferenceLabel(item.pieceInstance) || '—'}</td><td>{item.reasonDescription}</td></tr>)}</tbody></table></div> : <p className="section-note">Every current Piece Instance was placed.</p>}
             </section>
           </div>
@@ -710,6 +750,7 @@ export function ResultsPage({
   onExportStiffenerReport,
   onSelectOptimizationGroup,
   onReviewOptimizationGroup,
+  onSetOversizedStock,
 }: ResultsPageProps) {
   const orderedOptimizationGroups = useMemo(
     () => getResultsOptimizationGroups(optimizationGroups),
@@ -1113,7 +1154,7 @@ export function ResultsPage({
     : 'Waiting for a nesting result';
 
   if (projectKind === 'stockLength') {
-    return <StockLengthResults projectId={projectId} optimizationGroups={optimizationGroups} activeOptimizationGroupId={activeOptimizationGroupId} onSelectOptimizationGroup={onSelectOptimizationGroup} onReviewOptimizationGroup={onReviewOptimizationGroup} canExportReport={canExportReport} canExportExcelReport={canExportExcelReport} reportBusy={reportBusy} onExportReport={onExportReport} onExportExcelReport={onExportExcelReport} />;
+    return <StockLengthResults projectId={projectId} optimizationGroups={optimizationGroups} activeOptimizationGroupId={activeOptimizationGroupId} onSelectOptimizationGroup={onSelectOptimizationGroup} onReviewOptimizationGroup={onReviewOptimizationGroup} onSetOversizedStock={onSetOversizedStock} canExportReport={canExportReport} canExportExcelReport={canExportExcelReport} reportBusy={reportBusy} onExportReport={onExportReport} onExportExcelReport={onExportExcelReport} />;
   }
 
   return (

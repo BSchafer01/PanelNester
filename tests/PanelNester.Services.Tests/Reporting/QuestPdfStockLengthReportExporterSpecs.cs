@@ -21,6 +21,7 @@ public sealed class QuestPdfStockLengthReportExporterSpecs : IDisposable
             .Select(number => new StockLengthReportStockItem
             {
                 StockItemNumber = number,
+                Kind = number == 45 ? StockItemKind.Oversized : StockItemKind.Regular,
                 StockLength = 120m,
                 PieceLength = 24.125m,
                 Remainder = 95.875m,
@@ -123,6 +124,7 @@ public sealed class QuestPdfStockLengthReportExporterSpecs : IDisposable
         Assert.Contains("Empty Group", text);
         Assert.Contains("Empty", text);
         Assert.Contains("Stock Item 45", text);
+        Assert.Contains("Oversized Stock Item 45", text);
         Assert.Contains("Cut Sequence", text);
         Assert.Contains("PN-45", text);
         Assert.Contains("Lengths!55", text);

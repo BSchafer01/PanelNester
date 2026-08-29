@@ -46,6 +46,7 @@ public static class BridgeMessageTypes
     public const string UpdateRequiredPieces = "update-required-pieces";
     public const string GenerateSelectedCutPlan = "generate-selected-cut-plan";
     public const string GenerateSelectedCutPlans = "generate-selected-cut-plans";
+    public const string SetOversizedStock = "set-oversized-stock";
     public const string GenerateAllStaleCutPlans = "generate-all-stale-cut-plans";
     public const string CancelCutPlanGeneration = "cancel-cut-plan-generation";
     public const string GetCutPlanGenerationProgress = "get-cut-plan-generation-progress";
@@ -416,6 +417,8 @@ public sealed record FinalizeImportSessionRequest
     public bool ReplaceExistingImportSource { get; init; }
 
     public string? TargetOptimizationGroupId { get; init; }
+
+    public StockLengthImportGrouping? StockLengthGrouping { get; init; }
 
     public IReadOnlyList<ImportWorksheetSelection> Worksheets { get; init; } =
         Array.Empty<ImportWorksheetSelection>();
@@ -864,6 +867,25 @@ public sealed record GenerateSelectedCutPlanResponse(
     {
         var failure = BridgeFailure.Create(code, message, userMessage);
         return new(false, project, null, failure.Error, failure.ResponseMessage);
+    }
+}
+
+public sealed record SetOversizedStockRequest(
+    Project Project,
+    string OptimizationGroupId,
+    string? OversizedStockLength);
+
+public sealed record SetOversizedStockResponse(
+    bool Success,
+    Project? Project,
+    StockLengthOptimizationResult? Result,
+    BridgeError? Error,
+    string? Message)
+{
+    public static SetOversizedStockResponse Failure(string code, string message, string? userMessage = null)
+    {
+        var failure = BridgeFailure.Create(code, message, userMessage);
+        return new(false, null, null, failure.Error, failure.ResponseMessage);
     }
 }
 

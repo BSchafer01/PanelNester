@@ -43,6 +43,7 @@ export const bridgeMessageTypes = {
   updateRequiredPieces: 'update-required-pieces',
   generateSelectedCutPlan: 'generate-selected-cut-plan',
   generateSelectedCutPlans: 'generate-selected-cut-plans',
+  setOversizedStock: 'set-oversized-stock',
   generateAllStaleCutPlans: 'generate-all-stale-cut-plans',
   cancelCutPlanGeneration: 'cancel-cut-plan-generation',
   getCutPlanGenerationProgress: 'get-cut-plan-generation-progress',
@@ -410,6 +411,7 @@ export interface FinalizeImportSessionRequest {
   project: ProjectRecord;
   replaceExistingImportSource?: boolean;
   targetOptimizationGroupId?: string | null;
+  stockLengthGrouping?: StockLengthImportGrouping | null;
   worksheets?: ImportWorksheetSelection[];
 }
 
@@ -510,6 +512,7 @@ export interface ImportMappingSession {
   workbook?: WorkbookDiscovery;
   worksheets?: ImportWorksheetDraft[];
   activeWorksheetName?: string;
+  stockLengthGrouping?: StockLengthImportGrouping;
 }
 
 export interface ImportWorksheetDraft {
@@ -638,11 +641,17 @@ export interface ProjectMaterialSnapshot extends Material {}
 export type OptimizationResultStatus = 'none' | 'valid' | 'stale';
 export type OptimizationGroupOrigin = 'project' | 'importSource';
 
+export interface ImportGroupingKey {
+  field: ImportFieldName;
+  normalizedValue: string;
+}
+
 export interface OptimizationGroup {
   optimizationGroupId: string;
   name: string;
   order: number;
   origin?: OptimizationGroupOrigin;
+  importGroupingKey?: ImportGroupingKey | null;
   parts: PartRow[];
   stockLength?: number | null;
   requiredPieces: RequiredPiece[];
@@ -701,6 +710,7 @@ export interface StockLengthOptimizationResult {
   optimizationGroupId: string;
   status: CutPlanStatus;
   description: string;
+  oversizedStockLength?: number | null;
   cutPlans: CutPlan[];
 }
 
@@ -715,6 +725,7 @@ export interface CutPlan {
 export interface StockItem {
   stockItemId: string;
   stockItemNumber: number;
+  kind?: 'regular' | 'oversized';
   stockLength: number;
   pieceLength: number;
   sawLoss: number;
@@ -769,8 +780,24 @@ export interface ProjectStateRecord {
 
 export interface ImportConfiguration {
   options: ImportOptions;
+  stockLengthGrouping?: StockLengthImportGrouping;
   worksheets: ImportWorksheetConfiguration[];
   partOverrides: PartOverride[];
+}
+
+export type StockLengthImportGroupingMode = 'worksheet' | 'mappedField';
+
+export interface StockLengthImportGrouping {
+  mode: StockLengthImportGroupingMode;
+  field?: ImportFieldName | null;
+  groups: StockLengthImportGroupConfiguration[];
+}
+
+export interface StockLengthImportGroupConfiguration {
+  groupingValue: string;
+  optimizationGroupId: string;
+  name: string;
+  stockLength?: number | null;
 }
 
 export interface ImportWorksheetConfiguration {
@@ -1257,6 +1284,20 @@ export interface GenerateSelectedCutPlanResponse {
   message?: string;
 }
 
+export interface SetOversizedStockRequest {
+  project: ProjectRecord;
+  optimizationGroupId: string;
+  oversizedStockLength?: string | null;
+}
+
+export interface SetOversizedStockResponse {
+  success: boolean;
+  project?: ProjectRecord | null;
+  result?: StockLengthOptimizationResult | null;
+  error?: BridgeError | null;
+  message?: string;
+}
+
 export interface StockLengthGenerationFailure {
   optimizationGroupId: string;
   code: string;
@@ -1506,6 +1547,7 @@ export const requestedBridgeCapabilities: BridgeCapability[] = [
   bridgeMessageTypes.updateRequiredPieces,
   bridgeMessageTypes.generateSelectedCutPlan,
   bridgeMessageTypes.generateSelectedCutPlans,
+  bridgeMessageTypes.setOversizedStock,
   bridgeMessageTypes.generateAllStaleCutPlans,
   bridgeMessageTypes.cancelCutPlanGeneration,
   bridgeMessageTypes.getCutPlanGenerationProgress,

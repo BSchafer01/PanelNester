@@ -407,7 +407,7 @@ public sealed class ProjectPersistenceSpecs : IDisposable
 
         var restored = await serializer.LoadAsync(filePath);
 
-        Assert.Equal(7, Project.CurrentVersion);
+        Assert.Equal(8, Project.CurrentVersion);
         Assert.Equal(Project.CurrentVersion, restored.Version);
         var group = Assert.Single(restored.State.OptimizationGroups);
         Assert.Equal("project-phase3-001", group.OptimizationGroupId);
@@ -760,7 +760,8 @@ public sealed class ProjectPersistenceSpecs : IDisposable
     [Theory]
     [InlineData(false, true, 1, "project-not-found")]
     [InlineData(true, false, 1, "project-corrupt")]
-    [InlineData(true, true, 8, "project-unsupported-version")]
+    [InlineData(true, true, 9, "project-unsupported-version")]
+    [InlineData(true, true, 8, null)]
     [InlineData(true, true, 7, null)]
     [InlineData(true, true, 6, null)]
     [InlineData(true, true, 5, null)]
@@ -1321,5 +1322,97 @@ public sealed class ProjectPersistenceSpecs : IDisposable
 
         public Task<MaterialDeleteResult> DeleteAsync(string materialId, bool isInUse = false, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+    }
+
+    [Fact]
+    public async Task Version_seven_projects_migrate_to_Worksheet_grouping_regular_items_and_no_oversized_assignment()
+    {
+        var filePath = Path.Combine(_workspacePath, "legacy-stock-v7.pnest");
+        var project = new Project
+        {
+            Version = 7, ProjectId = "legacy-stock", ProjectKind = ProjectKind.StockLength,
+            State = new ProjectState
+            {
+                ImportConfiguration = new ImportConfiguration(),
+                OptimizationGroups = [new OptimizationGroup
+                {
+                    OptimizationGroupId = "frames", Name = "Frames",
+                    LastStockLengthOptimizationResult = new StockLengthOptimizationResult
+                    {
+                        OptimizationGroupId = "frames",
+                        CutPlans = [new CutPlan { CutPlanId = "plan", StockItems = [new StockItem { StockItemId = "stock" }] }]
+                    }
+                }]
+            }
+        };
+        var root = Assert.IsType<JsonObject>(JsonSerializer.SerializeToNode(project, CreateLegacyJsonOptions()));
+        Assert.IsType<JsonObject>(Assert.IsType<JsonObject>(root["state"])["importConfiguration"]).Remove("stockLengthGrouping");
+        var group = Assert.IsType<JsonObject>(Assert.IsType<JsonArray>(Assert.IsType<JsonObject>(root["state"])["optimizationGroups"])[0]);
+        group.Remove("importGroupingKey");
+        var result = Assert.IsType<JsonObject>(group["lastStockLengthOptimizationResult"]);
+        result.Remove("oversizedStockLength");
+        var item = Assert.IsType<JsonObject>(Assert.IsType<JsonArray>(Assert.IsType<JsonObject>(Assert.IsType<JsonArray>(result["cutPlans"])[0])["stockItems"])[0]);
+        item.Remove("kind");
+        EnsureWorkspace();
+        await File.WriteAllTextAsync(filePath, root.ToJsonString(CreateLegacyJsonOptions()));
+
+        var restored = await new ProjectSerializer().LoadAsync(filePath);
+
+        Assert.Equal(Project.CurrentVersion, restored.Version);
+        Assert.Equal(StockLengthImportGroupingMode.Worksheet, restored.State.ImportConfiguration!.StockLengthGrouping.Mode);
+        var restoredGroup = Assert.Single(restored.State.OptimizationGroups);
+        Assert.Null(restoredGroup.ImportGroupingKey);
+        Assert.Null(restoredGroup.LastStockLengthOptimizationResult!.OversizedStockLength);
+        Assert.Equal(StockItemKind.Regular, Assert.Single(Assert.Single(restoredGroup.LastStockLengthOptimizationResult.CutPlans).StockItems).Kind);
+    }
+
+    [Fact]
+    public async Task Project_serializer_round_trips_field_grouping_and_Oversized_Stock()
+    {
+        var filePath = Path.Combine(_workspacePath, "stock-grouping-roundtrip.pnest");
+        var project = new Project
+        {
+            ProjectId = "stock",
+            ProjectKind = ProjectKind.StockLength,
+            State = new ProjectState
+            {
+                ImportConfiguration = new ImportConfiguration
+                {
+                    Options = new ImportOptions { ProjectKind = ProjectKind.StockLength },
+                    StockLengthGrouping = new StockLengthImportGrouping
+                    {
+                        Mode = StockLengthImportGroupingMode.MappedField,
+                        Field = ImportFieldNames.ProfileNumber,
+                        Groups = [new StockLengthImportGroupConfiguration { GroupingValue = "P-100", OptimizationGroupId = "p100", Name = "P-100", StockLength = 240m }]
+                    }
+                },
+                OptimizationGroups =
+                [
+                    new OptimizationGroup
+                    {
+                        OptimizationGroupId = "p100",
+                        Name = "P-100",
+                        ImportGroupingKey = new ImportGroupingKey { Field = ImportFieldNames.ProfileNumber, NormalizedValue = "p-100" },
+                        ResultStatus = OptimizationResultStatus.Valid,
+                        LastStockLengthOptimizationResult = new StockLengthOptimizationResult
+                        {
+                            OptimizationGroupId = "p100",
+                            Status = CutPlanStatus.Complete,
+                            OversizedStockLength = 300m,
+                            CutPlans = [new CutPlan { CutPlanId = "plan", Status = CutPlanStatus.Complete, StockItems = [new StockItem { StockItemId = "oversized", Kind = StockItemKind.Oversized, StockLength = 300m }] }]
+                        }
+                    }
+                ]
+            }
+        };
+
+        await new ProjectSerializer().SaveAsync(project, filePath);
+        var restored = await new ProjectSerializer().LoadAsync(filePath);
+
+        Assert.Equal(StockLengthImportGroupingMode.MappedField, restored.State.ImportConfiguration?.StockLengthGrouping.Mode);
+        var group = Assert.Single(restored.State.OptimizationGroups);
+        Assert.Equal("p-100", group.ImportGroupingKey?.NormalizedValue);
+        Assert.Equal(300m, group.LastStockLengthOptimizationResult?.OversizedStockLength);
+        Assert.Equal(StockItemKind.Oversized, Assert.Single(Assert.Single(group.LastStockLengthOptimizationResult!.CutPlans).StockItems).Kind);
     }
 }

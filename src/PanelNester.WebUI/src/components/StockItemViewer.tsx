@@ -271,7 +271,7 @@ export function StockItemViewer({
   return (
     <section aria-label={`Stock Item ${stockItem.stockItemNumber} viewer`} className="stock-item-viewer">
       <header className="stock-item-viewer__header">
-        <div><p className="eyebrow">Stock Item Viewer</p><h2>Stock Item {stockItem.stockItemNumber}</h2><p>{profileNumber} — {finish || 'No finish specified'} — {stockItem.stockLength} in</p></div>
+        <div><p className="eyebrow">{stockItem.kind === 'oversized' ? 'Oversized Stock Item Viewer' : 'Regular Stock Item Viewer'}</p><h2>{stockItem.kind === 'oversized' ? 'Oversized' : 'Regular'} Stock Item {stockItem.stockItemNumber}</h2><p>{profileNumber} — {finish || 'No finish specified'} — {stockItem.stockLength} in</p></div>
         <div className="button-row">
           <button className="secondary-button" onClick={() => adjustZoom(1 / 1.2)} type="button">Zoom out</button>
           <button className="secondary-button" onClick={() => adjustZoom(1.2)} type="button">Zoom in</button>

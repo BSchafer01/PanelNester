@@ -316,6 +316,81 @@ describe('Stock-Length Results', () => {
     expect(screen.getByText('Piece Instance exceeds Stock Length.')).toBeInTheDocument();
   });
 
+  it('assigns and removes Oversized Stock and labels Oversized Stock Items', async () => {
+    const user = userEvent.setup();
+    const onSetOversizedStock = vi.fn().mockResolvedValue(undefined);
+    const group: OptimizationGroup = {
+      optimizationGroupId: 'frames', name: 'Frames', order: 0, parts: [], stockLength: 120,
+      requiredPieces: [], stockGroups: [], lastNestingResult: null, lastBatchNestingResult: null,
+      resultStatus: 'valid',
+      lastStockLengthOptimizationResult: {
+        optimizationGroupId: 'frames', status: 'partial', description: 'Cut Plan',
+        cutPlans: [{
+          cutPlanId: 'frames:p-100', status: 'partial',
+          stockGroup: { profileNumber: 'P-100', finish: null, requiredPieceIds: ['piece-1'] },
+          stockItems: [],
+          unplacedPieceInstances: [{
+            pieceInstance: { pieceInstanceId: 'piece-1:instance-1', requiredPieceId: 'piece-1', instanceNumber: 1, length: 130, profileNumber: 'P-100', sourceReferences: [] },
+            reasonCode: 'exceeds-stock-length', reasonDescription: 'Piece Instance exceeds Stock Length.',
+          }],
+        }],
+      },
+    };
+    const view = render(<StockLengthResults activeOptimizationGroupId="frames" onSelectOptimizationGroup={vi.fn()} onSetOversizedStock={onSetOversizedStock} optimizationGroups={[group]} />);
+
+    await user.type(screen.getByLabelText('Oversized Stock Length for Frames'), '144');
+    await user.click(screen.getByRole('button', { name: 'Assign oversized stock' }));
+    expect(onSetOversizedStock).toHaveBeenCalledWith('frames', '144');
+
+    const assigned: OptimizationGroup = {
+      ...group,
+      lastStockLengthOptimizationResult: {
+        ...group.lastStockLengthOptimizationResult!, oversizedStockLength: 144, status: 'complete',
+        cutPlans: [{
+          ...group.lastStockLengthOptimizationResult!.cutPlans[0], status: 'complete', unplacedPieceInstances: [],
+          stockItems: [{ stockItemId: 'oversized-1', stockItemNumber: 1, kind: 'oversized', stockLength: 144, pieceLength: 130, sawLoss: 0, remainder: 14, utilizationPercent: 90.28, cutSequence: [group.lastStockLengthOptimizationResult!.cutPlans[0].unplacedPieceInstances[0].pieceInstance] }],
+        }],
+      },
+    };
+    view.rerender(<StockLengthResults activeOptimizationGroupId="frames" onSelectOptimizationGroup={vi.fn()} onSetOversizedStock={onSetOversizedStock} optimizationGroups={[assigned]} />);
+
+    expect(screen.getByRole('row', { name: 'Oversized Stock Item 1, Frames' })).toHaveTextContent('Oversized');
+    await user.click(screen.getByRole('button', { name: 'Remove assignment' }));
+    expect(onSetOversizedStock).toHaveBeenLastCalledWith('frames', null);
+  });
+
+  it('keeps the Oversized Stock assignment control with the visible Unplaced table for long group lists', () => {
+    const eligible: OptimizationGroup = {
+      optimizationGroupId: 'eligible', name: 'Eligible', order: 29, parts: [], stockLength: 120,
+      requiredPieces: [], stockGroups: [], lastNestingResult: null, lastBatchNestingResult: null,
+      resultStatus: 'valid',
+      lastStockLengthOptimizationResult: {
+        optimizationGroupId: 'eligible', status: 'failed', description: 'Cut Plan',
+        cutPlans: [{
+          cutPlanId: 'eligible:p-100', status: 'failed',
+          stockGroup: { profileNumber: 'P-100', finish: null, requiredPieceIds: ['piece-1'] },
+          stockItems: [],
+          unplacedPieceInstances: [{
+            pieceInstance: { pieceInstanceId: 'piece-1:instance-1', requiredPieceId: 'piece-1', instanceNumber: 1, length: 130, profileNumber: 'P-100', sourceReferences: [] },
+            reasonCode: 'exceeds-stock-length', reasonDescription: 'Piece Instance exceeds Stock Length.',
+          }],
+        }],
+      },
+    };
+    const emptyGroups = Array.from({ length: 29 }, (_, index): OptimizationGroup => ({
+      optimizationGroupId: `group-${index}`, name: `Group ${index}`, order: index, parts: [], stockLength: 120,
+      requiredPieces: [], stockGroups: [], lastNestingResult: null, lastBatchNestingResult: null,
+      resultStatus: 'valid',
+      lastStockLengthOptimizationResult: { optimizationGroupId: `group-${index}`, status: 'complete', description: 'Cut Plan', cutPlans: [] },
+    }));
+
+    render(<StockLengthResults onSelectOptimizationGroup={vi.fn()} onSetOversizedStock={vi.fn()} optimizationGroups={[...emptyGroups, eligible]} />);
+
+    const unplacedPanel = screen.getByRole('region', { name: 'Unplaced Piece Instances' });
+    expect(within(unplacedPanel).getByLabelText('Oversized Stock Length for Eligible')).toBeInTheDocument();
+    expect(within(unplacedPanel).getByRole('button', { name: 'Assign oversized stock' })).toBeInTheDocument();
+  });
+
   it('shows selected empty and populated groups as placeholders in the default All scope', () => {
     const onReviewOptimizationGroup = vi.fn();
     const empty: OptimizationGroup = {

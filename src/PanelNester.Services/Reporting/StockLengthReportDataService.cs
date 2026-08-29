@@ -102,6 +102,7 @@ public sealed class StockLengthReportDataService
             .Select(item => new StockLengthReportStockItem
             {
                 StockItemNumber = item.StockItemNumber,
+                Kind = item.Kind,
                 StockLength = item.StockLength,
                 PieceLength = item.PieceLength,
                 SawLoss = item.SawLoss,

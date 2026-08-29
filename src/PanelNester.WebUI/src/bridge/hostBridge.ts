@@ -71,6 +71,8 @@ import {
   type UpdateRequiredPiecesResponse,
   type GenerateSelectedCutPlanRequest,
   type GenerateSelectedCutPlanResponse,
+  type SetOversizedStockRequest,
+  type SetOversizedStockResponse,
   type GenerateSelectedCutPlansRequest,
   type GenerateAllStaleCutPlansRequest,
   type GenerateAllStaleCutPlansResponse,
@@ -533,6 +535,15 @@ class HostBridgeClient {
       bridgeMessageTypes.generateSelectedCutPlan,
       request,
       longRunningRequestTimeoutMs,
+    );
+  }
+
+  setOversizedStock(
+    request: SetOversizedStockRequest,
+  ): Promise<SetOversizedStockResponse> {
+    return this.invoke<SetOversizedStockResponse>(
+      bridgeMessageTypes.setOversizedStock,
+      request,
     );
   }
 

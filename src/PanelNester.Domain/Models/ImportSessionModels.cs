@@ -15,11 +15,47 @@ public sealed record ImportConfiguration
 {
     public ImportOptions Options { get; init; } = new();
 
+    public StockLengthImportGrouping StockLengthGrouping { get; init; } = new();
+
     public IReadOnlyList<ImportWorksheetConfiguration> Worksheets { get; init; } =
         Array.Empty<ImportWorksheetConfiguration>();
 
     public IReadOnlyList<PartOverride> PartOverrides { get; init; } =
         Array.Empty<PartOverride>();
+}
+
+public enum StockLengthImportGroupingMode
+{
+    Worksheet,
+    MappedField
+}
+
+public sealed record StockLengthImportGrouping
+{
+    public StockLengthImportGroupingMode Mode { get; init; } = StockLengthImportGroupingMode.Worksheet;
+
+    public string? Field { get; init; }
+
+    public IReadOnlyList<StockLengthImportGroupConfiguration> Groups { get; init; } =
+        Array.Empty<StockLengthImportGroupConfiguration>();
+}
+
+public sealed record StockLengthImportGroupConfiguration
+{
+    public string GroupingValue { get; init; } = string.Empty;
+
+    public string OptimizationGroupId { get; init; } = string.Empty;
+
+    public string Name { get; init; } = string.Empty;
+
+    public decimal? StockLength { get; init; }
+}
+
+public sealed record ImportGroupingKey
+{
+    public string Field { get; init; } = string.Empty;
+
+    public string NormalizedValue { get; init; } = string.Empty;
 }
 
 public sealed record ImportWorksheetConfiguration

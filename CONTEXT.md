@@ -78,6 +78,10 @@ _Avoid_: Row ID, source ID
 The saved selection of Worksheets, Heading Ranges, Column Mappings, Optimization Groups, and excluded source rows used to derive imported sheet parts or Required Pieces from a Workbook.
 _Avoid_: Import settings, mapping session
 
+**Grouping Field**:
+A mapped text property whose normalized values create Optimization Groups for imported Required Pieces across selected Worksheets. Blank values belong to one explicitly named unspecified group.
+_Avoid_: Group column, Worksheet group
+
 **Excluded Source Row**:
 A source data row that the user explicitly chose not to import after validation identified an error.
 _Avoid_: Skipped row, ignored row
@@ -104,9 +108,17 @@ _Avoid_: Imported row, engine placement
 The fixed usable length of every Stock Item within one Optimization Group. All Worksheets assigned to that Optimization Group use the same Stock Length.
 _Avoid_: Sheet length, bar size
 
+**Oversized Stock Length**:
+An optional length greater than an Optimization Group's Stock Length that may receive overlong Piece Instances after its Cut Plan is generated. It does not participate in optimization.
+_Avoid_: Alternate Stock Length, second optimization length
+
 **Stock Item**:
 One consumed piece of stock in an Optimization Result. Its human-readable number is regenerated deterministically within its Stock Group whenever the result is recomputed and is not an inventory identity.
 _Avoid_: Sheet, inventory bar
+
+**Oversized Stock Item**:
+A Stock Item created after Cut Plan generation for exactly one formerly unplaced Piece Instance that fits the Oversized Stock Length.
+_Avoid_: Optimized oversized bar, alternate Stock Item
 
 **Cut Plan**:
 The generated arrangement of Piece Instances across ordered Stock Items for one Stock Group. It is a deterministic heuristic result and does not claim to minimize the number of Stock Items.

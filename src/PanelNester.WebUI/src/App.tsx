@@ -114,7 +114,7 @@ declare global {
 const importFileDialogTimeoutMs = 300000;
 const importBridgeTimeoutMs = 120000;
 const nestingBridgeTimeoutMs = 300000;
-const currentProjectVersion = 7;
+const currentProjectVersion = 8;
 
 function encodeDroppedImportSource(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -1162,6 +1162,11 @@ function createWorkbookImportMappingSession(
     workbook,
     activeWorksheetName: activeWorksheet?.worksheet.worksheetName ?? firstWorksheet.worksheetName,
     worksheets,
+    stockLengthGrouping: savedConfiguration?.stockLengthGrouping ?? {
+      mode: 'worksheet',
+      field: null,
+      groups: [],
+    },
   };
 }
 
@@ -4094,6 +4099,7 @@ export default function App() {
               project: buildProjectRecord(state),
               replaceExistingImportSource: hasExistingImportSource(state),
               targetOptimizationGroupId: state.activeOptimizationGroupId ?? null,
+              stockLengthGrouping: session.stockLengthGrouping ?? null,
               worksheets: selectedWorksheetDrafts.map((draft) => ({
                 worksheetName: draft.worksheet.worksheetName,
                 originalPosition: draft.worksheet.originalPosition,
@@ -4826,6 +4832,39 @@ export default function App() {
     }
   };
 
+  const setOversizedStock = async (
+    optimizationGroupId: string,
+    oversizedStockLength: string | null,
+  ): Promise<void> => {
+    if (!hasCapability(bridgeMessageTypes.setOversizedStock)) {
+      throw new Error('Oversized Stock assignment is not available from the connected desktop host.');
+    }
+    dispatch({ type: 'project-operation-started', message: 'Updating Oversized Stock…' });
+    try {
+      const response = await hostBridge.setOversizedStock({
+        project: buildProjectRecord(state),
+        optimizationGroupId,
+        oversizedStockLength,
+      });
+      if (!response.success || !response.project) {
+        throw new Error(getBridgeErrorMessage(
+          response.error,
+          response.message ?? 'Oversized Stock could not be updated.',
+        ));
+      }
+      dispatch({
+        type: 'optimization-groups-updated',
+        project: response.project,
+        activeOptimizationGroupId: optimizationGroupId,
+        message: response.message ?? 'Updated Oversized Stock.',
+      });
+    } catch (error) {
+      const message = getErrorMessage(error, 'Oversized Stock could not be updated.');
+      dispatch({ type: 'project-operation-failed', message });
+      throw new Error(message);
+    }
+  };
+
   const generateSelectedCutPlans = async (optimizationGroupIds: string[]): Promise<void> => {
     const targetOptimizationGroupIds = [...new Set(optimizationGroupIds)].filter((id) =>
       state.optimizationGroups.some((group) =>
@@ -5550,6 +5589,7 @@ export default function App() {
             dispatch({ type: 'optimization-group-activated', optimizationGroupId });
             dispatch({ type: 'route-changed', route: 'import' });
           }}
+          onSetOversizedStock={setOversizedStock}
         />
       );
       break;

@@ -204,7 +204,9 @@ public sealed class QuestPdfStockLengthReportExporter
     {
         container.EnsureSpace(120).BorderTop(1).BorderColor(Colors.Grey.Darken1).PaddingTop(5).Column(column =>
         {
-            column.Item().Text($"Stock Item {stockItem.StockItemNumber}").FontSize(10).SemiBold();
+            column.Item().Text(stockItem.Kind == StockItemKind.Oversized
+                ? $"Oversized Stock Item {stockItem.StockItemNumber}"
+                : $"Regular Stock Item {stockItem.StockItemNumber}").FontSize(10).SemiBold();
             column.Item().Text(
                 $"Stock Length {FormatLength(stockItem.StockLength, report.InchDisplayFormat)}  |  " +
                 $"Piece Length {FormatLength(stockItem.PieceLength, report.InchDisplayFormat)}  |  " +

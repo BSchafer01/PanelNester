@@ -26,7 +26,52 @@ public sealed record StockLengthOptimizationResult
 
     public string Description { get; init; } = "Deterministic heuristic Cut Plan";
 
+    public decimal? OversizedStockLength { get; init; }
+
     public IReadOnlyList<CutPlan> CutPlans { get; init; } = Array.Empty<CutPlan>();
+
+    public StockLengthOptimizationResult ClearOversizedStockAssignment()
+    {
+        if (OversizedStockLength is null && CutPlans.All(plan =>
+                plan.StockItems.All(item => item.Kind != StockItemKind.Oversized)))
+        {
+            return this;
+        }
+
+        var plans = CutPlans.Select(plan =>
+        {
+            var regular = plan.StockItems.Where(item => item.Kind != StockItemKind.Oversized).ToArray();
+            var restored = plan.StockItems
+                .Where(item => item.Kind == StockItemKind.Oversized)
+                .SelectMany(item => item.CutSequence)
+                .Select(instance => new UnplacedPieceInstance
+                {
+                    PieceInstance = instance,
+                    ReasonCode = "exceeds-stock-length",
+                    ReasonDescription = "Piece Instance exceeds Stock Length."
+                });
+            var unplaced = plan.UnplacedPieceInstances.Concat(restored)
+                .OrderBy(item => item.PieceInstance.PieceInstanceId, StringComparer.Ordinal)
+                .ToArray();
+            return plan with
+            {
+                StockItems = regular,
+                UnplacedPieceInstances = unplaced,
+                Status = Classify(regular.Sum(item => item.CutSequence.Count), unplaced.Length)
+            };
+        }).ToArray();
+        return this with
+        {
+            OversizedStockLength = null,
+            CutPlans = plans,
+            Status = Classify(
+                plans.Sum(plan => plan.StockItems.Sum(item => item.CutSequence.Count)),
+                plans.Sum(plan => plan.UnplacedPieceInstances.Count))
+        };
+    }
+
+    private static CutPlanStatus Classify(int placed, int unplaced) =>
+        unplaced == 0 ? CutPlanStatus.Complete : placed == 0 ? CutPlanStatus.Failed : CutPlanStatus.Partial;
 
     public StockLengthOptimizationResult RefreshRequiredPieceMetadata(
         IReadOnlyList<RequiredPiece> previousRequiredPieces,
@@ -161,6 +206,8 @@ public sealed record StockItem
 
     public int StockItemNumber { get; init; }
 
+    public StockItemKind Kind { get; init; } = StockItemKind.Regular;
+
     public decimal StockLength { get; init; }
 
     public decimal PieceLength { get; init; }
@@ -172,6 +219,12 @@ public sealed record StockItem
     public decimal UtilizationPercent { get; init; }
 
     public IReadOnlyList<PieceInstance> CutSequence { get; init; } = Array.Empty<PieceInstance>();
+}
+
+public enum StockItemKind
+{
+    Regular,
+    Oversized
 }
 
 public sealed record PieceInstance
